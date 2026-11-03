@@ -450,3 +450,32 @@ func (o *Ownership) QuarantineInterrupted(ctx context.Context) error {
 	}
 	return os.Rename(o.layout.BundleStaging, filepath.Join(dir, "staging"))
 }
+
+// RunHelper retains file ownership through a trusted built-in helper operation.
+// work may parse private protocol frames into a bounded queue, but must never
+// invoke application callbacks. It returns only after owned descendants retire.
+func (o *Ownership) RunHelper(ctx context.Context, work func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	if o.closing {
+		o.mu.Unlock()
+		return ErrReleased
+	}
+	if o.active > 0 {
+		o.mu.Unlock()
+		return ErrBusy
+	}
+	o.active++
+	o.mu.Unlock()
+	err := work(ctx)
+	o.mu.Lock()
+	if errors.Is(err, process.ErrCleanup) {
+		o.cleanup = err
+	}
+	o.active--
+	o.cond.Broadcast()
+	o.mu.Unlock()
+	return err
+}

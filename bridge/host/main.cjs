@@ -12,6 +12,7 @@ function register(feature, operation, handler) {
   if (registry.has(key)) throw new Error('duplicate helper operation');
   registry.set(key, handler);
 }
+register('vite', 'run', require('../vite/index.cjs'));
 register('resolve', 'project', require('../resolve/index.cjs'));
 register('host', 'info', async () => ({ protocol, payloadVersion }));
 register('host', 'resolveDependency', async ({ projectDir, name }) => {
@@ -28,6 +29,7 @@ register('editor', 'roundTrip', async ({ file }) => {
   return { text: project.writeSync() };
 });
 let request;
+let sequence = 0;
 function frame(kind, extra = {}) {
   process.stdout.write(JSON.stringify({ version: protocol, payloadVersion, id: request.id, kind, ...extra }) + '\n');
 }
@@ -42,10 +44,10 @@ console.log = console.info = console.warn = console.error = () => {};
   if (!request.id || !request.feature || !request.operation) throw Object.assign(new Error(), { code: 'invalid_input' });
   const handler = registry.get(`${request.feature}/${request.operation}`);
   if (!handler) throw Object.assign(new Error(), { code: 'unavailable' });
-  frame('event', { sequence: 1, payload: { stage: 'started' } });
-  frame('result', { payload: await handler(request.payload || {}) });
+  frame('event', { sequence: ++sequence, payload: { stage: 'started' } });
+  frame('result', { payload: await handler(request.payload || {}, payload => frame('event', { sequence: ++sequence, payload })) });
 })().catch(error => {
   if (!request) { process.exitCode = 1; return; }
   // Do not forward arbitrary dependency messages, paths, environment or stack traces.
-  frame('error', { error: { code: error.code === 'invalid_input' ? 'invalid_input' : error.code === 'unavailable' ? 'unavailable' : 'operation_failed', message: error.safeResolve ? error.message : 'Helper operation failed' } });
+  frame('error', { error: { code: ['invalid_input', 'unavailable', 'EADDRINUSE', 'server_closed', 'restart_required'].includes(error.code) ? error.code : 'operation_failed', message: request.feature === 'resolve' && error.safeResolve ? error.message : 'Helper operation failed' } });
 });

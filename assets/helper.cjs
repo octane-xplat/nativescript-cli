@@ -17460,6 +17460,120 @@ var require_xcode = __commonJS({
   }
 });
 
+// bridge/vite/index.cjs
+var require_vite = __commonJS({
+  "bridge/vite/index.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var { createRequire: createRequire2 } = require("node:module");
+    var { pathToFileURL } = require("node:url");
+    var fail = (code) => Object.assign(new Error(), { code });
+    module2.exports = async function bundle(p, emit) {
+      for (const key2 of ["projectDir", "directory", "entry"]) if (!path2.isAbsolute(p[key2] || "")) throw fail("invalid_input");
+      if (!["bundle", "watch"].includes(p.mode)) throw fail("invalid_input");
+      const req = createRequire2(path2.join(p.projectDir, "package.json"));
+      let vite;
+      try {
+        vite = await import(pathToFileURL(req.resolve("vite")).href);
+      } catch {
+        throw fail("unavailable");
+      }
+      if (!/^7\./.test(vite.version)) throw fail("unavailable");
+      let server, watcher;
+      let latest;
+      let failWatch;
+      const manifest = {
+        name: "xplat-emitted-manifest",
+        buildStart() {
+          for (const name of ["package.json", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.ts"]) {
+            const file = path2.join(p.projectDir, name);
+            if (fs2.existsSync(file)) this.addWatchFile(file);
+          }
+          const appPackage = path2.join(path2.dirname(p.entry), "package.json");
+          if (fs2.existsSync(appPackage)) this.addWatchFile(appPackage);
+        },
+        watchChange(file) {
+          if (/nativescript\.config\.|package\.json$/.test(file)) failWatch?.(fail("restart_required"));
+        },
+        writeBundle(options, output) {
+          const files = Object.keys(output).sort().map((name) => path2.join(p.directory, name));
+          const entry = Object.values(output).find((file) => file.type === "chunk" && file.isEntry);
+          if (!entry) throw fail("operation_failed");
+          latest = { directory: p.directory, entry: path2.join(p.directory, entry.fileName), files };
+          if (p.mode === "watch") emit({ type: "emitted", manifest: latest });
+        }
+      };
+      const config = {
+        root: p.projectDir,
+        configFile: false,
+        logLevel: "silent",
+        mode: p.mode === "watch" ? "development" : "production",
+        plugins: [manifest],
+        build: {
+          outDir: p.directory,
+          emptyOutDir: false,
+          minify: false,
+          lib: { entry: p.entry, formats: ["iife"], name: "NativeScriptApp", fileName: () => "bundle.js" },
+          watch: p.mode === "watch" ? {} : null
+        }
+      };
+      if (p.mode === "bundle") {
+        await vite.build(config);
+        return latest;
+      }
+      try {
+        if (!p.callerEndpoint) {
+          server = await vite.createServer({
+            root: p.projectDir,
+            configFile: false,
+            logLevel: "silent",
+            server: {
+              host: "127.0.0.1",
+              port: p.port || 0,
+              strictPort: true,
+              open: false,
+              hmr: { host: p.hmrHost || "127.0.0.1", clientPort: p.hmrPort || void 0, path: "/__xplat_hmr" }
+            }
+          });
+          try {
+            await server.listen();
+          } catch (error) {
+            if (/^Port \d+ is already in use$/.test(error.message || "")) throw fail("EADDRINUSE");
+            throw error;
+          }
+        }
+        const address = server?.httpServer.address();
+        const endpoint = p.callerEndpoint || { url: `http://127.0.0.1:${address.port}`, hmrURL: `ws://${p.hmrHost || "127.0.0.1"}:${p.hmrPort || address.port}/__xplat_hmr` };
+        await new Promise(async (resolve, reject) => {
+          try {
+            failWatch = reject;
+            server?.httpServer.on("close", () => reject(fail("server_closed")));
+            server?.httpServer.on("error", reject);
+            watcher = await vite.build(config);
+            let ready = false;
+            watcher.on("event", (event) => {
+              if (event.code === "ERROR") reject(fail("operation_failed"));
+              if (event.code === "END" && !ready) {
+                ready = true;
+                emit({ type: "ready", manifest: latest, endpoint });
+              }
+            });
+            server?.watcher.on("change", (file) => {
+              if (/nativescript\.config\.|package\.json$/.test(file)) reject(fail("restart_required"));
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      } finally {
+        await watcher?.close();
+        await server?.close();
+      }
+    };
+  }
+});
+
 // bridge/resolve/index.cjs
 var require_resolve = __commonJS({
   "bridge/resolve/index.cjs"(exports2, module2) {
@@ -17661,6 +17775,7 @@ function register(feature, operation, handler) {
   if (registry.has(key2)) throw new Error("duplicate helper operation");
   registry.set(key2, handler);
 }
+register("vite", "run", require_vite());
 register("resolve", "project", require_resolve());
 register("host", "info", async () => ({ protocol, payloadVersion }));
 register("host", "resolveDependency", async ({ projectDir, name }) => {
@@ -17676,6 +17791,7 @@ register("editor", "roundTrip", async ({ file }) => {
   return { text: project.writeSync() };
 });
 var request;
+var sequence = 0;
 function frame(kind, extra = {}) {
   process.stdout.write(JSON.stringify({ version: protocol, payloadVersion, id: request.id, kind, ...extra }) + "\n");
 }
@@ -17690,12 +17806,12 @@ console.log = console.info = console.warn = console.error = () => {
   if (!request.id || !request.feature || !request.operation) throw Object.assign(new Error(), { code: "invalid_input" });
   const handler = registry.get(`${request.feature}/${request.operation}`);
   if (!handler) throw Object.assign(new Error(), { code: "unavailable" });
-  frame("event", { sequence: 1, payload: { stage: "started" } });
-  frame("result", { payload: await handler(request.payload || {}) });
+  frame("event", { sequence: ++sequence, payload: { stage: "started" } });
+  frame("result", { payload: await handler(request.payload || {}, (payload) => frame("event", { sequence: ++sequence, payload })) });
 })().catch((error) => {
   if (!request) {
     process.exitCode = 1;
     return;
   }
-  frame("error", { error: { code: error.code === "invalid_input" ? "invalid_input" : error.code === "unavailable" ? "unavailable" : "operation_failed", message: error.safeResolve ? error.message : "Helper operation failed" } });
+  frame("error", { error: { code: ["invalid_input", "unavailable", "EADDRINUSE", "server_closed", "restart_required"].includes(error.code) ? error.code : "operation_failed", message: request.feature === "resolve" && error.safeResolve ? error.message : "Helper operation failed" } });
 });

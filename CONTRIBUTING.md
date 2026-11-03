@@ -5,7 +5,10 @@ contracts small until a representative library-to-platform workflow is proven.
 
 ## Local checks
 
-Use Go 1.26 or newer. Format Go source and check the module before committing:
+Use Go 1.26 or newer and Node 22.12 or newer for the real Vite fixture.
+Run `bun install --frozen-lockfile` before Go tests on macOS/Linux; Vite is a
+test prerequisite, while production resolves Vite from the caller project.
+Format Go source and check the module before committing:
 
 ```sh
 gofmt -w .

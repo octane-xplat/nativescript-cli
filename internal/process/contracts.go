@@ -14,7 +14,9 @@ const (
 // an override of inherited env, copied at Start; nil means inherit unchanged.
 // Output is serial per handle, preserves per-stream order, and applies synchronous
 // backpressure. Its first error cancels the owned tree and becomes the Wait cause.
-// Callbacks cannot Wait/Close their own handle; no workspace lock may be held.
+// Callbacks cannot Wait/Close their own handle. Application callbacks run outside
+// workspace ownership. Trusted helper parsers may queue private frames under
+// Ownership.RunHelper; they must never invoke application code.
 type Command struct {
 	Executable  string
 	Args        []string
