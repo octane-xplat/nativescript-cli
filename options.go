@@ -78,7 +78,11 @@ type BuildRequest struct {
 	Target     Target
 }
 type DeviceQuery struct{ Platform Platform }
+
+// AndroidReverse reserves a device TCP port for a caller-owned host service.
+type AndroidReverse struct{ DevicePort, HostPort int }
 type RunRequest struct {
+	AndroidReverse []AndroidReverse
 	// Artifact bypasses compilation; only compatible existing app products install.
 	Artifact *Artifact
 	// AllowBoot permits booting the exact selected shutdown simulator.

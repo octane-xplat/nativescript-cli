@@ -15,14 +15,14 @@ import (
 )
 
 func TestEmbeddedEditorAndLazyNativeDiscovery(t *testing.T) {
-	c, e := ns.New(ns.Options{})
+	c, e := ns.New(ns.Options{Environment: map[string]string{"ADB": filepath.Join(t.TempDir(), "missing-adb")}})
 	if e != nil {
 		t.Fatal(e)
 	}
 	root := t.TempDir()
 	cache := filepath.Join(root, "cache")
 	_, e = c.Devices(context.Background(), ns.DeviceQuery{Platform: ns.Android})
-	if !errors.Is(e, ns.ErrUnavailable) {
+	if !errors.Is(e, ns.ErrToolchain) {
 		t.Fatal(e)
 	}
 	if _, e = os.Stat(cache); !os.IsNotExist(e) {
@@ -77,9 +77,9 @@ func TestIndependentClientsRealHelperHaveNoGlobalEffects(t *testing.T) {
 					return fmt.Errorf("bad event sequence")
 				}
 				// Reentrant discovery stays lazy and does not share helper ownership.
-				other, _ := ns.New(ns.Options{})
+				other, _ := ns.New(ns.Options{Environment: map[string]string{"ADB": filepath.Join(t.TempDir(), "missing-adb")}})
 				_, err := other.Devices(ctx, ns.DeviceQuery{Platform: ns.Android})
-				if !errors.Is(err, ns.ErrUnavailable) {
+				if !errors.Is(err, ns.ErrToolchain) {
 					return fmt.Errorf("unexpected discovery: %w", err)
 				}
 				return nil

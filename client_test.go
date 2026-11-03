@@ -274,7 +274,7 @@ func TestSinkFailureBackpressureAndReentry(t *testing.T) {
 }
 func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 	c, _, r := fixture(t)
-	c, _ = New(Options{})
+	c, _ = New(Options{Environment: map[string]string{"ADB": filepath.Join(t.TempDir(), "missing-adb")}})
 	os.WriteFile(filepath.Join(r.ProjectDir, "package.json"), []byte(`{"name":"app","version":"1"}`), 0600)
 	os.WriteFile(filepath.Join(r.ProjectDir, "nativescript.config.cjs"), []byte(`module.exports={id:'org.example.app'}`), 0600)
 	os.Mkdir(filepath.Join(r.ProjectDir, "app"), 0700)
@@ -292,12 +292,12 @@ func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = c.Devices(context.Background(), DeviceQuery{Android})
-	if !errors.Is(err, ErrUnavailable) {
+	if !errors.Is(err, ErrToolchain) {
 		t.Fatal(err)
 	}
 	r.Target.Platform = Android
 	s, err := c.Run(context.Background(), RunRequest{Build: r, DeviceID: "exact"})
-	if s != nil || !errors.Is(err, ErrUnavailable) {
+	if s != nil || !errors.Is(err, ErrToolchain) {
 		t.Fatal(s, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

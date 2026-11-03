@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	androidbuild "github.com/octane-xplat/nativescript-cli/internal/android/build"
+	androiddevice "github.com/octane-xplat/nativescript-cli/internal/android/device"
 	androidprepare "github.com/octane-xplat/nativescript-cli/internal/android/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
 	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
@@ -32,7 +33,7 @@ func New(options Options) (*Client, error) {
 	options.Environment = maps.Clone(options.Environment)
 	files, _ := fs.Sub(helperFiles, "assets")
 	engine := workflow.Engine{Factory: func(env map[string]string) workflow.Stages {
-		return workflow.Stages{Devices: iosdevice.Adapter{Environment: env}, Launcher: iosdevice.Adapter{Environment: env}, Preparer: platformPreparer{ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		return workflow.Stages{Devices: platformDevices{env: env}, Launcher: platformDevices{env: env}, Preparer: platformPreparer{ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }
@@ -202,6 +203,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 		return nil, operationError("run", workflow.ErrInvalid)
 	}
 	s, n := c.stages(), c.notify("run")
+	if _, ok := s.Launcher.(platformDevices); ok {
+		s.Launcher = platformDevices{env: maps.Clone(c.options.Environment), boot: r.AllowBoot, physical: r.AllowPhysicalDevice, reverse: r.AndroidReverse}
+	}
 	if _, ok := s.Launcher.(iosdevice.Adapter); ok {
 		s.Launcher = iosdevice.Adapter{Environment: maps.Clone(c.options.Environment), AllowBoot: r.AllowBoot, AllowPhysicalDevice: r.AllowPhysicalDevice}
 	}
@@ -268,4 +272,28 @@ func (p platformPreparer) Prepare(ctx context.Context, r project.Resolved, l wor
 		return (androidprepare.Adapter{}).Prepare(ctx, r, l)
 	}
 	return p.ios.Prepare(ctx, r, l)
+}
+
+// platformDevices dispatches native-only operations without starting the helper.
+type platformDevices struct {
+	env            map[string]string
+	boot, physical bool
+	reverse        []AndroidReverse
+}
+
+func (p platformDevices) Discover(ctx context.Context, platform string) ([]project.Device, error) {
+	if platform == "android" {
+		return (androiddevice.Adapter{Environment: p.env}).Discover(ctx, platform)
+	}
+	return (iosdevice.Adapter{Environment: p.env}).Discover(ctx, platform)
+}
+func (p platformDevices) Launch(ctx context.Context, a project.Artifact, d project.Device) (*workflow.Session, error) {
+	if d.Platform == "android" {
+		var rs []androiddevice.Reverse
+		for _, r := range p.reverse {
+			rs = append(rs, androiddevice.Reverse{DevicePort: r.DevicePort, HostPort: r.HostPort})
+		}
+		return (androiddevice.Adapter{Environment: p.env, AllowPhysicalDevice: p.physical, Reverse: rs}).Launch(ctx, a, d)
+	}
+	return (iosdevice.Adapter{Environment: p.env, AllowBoot: p.boot, AllowPhysicalDevice: p.physical}).Launch(ctx, a, d)
 }

@@ -169,6 +169,7 @@ func TestOutputFailures(t *testing.T) {
 	}
 }
 func TestRealPublicOperations(t *testing.T) {
+	t.Setenv("ADB", filepath.Join(t.TempDir(), "missing-adb"))
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","version":"1"}`), 0600)
 	os.WriteFile(filepath.Join(root, "nativescript.config.cjs"), []byte(`module.exports={id:'org.example.app'}`), 0600)
@@ -191,6 +192,9 @@ func TestRealPublicOperations(t *testing.T) {
 		if op == "run" {
 			expected = 2
 			text = `"code":"invalid_input"`
+		}
+		if op == "devices" {
+			text = `"code":"toolchain_unavailable"`
 		}
 		if op == "resolve" {
 			expected = 0
