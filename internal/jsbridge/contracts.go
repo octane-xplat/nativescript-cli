@@ -15,11 +15,12 @@ var ErrVersion = errors.New("helper protocol mismatch")
 // One request ID scopes all responses/events/cancel frames. Feature owns dispatch
 // (resolve/xcode/vite); Operation belongs to that feature. Payload is feature-owned.
 type Request struct {
-	Version   int             `json:"version"`
-	ID        string          `json:"id"`
-	Feature   string          `json:"feature"`
-	Operation string          `json:"operation"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
+	PayloadVersion string          `json:"payloadVersion"`
+	Version        int             `json:"version"`
+	ID             string          `json:"id"`
+	Feature        string          `json:"feature"`
+	Operation      string          `json:"operation"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 type Failure struct {
 	Code    string `json:"code"`
@@ -30,12 +31,13 @@ type Failure struct {
 // exactly one terminal result/error follows events. Logs never use protocol stdout.
 // Cancellation must retire the owned request and descendants before completion.
 type Frame struct {
-	Version  int             `json:"version"`
-	ID       string          `json:"id"`
-	Kind     string          `json:"kind"`
-	Sequence uint64          `json:"sequence,omitempty"`
-	Payload  json.RawMessage `json:"payload,omitempty"`
-	Error    *Failure        `json:"error,omitempty"`
+	PayloadVersion string          `json:"payloadVersion"`
+	Version        int             `json:"version"`
+	ID             string          `json:"id"`
+	Kind           string          `json:"kind"`
+	Sequence       uint64          `json:"sequence,omitempty"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Error          *Failure        `json:"error,omitempty"`
 }
 
 func (r Request) Validate() error {

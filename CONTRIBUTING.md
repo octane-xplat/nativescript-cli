@@ -14,8 +14,13 @@ go vet ./...
 go test ./...
 ```
 
-Use Bun for future JavaScript tooling. There are currently no JS dependencies,
-installation steps or helper payload to generate.
+Use Bun for helper tooling. Go builds use the committed payload without an npm
+installation or generation step. After changing helper sources or dependencies,
+run `bun install --frozen-lockfile`, `node tools/helper/generate.mjs` and
+`node tools/helper/generate.mjs --check`. Run
+`python3 tools/helper/external-consumer.py` to qualify the module distribution
+with a clean external consumer. See `internal/jsbridge/README.md`. Node is needed
+for helper runtime tests; Windows helper execution remains explicitly unavailable.
 
 ## Ownership and integration
 

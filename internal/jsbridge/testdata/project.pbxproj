@@ -1,0 +1,24 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 46;
+ objects = {
+  /* Begin PBXProject section */
+  AAAAAAAAAAAAAAAAAAAAAAAA /* Project object */ = {
+   isa = PBXProject;
+   attributes = { LastUpgradeCheck = 1500; };
+   buildConfigurationList = BBBBBBBBBBBBBBBBBBBBBBBB;
+   compatibilityVersion = "Xcode 3.2";
+   developmentRegion = en;
+   hasScannedForEncodings = 0;
+   knownRegions = (en, Base,);
+   mainGroup = CCCCCCCCCCCCCCCCCCCCCCCC;
+   projectDirPath = "";
+   projectRoot = "";
+   targets = ();
+  };
+  /* End PBXProject section */
+ };
+ rootObject = AAAAAAAAAAAAAAAAAAAAAAAA /* Project object */;
+}
