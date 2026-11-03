@@ -1,13 +1,18 @@
-// Command xplat-ns is the executable entry point for the NativeScript tooling.
-// This scaffold deliberately reports that operational commands are unavailable.
+// Command xplat-ns owns process signals and exit status.
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/octane-xplat/nativescript-cli/internal/cli"
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "xplat-ns: scaffolding only; commands are not implemented")
-	os.Exit(2)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := cli.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
