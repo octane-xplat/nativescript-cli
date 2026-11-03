@@ -18,6 +18,9 @@ within the requested scope and preserve unrelated work.
   contract version independent from the private helper protocol. Use external
   executable plugins or direct Go registration; do not depend on Go shared-object
   plugins for portability.
+- Use `hashicorp/go-plugin` with gRPC for external Go and Node/JavaScript
+  extensions. Keep transport adapters separate from public extension domain
+  types. See [the extension framework decision](docs/design/extensions.md).
 - Never expose secrets in logs, events, generated fixtures or commits.
 - Do not capture or analyze screenshots/images without explicit task approval.
 - Label evidence accurately: source, fixture, compilation, native build and

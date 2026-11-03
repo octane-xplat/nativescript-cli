@@ -12,7 +12,9 @@ The executable prints that status to stderr and exits with code 2.
 
 Use Go 1.26 or newer. Node will be required by operations that use JavaScript
 configuration, Vite or JavaScript extensions; the scaffold does not run Node.
-No third-party dependencies are installed or selected in the module yet.
+No third-party dependencies have been added to the module yet. The selected
+external extension framework is documented in
+[the extension framework decision](docs/design/extensions.md).
 
 ```sh
 go build ./...
@@ -44,6 +46,8 @@ SDK export yet. Root `v0.x.y` tags will identify Go module releases.
 The intended extension model supports JS modules under Node, external Go
 executables, and direct Go registration by library consumers. These are CLI/build
 extensions; runtime NativeScript plugins remain a separate integration concern.
+External Go and Node/JavaScript extensions will use `hashicorp/go-plugin` with
+gRPC. Direct Go registration remains available in the planned library design.
 
 The CLI will use the public library directly. Public requests/results must stay
 independent of command parsing, private helper messages and third-party parser
