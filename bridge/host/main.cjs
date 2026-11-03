@@ -12,6 +12,7 @@ function register(feature, operation, handler) {
   if (registry.has(key)) throw new Error('duplicate helper operation');
   registry.set(key, handler);
 }
+register('extensions', 'otaStartup', require('../extensions/ota.cjs'));
 register('xcode', 'prepare', require('../xcode/index.cjs'));
 register('vite', 'run', require('../vite/index.cjs'));
 register('resolve', 'project', require('../resolve/index.cjs'));

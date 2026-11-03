@@ -1,3 +1,4 @@
-// Package extension is reserved for the planned Go build-extension SDK.
-// Extension contracts and execution are not implemented yet.
+// Package extension defines the independent, domain-typed build-extension SDK.
+// Direct Go registration requires no transport. The transport subpackage provides
+// explicit external Go server/client and embedded Node runner adapters.
 package extension

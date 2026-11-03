@@ -1,5 +1,7 @@
 package nativescript
 
+import "github.com/octane-xplat/nativescript-cli/extension"
+
 // Platform selects the native toolchain.
 type Platform string
 
@@ -38,6 +40,11 @@ type Target struct {
 // Options are copied at construction. No tools are discovered until an operation.
 // Sink may be called concurrently by independent operations.
 type Options struct {
+	// OTAStartup opts into installed @octane-xplat/updates 0.14 release startup wiring.
+	// Automatic native compatibility fingerprinting is unavailable.
+	OTAStartup bool
+	// Extensions are explicit registrations; IDs must be unique across all execution forms.
+	Extensions  []extension.Extension
 	Environment map[string]string
 	Sink        EventSink
 }

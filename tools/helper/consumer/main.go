@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	ns "github.com/octane-xplat/nativescript-cli"
+	"github.com/octane-xplat/nativescript-cli/extension"
+	"github.com/octane-xplat/nativescript-cli/extension/transport"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +27,19 @@ func main() {
 	if ns.Version != os.Args[3] {
 		panic("Go module/package version mismatch")
 	}
+	module := filepath.Join(root, "extension.cjs")
+	must(os.WriteFile(module, []byte(`module.exports={manifest:{id:'consumer',api:'1',version:'1.0.0',phases:['collect']},async invoke(input){return {files:[{path:'test.txt',content:input.platform}]}}};`), 0600))
+	node, err := exec.LookPath("node")
+	must(err)
+	impl, closeExtension, err := transport.OpenNode(context.Background(), node, module, filepath.Join(root, "extension-cache"), root, os.Environ(), nil)
+	must(err)
+	resultExtension, err := impl.Invoke(context.Background(), extension.Input{Phase: extension.Collect, Platform: "ios"})
+	must(err)
+	closeExtension()
+	if len(resultExtension.Files) != 1 || resultExtension.Files[0].Content != "ios" {
+		panic("external module embedded Node runner failed")
+	}
+	fmt.Println("PASS: embedded extension runner from module zip with Node-only PATH")
 	c, err := ns.New(ns.Options{})
 	must(err)
 	r := ns.XcodeInspectionRequest{ProjectDir: root, File: file, CacheDir: filepath.Join(root, "cache")}

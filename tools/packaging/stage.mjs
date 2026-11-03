@@ -32,7 +32,10 @@ for (const [target, file] of Object.entries(binaries)) {
   fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'));
   fs.copyFileSync(path.join(root, 'assets/NOTICES.txt'), path.join(dir, 'NOTICES.txt'));
 }
-fs.writeFileSync(path.join(wrapper, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, private: true, license: pkg.license, bin: { 'xplat-ns': 'launcher.cjs' }, files: ['launcher.cjs', 'LICENSE', 'NOTICES.txt'], engines: { node: '>=22' }, optionalDependencies }, null, 2));
+fs.writeFileSync(path.join(wrapper, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, private: true, license: pkg.license, bin: { 'xplat-ns': 'launcher.cjs' }, exports: {'./plugin': {types:'./plugin/index.d.ts',default:'./plugin/index.cjs'}}, files: ['launcher.cjs', 'plugin', 'LICENSE', 'NOTICES.txt'], engines: { node: '>=22' }, optionalDependencies }, null, 2));
 fs.copyFileSync(path.join(root, 'npm/launcher.cjs'), path.join(wrapper, 'launcher.cjs'));
 fs.chmodSync(path.join(wrapper, 'launcher.cjs'), 0o755);
 for (const [source, name] of [['LICENSE', 'LICENSE'], ['assets/NOTICES.txt', 'NOTICES.txt']]) fs.copyFileSync(path.join(root, source), path.join(wrapper, name));
+
+fs.mkdirSync(path.join(wrapper, 'plugin'));
+for (const file of ['index.cjs', 'index.d.ts']) fs.copyFileSync(path.join(root, 'plugin', file), path.join(wrapper, 'plugin', file));

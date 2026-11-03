@@ -44,6 +44,7 @@ with tempfile.TemporaryDirectory(prefix='q1 npm distribution ') as tmp:
         '@octane-xplat/nativescript-cli': 'file:'+str(tarballs['launcher']),
         '@octane-xplat/nativescript-cli-'+host: 'file:'+str(tarballs[host])}}))
     run(['npm','install','--offline','--ignore-scripts','--no-audit','--no-fund','--package-lock=false'],consumer,stdout=subprocess.DEVNULL)
+    run(['node','-e', "const {defineExtension}=require('@octane-xplat/nativescript-cli/plugin'); if(defineExtension({id:'example'},async()=>({})).manifest.id!=='example') throw Error('plugin subpath');"],consumer)
     installed = consumer/'node_modules/@octane-xplat/nativescript-cli'
     launcher = installed/'launcher.cjs'
     # Remove all staging/source binary inputs before running installed artifacts.

@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"errors"
+	"github.com/octane-xplat/nativescript-cli/extension"
+	"github.com/octane-xplat/nativescript-cli/internal/extensions"
 	"path/filepath"
 
 	"github.com/octane-xplat/nativescript-cli/internal/project"
@@ -23,12 +25,16 @@ type Request struct {
 // Stages is a per-operation set of adapters. Factory receives a private copy of
 // environment overrides; adapters must never mutate process-global state.
 type Stages struct {
-	Resolver Resolver
-	Preparer Preparer
-	Bundler  Bundler
-	Compiler Compiler
-	Devices  Devices
-	Launcher Launcher
+	OTA interface {
+		Apply(context.Context, project.Resolved, project.Prepared, workspace.Lease) error
+	}
+	Extensions []extension.Extension
+	Resolver   Resolver
+	Preparer   Preparer
+	Bundler    Bundler
+	Compiler   Compiler
+	Devices    Devices
+	Launcher   Launcher
 }
 type Engine struct {
 	Factory func(map[string]string) Stages
@@ -104,6 +110,20 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 				return err
 			}
 		}
+		registry, err := extensions.New(ctx, s.Extensions, q.Target.Platform)
+		if err != nil {
+			return err
+		}
+		input := extension.Input{Phase: extension.Collect, Project: r.Directory, Platform: q.Target.Platform, Configuration: q.Target.Configuration, Revision: r.Revision}
+		for _, p := range r.Packages {
+			if p.Native {
+				input.Pins = append(input.Pins, extension.Pin{Name: p.Name, Version: p.Version})
+			}
+		}
+		collected, err := registry.Invoke(ctx, input)
+		if err != nil {
+			return err
+		}
 		l, err := workspace.NewLayout(q.OutputDir, project.Identity{Schema: 1, Revision: r.Revision, ProjectDir: r.Directory, Target: q.Target})
 		if err != nil {
 			return err
@@ -125,6 +145,19 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		}
 		if !p.Identity.Compatible(l.Identity) || !filepath.IsAbs(p.NativeDir) || !filepath.IsAbs(p.BundleDir) {
 			return ErrHandoff
+		}
+		if s.OTA != nil {
+			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
+				return err
+			}
+		}
+		input.Phase = extension.Prepared
+		preparedFiles, err := registry.Invoke(ctx, input)
+		if err != nil {
+			return err
+		}
+		if err = extensions.Apply(ctx, p.NativeDir, append(collected, preparedFiles...)); err != nil {
+			return err
 		}
 		if err = ctx.Err(); err != nil || !build {
 			return err
@@ -150,6 +183,14 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 			if !v.Identity.Compatible(p.Identity) || !filepath.IsAbs(v.Path) || v.Kind == "" || v.ApplicationID != r.ApplicationID {
 				return ErrHandoff
 			}
+		}
+		input.Phase = extension.PostBuild
+		postFiles, err := registry.Invoke(ctx, input)
+		if err != nil {
+			return err
+		}
+		if err = extensions.Apply(ctx, p.NativeDir, append(append(collected, preparedFiles...), postFiles...)); err != nil {
+			return err
 		}
 		return ctx.Err()
 	})

@@ -9,12 +9,22 @@
     "url": "https://github.com/octane-xplat/nativescript-cli"
   },
   "devDependencies": {
+    "@grpc/grpc-js": "1.14.3",
     "esbuild": "0.25.12",
+    "google-protobuf": "4.0.2",
+    "grpc-tools": "1.13.1",
     "vite": "7.3.1",
     "xcode": "3.0.1"
   },
   "scripts": {
     "helper:generate": "node tools/helper/generate.mjs",
     "helper:check": "node tools/helper/generate.mjs --check"
+  },
+  "exports": {
+    "./plugin": {
+      "types": "./plugin/index.d.ts",
+      "require": "./plugin/index.cjs",
+      "default": "./plugin/index.cjs"
+    }
   }
 }

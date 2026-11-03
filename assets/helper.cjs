@@ -17460,6 +17460,43 @@ var require_xcode = __commonJS({
   }
 });
 
+// bridge/extensions/ota.cjs
+var require_ota = __commonJS({
+  "bridge/extensions/ota.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var os = require("node:os");
+    var { createRequire: createRequire2 } = require("node:module");
+    module2.exports = async function({ projectDir, nativeDir, platform, configuration, appResourcesPath, fingerprint }) {
+      if (fingerprint) throw Object.assign(new Error("canonical fingerprint producer unavailable"), { code: "unavailable" });
+      if (configuration !== "release") return { files: [], skipped: true };
+      if (![projectDir, nativeDir, appResourcesPath].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !["ios", "android"].includes(platform)) throw Object.assign(new Error(), { code: "invalid_input" });
+      const req = createRequire2(path2.join(projectDir, "package.json"));
+      let file;
+      try {
+        file = req.resolve("@octane-xplat/updates/prepare");
+      } catch {
+        throw Object.assign(new Error(), { code: "unavailable" });
+      }
+      const pkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(file), "package.json"), "utf8"));
+      if (pkg.version !== "0.14.0") throw Object.assign(new Error(), { code: "unavailable" });
+      const rel = platform === "ios" ? "internal/main.m" : "app/src/main/java/com/tns/NativeScriptApplication.java";
+      const shim = fs2.mkdtempSync(path2.join(os.tmpdir(), "nativescript-ota-"));
+      try {
+        const native = path2.join(shim, "platforms", platform);
+        fs2.mkdirSync(path2.dirname(native), { recursive: true });
+        fs2.cpSync(nativeDir, native, { recursive: true, dereference: true });
+        fs2.symlinkSync(appResourcesPath, path2.join(shim, "App_Resources"), "dir");
+        await req(file)({ projectDir: shim, platform });
+        return { files: [{ path: rel, content: fs2.readFileSync(path2.join(native, rel), "utf8") }], skipped: false };
+      } finally {
+        fs2.rmSync(shim, { recursive: true, force: true });
+      }
+    };
+  }
+});
+
 // bridge/xcode/index.cjs
 var require_xcode2 = __commonJS({
   "bridge/xcode/index.cjs"(exports2, module2) {
@@ -18032,6 +18069,7 @@ function register(feature, operation, handler) {
   if (registry.has(key2)) throw new Error("duplicate helper operation");
   registry.set(key2, handler);
 }
+register("extensions", "otaStartup", require_ota());
 register("xcode", "prepare", require_xcode2());
 register("vite", "run", require_vite());
 register("resolve", "project", require_resolve());

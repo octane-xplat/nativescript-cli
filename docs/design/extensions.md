@@ -1,65 +1,68 @@
-# External extension framework
+# Build extensions
 
-## Decision
+The independent `extension` SDK defines manifests, three lifecycle phases
+(`collect`, `prepared`, `post_build`), explicit native package pins, and declarative
+generated files. `Options.Extensions` merges all explicitly registered execution
+forms; duplicate IDs reject. There is no automatic executable/module discovery.
+Implementations must honor cancellation, avoid project writes and support concurrent
+operations. They are trusted code, not sandboxed.
 
-Use [`hashicorp/go-plugin`](https://github.com/hashicorp/go-plugin) with gRPC
-for external CLI/build extensions. The user selected this framework in the
-design discussion. The repository is still a scaffold: no framework dependency,
-protobuf service, SDK or plugin execution has been implemented.
+The host validates exact API `1`, package identity, platform applicability,
+required capabilities, missing dependencies and cycles before preparation.
+`after` edges order dependencies first; unrelated IDs sort lexically. Only
+`generated_files` is supported. Injection of upstream services and undeclared
+lifecycle phases reject. Package version, extension API, go-plugin application
+protocol `1`, framework core protocol `1` and private helper `0.1.0` are independent.
 
-## Execution forms
+Files are relative paths owned by an extension ID under
+`NativeDir/.nativescript-extensions/ID/`. These are ancillary generated files;
+they do not automatically become Xcode/Gradle source members or mutate artifacts.
+The coordinator retains the workspace lease through handlers and application.
+A failed handler publishes no files from that phase. Prepared output replaces
+only the reserved directory. Native preparation and compilation are not rolled
+back if a later phase fails. Extension removal clears reserved files on the next
+preparation, including preparation without registrations. Native input contributions outside this narrow
+capability require a future explicit typed contract and currently reject.
 
-| Extension | Planned execution |
-| --- | --- |
-| External Go | A host-specific executable serves the extension gRPC API through go-plugin |
-| JavaScript | A Node runner loads the JS module and serves the same gRPC API with go-plugin-compatible startup/lifecycle behavior |
-| Go registered by a library consumer | An in-process implementation of the same semantic interface; no RPC required |
+Go consumers implement `extension.Extension` and register directly. External
+Go executables call `transport.Serve(implementation)` from main. Hosts use
+`transport.Open` or `transport.OpenNode`, retain the returned implementation for
+registration, and call the idempotent close function. Both use
+[hashicorp/go-plugin gRPC](https://github.com/hashicorp/go-plugin/blob/main/docs/internals.md).
+No Go dynamic libraries or external JSON transport are used. The complete child
+environment and absolute working directory are explicit. Logs are separate from
+handshake stdout and go-plugin controls the RPC lifecycle. macOS/Linux children
+own a process group; extensions must not detach children from it. Windows execution
+is explicitly unavailable. Direct registration remains portable.
 
-Node is an accepted prerequisite. Go plugin authors can distribute prebuilt
-binaries so end users do not need a Go compiler. These extensions customize
-build/development tooling; they are separate from NativeScript runtime plugins
-included in an application.
+JavaScript authors import `defineExtension` from
+`@octane-xplat/nativescript-cli/plugin`, export its result, and implement
+`async invoke(input, {signal})`. The supplied signal tracks gRPC cancellation.
+The Node runner includes generated protobuf bindings, framework control, broker
+and stdio services, and a compatible handshake. Its self-contained committed
+payload is embedded in the Go module; ordinary consumers need Node without npm
+installation or generation. Modules and writable extraction caches are explicit.
 
-## Responsibilities
+`Options.OTAStartup` opts into the installed `@octane-xplat/updates` **0.14.0**
+startup adapter for release preparations. Debug skips it. The private built-in
+helper runs that package's startup preparation on a copy of generated native
+output, returning only the known startup source for atomic publication. It
+preserves the producer's template refusal and idempotent startup block. It never
+loads the upstream CLI or depends on a monorepo checkout.
 
-Use the framework's process startup, handshake, RPC connection and protocol
-versioning machinery. The core still owns workspace/device resources, phase
-ordering, cancellation propagation, timeouts, diagnostics and cleanup of its
-operations. Framework process cleanup does not replace those responsibilities.
+The available OTA producer explicitly lacks automatic compatibility fingerprinting.
+This implementation does not redefine that hash or stamp unresolved native pins.
+`ota_fingerprint` is an unsupported required capability and rejects before
+preparation. Package pins in extension inputs are resolved package versions, not
+proof of resolved CocoaPods/SPM pins. Release/offline OTA runtime behavior and
+native compatibility remain unqualified.
 
-Define the extension service in one protobuf schema and generate Go/Node
-bindings from it. SDKs expose typed lifecycle inputs/results and contributions.
-Keep framework and generated transport adapters separate from the public
-extension domain types, allowing direct Go registration to share semantics.
+Regenerate Go bindings with protoc plus `protoc-gen-go` 1.36.11 and
+`protoc-gen-go-grpc` 1.6.1 using source-relative output in
+`extension/transport/wire`. Node bindings use grpc-tools 1.13.1 with commonjs binary
+and grpc_js output in `plugin/generated`. Framework schemas retain HashiCorp's
+MPL notices. Run `node tools/extensions/generate.mjs` after runner/binding changes
+and `--check` in CI. The embedded bundle includes dependency license notices.
 
-The Node runner must implement the framework's startup handshake and required
-gRPC services. Plugin authors should export JS handlers through the authoring
-SDK without implementing those mechanics. The framework does not itself load
-npm modules or supply the NativeScript-specific lifecycle API.
-
-Keep the framework's core protocol version, our extension service/API version,
-plugin package version and private built-in helper version distinct. The host
-must report incompatible extension APIs explicitly. Keep handshake/protocol
-output separate from plugin logs and allow library callers to control output.
-
-Do not implement a second custom JSON protocol for external extensions or
-fall back to Go's dynamic shared-library plugin mechanism. The private built-in
-JavaScript helper remains an internal boundary with its own version contract;
-this decision does not require migrating it to gRPC.
-
-## Implementation and qualification
-
-The extension workstream owns the protobuf contract, Go adapters and JS runner
-SDK. Coordinate process ownership with the process workstream and shared helper
-packaging with the helper workstream. Test equivalent external Go, external JS
-and direct Go implementations, including version mismatch, handshake failure,
-startup timeout, async errors, cancellation, cleanup and deterministic ordering.
-Qualify supported hosts separately, including Windows.
-
-Choose exact framework/Node runtime versions and code-generation tooling when
-implementation begins. No transport interoperability or native behavior is
-qualified by this design decision. Existing upstream hooks that depend on CLI
-internal services still require explicit adapters.
-
-Upstream references: [framework capabilities](https://github.com/hashicorp/go-plugin#features)
-and [cross-language startup handshake](https://github.com/hashicorp/go-plugin/blob/main/docs/internals.md).
+Tests distinguish actual Go/Node host interoperability from fixture native inputs.
+No new native/device qualification or foreign-host execution is implied.

@@ -16,6 +16,21 @@ with tempfile.TemporaryDirectory(prefix='j1-distribution-') as tmp:
         for file in files:
             if file and (root / file).is_file():
                 archive.write(root / file, module + '@' + version + '/' + file)
+    # Seed only declared dependency module artifacts into the isolated file proxy.
+    depsmod = work / 'dependencies.mod'
+    depsmod.write_bytes((root / 'go.mod').read_bytes())
+    depsmod.with_suffix('.sum').write_bytes((root / 'go.sum').read_bytes())
+    downloads = subprocess.check_output(['go', 'mod', 'download', '-modfile='+str(depsmod), '-json', 'all'], cwd=root, text=True)
+    decoder = json.JSONDecoder()
+    while downloads.strip():
+        item, end = decoder.raw_decode(downloads.lstrip())
+        downloads = downloads.lstrip()[end:]
+        for key in ['Info', 'GoMod', 'Zip']:
+            source = pathlib.Path(item[key])
+            cache = pathlib.Path(subprocess.check_output(['go','env','GOMODCACHE'],cwd=root,text=True).strip()) / 'cache/download'
+            target = work / 'proxy' / source.relative_to(cache)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source.parent,target.parent,dirs_exist_ok=True)
     consumer = work / 'consumer'
     consumer.mkdir()
     (consumer / 'main.go').write_bytes((root / 'tools/helper/consumer/main.go').read_bytes())
