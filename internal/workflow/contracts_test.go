@@ -43,13 +43,13 @@ func (f fixtureStages) Prepare(_ context.Context, r project.Resolved, l workspac
 	}
 	return f.prepared, nil
 }
-func (f fixtureStages) Bundle(_ context.Context, r project.Resolved, p project.Prepared) (project.Bundle, error) {
+func (f fixtureStages) Bundle(_ context.Context, r project.Resolved, p project.Prepared, _ workspace.Lease) (project.Bundle, error) {
 	if r.Revision != p.Identity.Revision {
 		return project.Bundle{}, errors.New("stale source")
 	}
 	return f.bundle, nil
 }
-func (f fixtureStages) Compile(_ context.Context, p project.Prepared, b project.Bundle) ([]project.Artifact, error) {
+func (f fixtureStages) Compile(_ context.Context, p project.Prepared, b project.Bundle, _ workspace.Lease) ([]project.Artifact, error) {
 	if !p.Identity.Compatible(b.Identity) {
 		return nil, errors.New("incompatible bundle")
 	}
@@ -107,11 +107,11 @@ func TestStageFixtureHandoffs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle, err := f.Bundle(ctx, r, prepared)
+			bundle, err := f.Bundle(ctx, r, prepared, lease)
 			if err != nil {
 				t.Fatal(err)
 			}
-			artifacts, err := f.Compile(ctx, prepared, bundle)
+			artifacts, err := f.Compile(ctx, prepared, bundle, lease)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestStageFixtureHandoffs(t *testing.T) {
 				t.Fatal("handoff identity lost")
 			}
 			bundle.Identity.Target.Configuration = "wrong"
-			if _, err = f.Compile(ctx, prepared, bundle); err == nil {
+			if _, err = f.Compile(ctx, prepared, bundle, lease); err == nil {
 				t.Fatal("accepted stale bundle")
 			}
 			if err = lease.Release(); err != nil {

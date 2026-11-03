@@ -3,11 +3,12 @@ package nativescript
 import (
 	"context"
 	"embed"
-	"encoding/json"
+
 	"io/fs"
 	"path/filepath"
 
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
+	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 )
 
 //go:embed assets/helper.cjs assets/NOTICES.txt
@@ -27,25 +28,23 @@ type XcodeInspection struct{ Text string }
 // Node is checked lazily. Native-only operations never extract or launch it.
 func (c *Client) InspectXcode(ctx context.Context, r XcodeInspectionRequest) (XcodeInspection, error) {
 	if err := ctx.Err(); err != nil {
-		return XcodeInspection{}, err
+		return XcodeInspection{}, operationError("inspect-xcode", err)
 	}
 	if !filepath.IsAbs(r.ProjectDir) || !filepath.IsAbs(r.File) || !filepath.IsAbs(r.CacheDir) {
-		return XcodeInspection{}, &OperationError{Operation: "inspect-xcode", Kind: ErrInvalidInput}
+		return XcodeInspection{}, operationError("inspect-xcode", workflow.ErrInvalid)
 	}
 	files, _ := fs.Sub(helperFiles, "assets")
-	payload, _ := json.Marshal(struct {
-		File string `json:"file"`
-	}{r.File})
 	host := jsbridge.Host{Payload: jsbridge.Payload{Files: files}, CacheDir: r.CacheDir, ProjectDir: r.ProjectDir, Environment: c.options.Environment}
-	result, err := host.Call(ctx, jsbridge.Request{Version: jsbridge.ProtocolVersion, ID: "inspect", Feature: "editor", Operation: "roundTrip", Payload: payload}, nil)
+	n := c.notify("inspect-xcode")
+	if err := n(ctx, true, "helper"); err != nil {
+		return XcodeInspection{}, operationError("inspect-xcode", err)
+	}
+	text, err := workflow.InspectXcode(ctx, host, r.File)
 	if err != nil {
-		return XcodeInspection{}, &OperationError{Operation: "inspect-xcode", Kind: ErrBuild, Cause: err}
+		return XcodeInspection{}, operationError("inspect-xcode", err)
 	}
-	var value struct {
-		Text string `json:"text"`
+	if err = n(ctx, false, "helper"); err != nil {
+		return XcodeInspection{}, operationError("inspect-xcode", err)
 	}
-	if json.Unmarshal(result.Payload, &value) != nil {
-		return XcodeInspection{}, &OperationError{Operation: "inspect-xcode", Kind: ErrBuild}
-	}
-	return XcodeInspection{Text: value.Text}, nil
+	return XcodeInspection{Text: text}, nil
 }

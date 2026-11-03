@@ -17,10 +17,10 @@ type Preparer interface {
 	Prepare(context.Context, project.Resolved, workspace.Lease) (project.Prepared, error)
 }
 type Bundler interface {
-	Bundle(context.Context, project.Resolved, project.Prepared) (project.Bundle, error)
+	Bundle(context.Context, project.Resolved, project.Prepared, workspace.Lease) (project.Bundle, error)
 }
 type Compiler interface {
-	Compile(context.Context, project.Prepared, project.Bundle) ([]project.Artifact, error)
+	Compile(context.Context, project.Prepared, project.Bundle, workspace.Lease) ([]project.Artifact, error)
 }
 type Devices interface {
 	Discover(context.Context, string) ([]project.Device, error)
