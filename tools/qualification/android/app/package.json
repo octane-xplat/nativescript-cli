@@ -1,0 +1,1 @@
+{"name": "b2-isolated-app", "version": "1.0.0", "private": true, "main": "app.js", "devDependencies": {"@nativescript/android": "9.0.0", "vite": "7.3.1"}, "dependencies": {"b2-native-health": "file:./native-plugin"}}

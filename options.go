@@ -60,7 +60,18 @@ type IOSBuildOptions struct {
 	ProvisioningProfile string
 	ExportOptionsPlist  string
 }
+
+// AndroidBuildOptions selects apk (default) or release aab. Release always
+// requires caller-owned signing inputs; password fields name environment variables.
+type AndroidBuildOptions struct {
+	Format           string
+	Keystore         string
+	Alias            string
+	StorePasswordEnv string
+	KeyPasswordEnv   string
+}
 type BuildRequest struct {
+	Android    AndroidBuildOptions
 	IOS        IOSBuildOptions
 	ProjectDir string
 	OutputDir  string

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 
+	androidbuild "github.com/octane-xplat/nativescript-cli/internal/android/build"
 	androidprepare "github.com/octane-xplat/nativescript-cli/internal/android/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
 	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
@@ -55,7 +56,7 @@ func operationError(op string, err error) error {
 		kind = ErrUnsupportedHost
 	case errors.Is(err, workspace.ErrBusy):
 		kind = ErrContention
-	case errors.Is(err, iosbuild.ErrSigning):
+	case errors.Is(err, iosbuild.ErrSigning), errors.Is(err, androidbuild.ErrSigning):
 		kind = ErrSigning
 	case errors.Is(err, process.ErrStart):
 		kind = ErrToolchain
@@ -65,7 +66,17 @@ func operationError(op string, err error) error {
 	if errors.As(err, &native) {
 		cause = &BuildError{Stage: native.Stage, ExitCode: native.ExitCode, Cause: err}
 	}
+	var android *androidbuild.Failure
+	if errors.As(err, &android) {
+		cause = &BuildError{Stage: android.Stage, ExitCode: android.ExitCode, Cause: err}
+	}
 	result := &OperationError{Operation: op, Kind: kind, Cause: cause}
+	if errors.Is(err, androidbuild.ErrArtifact) {
+		result.Advice = androidbuild.ErrArtifact.Error()
+	}
+	if errors.Is(err, androidbuild.ErrSigning) {
+		result.Advice = androidbuild.ErrSigning.Error()
+	}
 	var diagnostic *resolver.Diagnostic
 	if errors.As(err, &diagnostic) {
 		result.Advice = diagnostic.Message
@@ -138,6 +149,9 @@ func (c *Client) Prepare(ctx context.Context, r PrepareRequest) (PreparedProject
 func (c *Client) build(ctx context.Context, r BuildRequest, s workflow.Stages, n workflow.Notify) (BuildResult, error) {
 	if r.Target.Platform == IOS && s.Compiler == nil {
 		s.Compiler = iosbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: iosbuild.Options{Action: r.IOS.Action, SigningMode: r.IOS.SigningMode, TeamID: r.IOS.TeamID, Identity: r.IOS.Identity, ProvisioningProfile: r.IOS.ProvisioningProfile, ExportOptionsPlist: r.IOS.ExportOptionsPlist}}
+	}
+	if r.Target.Platform == Android && s.Compiler == nil {
+		s.Compiler = androidbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: androidbuild.Options{Format: r.Android.Format, Keystore: r.Android.Keystore, Alias: r.Android.Alias, StorePasswordEnv: r.Android.StorePasswordEnv, KeyPasswordEnv: r.Android.KeyPasswordEnv}}
 	}
 	resolved, err := workflow.Resolve(ctx, s, r.ProjectDir, n)
 	if err != nil {
