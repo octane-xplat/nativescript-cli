@@ -1,0 +1,207 @@
+package nativescript_test
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"errors"
+	ns "github.com/octane-xplat/nativescript-cli"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func androidApp(t *testing.T, actual bool) (string, *ns.Client, ns.PrepareRequest) {
+	t.Helper()
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1.0.0","devDependencies":{"@nativescript/android":"9.0.0"},"dependencies":{"native-plugin":"1"}}`)
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1.0.0","nativescript":{"platforms":{"android":"9"}}}`)
+	for name, body := range map[string]string{"Binding.java": "package example; public class Binding {}", "AndroidManifest.xml": `<manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.CAMERA"/></manifest>`, "res/values/plugin.xml": `<resources><string name="plugin">plugin</string></resources>`, "libs/local.aar": "fixture aar", "libs/local.jar": "fixture jar", "libs/arm64-v8a/liblocal.so": "fixture so", "include.gradle": "// plugin config", "whitelist.mdg": "example:*"} {
+		resolutionFile(t, root, "node_modules/native-plugin/platforms/android/"+name, body)
+	}
+	resolutionFile(t, root, "App_Resources/Android/src/main/AndroidManifest.xml", `<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="App"/></manifest>`)
+	resolutionFile(t, root, "App_Resources/Android/src/main/res/values/app.xml", `<resources><string name="app_name">App</string></resources>`)
+	if actual {
+		var jar bytes.Buffer
+		z := zip.NewWriter(&jar)
+		if e := z.Close(); e != nil {
+			t.Fatal(e)
+		}
+		resolutionFile(t, root, "node_modules/native-plugin/platforms/android/libs/local.jar", jar.String())
+		var aar bytes.Buffer
+		z = zip.NewWriter(&aar)
+		f, _ := z.Create("AndroidManifest.xml")
+		f.Write([]byte(`<manifest package="org.example.library"/>`))
+		f, _ = z.Create("classes.jar")
+		f.Write(jar.Bytes())
+		if e := z.Close(); e != nil {
+			t.Fatal(e)
+		}
+		resolutionFile(t, root, "node_modules/native-plugin/platforms/android/libs/local.aar", aar.String())
+	}
+	runtime := filepath.Join(root, "node_modules/@nativescript/android")
+	if actual {
+		src := os.Getenv("P2_RUNTIME_DIR")
+		if src == "" {
+			t.Skip("set P2_RUNTIME_DIR to published Android 9.0.0 package")
+		}
+		if e := os.MkdirAll(filepath.Dir(runtime), 0700); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.Symlink(src, runtime); e != nil {
+			t.Fatal(e)
+		}
+	} else {
+		resolutionFile(t, root, "node_modules/@nativescript/android/package.json", `{"name":"@nativescript/android","version":"9.0.0"}`)
+		for _, name := range []string{"build.gradle", "settings.gradle", "app/build.gradle", "gradlew", "gradle.properties", "gradle/wrapper/gradle-wrapper.jar", "build-tools/static-binding-generator.jar", "build-tools/android-metadata-generator.jar"} {
+			resolutionFile(t, runtime, "framework/"+name, "// fixture __PROJECT_NAME__ $rootDir/../..")
+		}
+		resolutionFile(t, runtime, "framework/app/src/main/AndroidManifest.xml", `<manifest package="__PACKAGE__"/>`)
+	}
+	c, _ := ns.New(ns.Options{})
+	return root, c, ns.PrepareRequest{ProjectDir: root, OutputDir: filepath.Join(t.TempDir(), "state with spaces"), Target: ns.Target{Platform: ns.Android, Configuration: ns.Debug, Destination: ns.Destination{Kind: ns.Simulator, ID: "android-fixture", Architecture: "arm64-v8a"}}}
+}
+func readAndroid(t *testing.T, root, name string) string {
+	t.Helper()
+	b, e := os.ReadFile(filepath.Join(root, name))
+	if e != nil {
+		t.Fatal(e)
+	}
+	return string(b)
+}
+func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
+	root, c, q := androidApp(t, false)
+	p, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(readAndroid(t, p.NativeDir, "whitelist.mdg"), "example:*") {
+		t.Fatal("missing metadata filter")
+	}
+	deps := readAndroid(t, p.NativeDir, "dependencies.json")
+	if !strings.Contains(deps, "contributions/") {
+		t.Fatal(deps)
+	}
+	inputs := readAndroid(t, p.NativeDir, "metadata-inputs.json")
+	for _, name := range []string{"Binding.java", "local.aar", "local.jar", "plugin.xml", "liblocal.so", "include.gradle"} {
+		if !strings.Contains(inputs, name) {
+			t.Fatal("missing metadata input", name)
+		}
+	}
+	if strings.Contains(readAndroid(t, p.NativeDir, "app/src/main/AndroidManifest.xml"), "CAMERA") {
+		t.Fatal("preparer merged library manifest")
+	}
+	if !strings.Contains(readAndroid(t, p.NativeDir, "settings.gradle"), "include ':native") {
+		t.Fatal("missing Gradle module")
+	}
+	before := map[string]string{}
+	filepath.WalkDir(p.NativeDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !d.IsDir() {
+			rel, _ := filepath.Rel(p.NativeDir, path)
+			before[rel] = readAndroid(t, p.NativeDir, rel)
+		}
+		return nil
+	})
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if _, e := c.Prepare(context.Background(), q); e != nil {
+				t.Error(e)
+			}
+		})
+	}
+	wg.Wait()
+	p2, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for name, b := range before {
+		if readAndroid(t, p2.NativeDir, name) != b {
+			t.Fatal("non deterministic", name)
+		}
+	}
+	// Native sources remain untouched, and removal publishes a clean new tree.
+	if e = os.RemoveAll(filepath.Join(root, "node_modules/native-plugin/platforms/android")); e != nil {
+		t.Fatal(e)
+	}
+	p3, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if p3.Identity.Revision == p.Identity.Revision {
+		t.Fatal("stale identity")
+	}
+	if _, e := os.Stat(filepath.Join(p3.NativeDir, "whitelist.mdg")); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("stale metadata filter", e)
+	}
+	if readAndroid(t, p3.NativeDir, "dependencies.json") != "[]" {
+		t.Fatal("stale dependencies")
+	}
+	if strings.Contains(readAndroid(t, p3.NativeDir, "settings.gradle"), "include ':native") {
+		t.Fatal("stale module")
+	}
+	if _, e = os.Stat(filepath.Join(p.NativeDir, "metadata-inputs.json")); e != nil {
+		t.Fatal("previous generation destroyed", e)
+	}
+}
+func TestAndroidFailureAndCancellationPreserveState(t *testing.T) {
+	root, c, q := androidApp(t, false)
+	p, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/unsupported.cpp", "// requires explicit build configuration")
+	if _, e = c.Prepare(context.Background(), q); !errors.Is(e, ns.ErrUnavailable) {
+		t.Fatal(e)
+	}
+	if !strings.Contains(readAndroid(t, p.NativeDir, "metadata-inputs.json"), "Binding.java") {
+		t.Fatal("previous state damaged")
+	}
+	os.Remove(filepath.Join(root, "node_modules/native-plugin/platforms/android/unsupported.cpp"))
+	if _, e = c.Prepare(context.Background(), q); e != nil {
+		t.Fatal("failed lease retirement", e)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, e = c.Prepare(ctx, q); !errors.Is(e, context.Canceled) {
+		t.Fatal(e)
+	}
+	os.Remove(filepath.Join(root, "node_modules/@nativescript/android/framework/gradlew"))
+	if _, e = c.Prepare(context.Background(), q); !errors.Is(e, ns.ErrUnavailable) {
+		t.Fatal(e)
+	}
+}
+func TestAndroidPrepareActualPublishedRuntime(t *testing.T) {
+	_, c, q := androidApp(t, true)
+	p, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, name := range []string{"gradlew", "gradle/wrapper/gradle-wrapper.jar", "app/libs/runtime-libs/nativescript-regular.aar", "build-tools/static-binding-generator.jar", "build-tools/android-metadata-generator.jar", "app/src/main/java/com/tns/RuntimeHelper.java"} {
+		if _, e = os.Stat(filepath.Join(p.NativeDir, name)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if strings.Contains(readAndroid(t, p.NativeDir, "build.gradle"), "$rootDir/../..") {
+		t.Fatal("upstream layout assumption")
+	}
+	if os.Getenv("P2_GRADLE_CONFIG") == "1" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, filepath.Join(p.NativeDir, "gradlew"), "help", "--no-daemon", "--console=plain")
+		cmd.Dir = p.NativeDir
+		out, e := cmd.CombinedOutput()
+		t.Log(string(out))
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	t.Log("Published runtime templates/tools/AARs + real R1/F2/public Prepare; no Gradle compile or device assertion")
+}

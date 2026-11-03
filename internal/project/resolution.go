@@ -1,5 +1,7 @@
 package project
 
+import "fmt"
+
 // Resolution data is read-only input to platform preparation. A successful
 // resolution describes files; it does not assert that they have been prepared.
 type Config struct {
@@ -8,8 +10,8 @@ type Config struct {
 	Android          AndroidConfig
 }
 type AndroidConfig struct {
-	V8Flags     string
-	MarkingMode string
+	V8Flags     string `json:"v8Flags,omitempty"`
+	MarkingMode string `json:"markingMode,omitempty"`
 }
 type Package struct {
 	IOSRequirement     string
@@ -35,4 +37,25 @@ type Contribution struct {
 type Source struct {
 	Path   string
 	Digest string
+}
+
+// AndroidSettings applies app overrides to plugin defaults. Conflicting plugin
+// defaults require an explicit app choice rather than package-order precedence.
+func AndroidSettings(r Resolved) (AndroidConfig, error) {
+	config := r.Config.Android
+	for _, p := range r.Packages {
+		if r.Config.Android.V8Flags == "" && p.Android.V8Flags != "" {
+			if config.V8Flags != "" && config.V8Flags != p.Android.V8Flags {
+				return AndroidConfig{}, fmt.Errorf("conflicting plugin v8Flags; set app android.v8Flags")
+			}
+			config.V8Flags = p.Android.V8Flags
+		}
+		if r.Config.Android.MarkingMode == "" && p.Android.MarkingMode != "" {
+			if config.MarkingMode != "" && config.MarkingMode != p.Android.MarkingMode {
+				return AndroidConfig{}, fmt.Errorf("conflicting plugin markingMode; set app android.markingMode")
+			}
+			config.MarkingMode = p.Android.MarkingMode
+		}
+	}
+	return config, nil
 }

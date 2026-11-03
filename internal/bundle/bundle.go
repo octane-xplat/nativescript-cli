@@ -35,14 +35,16 @@ type Event struct {
 	Endpoint Endpoint `json:"endpoint"`
 }
 type Request struct {
-	ProjectDir     string    `json:"projectDir"`
-	Directory      string    `json:"directory"`
-	Entry          string    `json:"entry"`
-	Mode           string    `json:"mode"`
-	Port           int       `json:"port"`
-	HMRHost        string    `json:"hmrHost"`
-	HMRPort        int       `json:"hmrPort"`
-	CallerEndpoint *Endpoint `json:"callerEndpoint,omitempty"`
+	Android        *project.AndroidConfig `json:"android,omitempty"`
+	ApplicationID  string                 `json:"applicationID,omitempty"`
+	ProjectDir     string                 `json:"projectDir"`
+	Directory      string                 `json:"directory"`
+	Entry          string                 `json:"entry"`
+	Mode           string                 `json:"mode"`
+	Port           int                    `json:"port"`
+	HMRHost        string                 `json:"hmrHost"`
+	HMRPort        int                    `json:"hmrPort"`
+	CallerEndpoint *Endpoint              `json:"callerEndpoint,omitempty"`
 }
 
 func (a Adapter) call(ctx context.Context, q Request, sink func(jsbridge.Frame) error) (Manifest, error) {
@@ -129,7 +131,16 @@ func request(r project.Resolved, p project.Prepared, lease workspace.Lease) (Req
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return Request{}, workflow.ErrInvalid
 	}
-	return Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle"}, nil
+	q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle"}
+	if p.Identity.Target.Platform == "android" {
+		config, err := project.AndroidSettings(r)
+		if err != nil {
+			return Request{}, workflow.ErrInvalid
+		}
+		q.Android = &config
+		q.ApplicationID = r.ApplicationID
+	}
+	return q, nil
 }
 func (a Adapter) Bundle(ctx context.Context, r project.Resolved, p project.Prepared, lease workspace.Lease) (project.Bundle, error) {
 	q, err := request(r, p, lease)

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 
+	androidprepare "github.com/octane-xplat/nativescript-cli/internal/android/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
 	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
 	iosdevice "github.com/octane-xplat/nativescript-cli/internal/ios/device"
@@ -30,7 +31,7 @@ func New(options Options) (*Client, error) {
 	options.Environment = maps.Clone(options.Environment)
 	files, _ := fs.Sub(helperFiles, "assets")
 	engine := workflow.Engine{Factory: func(env map[string]string) workflow.Stages {
-		return workflow.Stages{Devices: iosdevice.Adapter{Environment: env}, Launcher: iosdevice.Adapter{Environment: env}, Preparer: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		return workflow.Stages{Devices: iosdevice.Adapter{Environment: env}, Launcher: iosdevice.Adapter{Environment: env}, Preparer: platformPreparer{ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }
@@ -237,4 +238,20 @@ func internalTarget(t Target) project.Target {
 }
 func publicIdentity(i project.Identity) Identity {
 	return Identity{Schema: i.Schema, Revision: i.Revision, ProjectDir: i.ProjectDir, Target: Target{Platform: Platform(i.Target.Platform), Configuration: Configuration(i.Target.Configuration), Destination: Destination{Kind: DestinationKind(i.Target.DestinationKind), ID: i.Target.DestinationID, Architecture: i.Target.Architecture}}}
+}
+
+// platformPreparer selects only the adapter for the explicit target.
+type platformPreparer struct{ ios iosprepare.Adapter }
+
+func (p platformPreparer) Validate(r project.Resolved, t project.Target) error {
+	if t.Platform == "android" {
+		return (androidprepare.Adapter{}).Validate(r, t)
+	}
+	return p.ios.Validate(r, t)
+}
+func (p platformPreparer) Prepare(ctx context.Context, r project.Resolved, l workspace.Lease) (project.Prepared, error) {
+	if l.Layout().Identity.Target.Platform == "android" {
+		return (androidprepare.Adapter{}).Prepare(ctx, r, l)
+	}
+	return p.ios.Prepare(ctx, r, l)
 }

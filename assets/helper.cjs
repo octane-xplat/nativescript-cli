@@ -17732,7 +17732,7 @@ var require_vite = __commonJS({
           if (/nativescript\.config\.|package\.json$/.test(file)) failWatch?.(fail("restart_required"));
         },
         generateBundle() {
-          this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify({ main: "bundle.js" }) });
+          this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify({ main: "bundle.js", ...p.android ? { id: p.applicationID, android: p.android } : {} }) });
         },
         writeBundle(options, output) {
           const files = Object.keys(output).sort().map((name) => path2.join(p.directory, name));
@@ -17935,7 +17935,7 @@ var require_resolve = __commonJS({
             } else {
               if ([".aar", ".jar", ".so"].includes(ext)) kind = "library";
               else if ([".java", ".kt", ".c", ".cpp", ".h"].includes(ext)) kind = "source";
-              else if ([".gradle", ".properties"].includes(ext) || entry.name === "AndroidManifest.xml") kind = "configuration";
+              else if ([".gradle", ".properties", ".mdg"].includes(ext) || entry.name === "AndroidManifest.xml") kind = "configuration";
               else if (file.split(path2.sep).includes("res") || file.split(path2.sep).includes("assets")) kind = "resource";
             }
             if (!kind) fail("unavailable", `Unsupported ${platform} native file type; migrate or remove the unrecognized contribution before preparing`);

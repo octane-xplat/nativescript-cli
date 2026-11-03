@@ -311,3 +311,35 @@ func TestMissingViteAndColdCancellation(t *testing.T) {
 		t.Fatal("unexpected dependency installation")
 	}
 }
+
+func TestAndroidBundleRetainsRuntimeSettings(t *testing.T) {
+	a, r, p, l := fixture(t)
+	p.Identity.Target.Platform = "android"
+	// Use a genuine Android lease, rather than altering a compatible identity.
+	l.Release()
+	layout, err := workspace.NewLayout(t.TempDir(), p.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, err := workspace.Acquire(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owned.Release()
+	p.NativeDir = layout.GeneratedRoot
+	p.BundleDir = layout.BundleStaging
+	r.Config.Android = project.AndroidConfig{V8Flags: "--expose_gc", MarkingMode: "none"}
+	b, err := a.Bundle(context.Background(), r, p, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(b.Directory, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{`"main":"bundle.js"`, `"id":"org.example.fixture"`, `"v8Flags":"--expose_gc"`, `"markingMode":"none"`} {
+		if !strings.Contains(string(data), s) {
+			t.Fatal(string(data))
+		}
+	}
+}
