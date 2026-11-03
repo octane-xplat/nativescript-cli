@@ -1,8 +1,9 @@
-package process
+package process_test
 
 import (
 	"context"
 	"errors"
+	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 	"reflect"
 	"testing"
@@ -10,18 +11,18 @@ import (
 
 // A fake executor models an owned descendant. Real OS tree termination is F1.
 type fakeExecutor struct {
-	got            Command
+	got            process.Command
 	started        bool
 	descendantDone chan struct{}
 }
 type fakeHandle struct {
 	session *workflow.Session
-	exit    Exit
+	exit    process.Exit
 }
 
-func (h *fakeHandle) Wait() (Exit, error)             { return h.exit, h.session.Wait() }
+func (h *fakeHandle) Wait() (process.Exit, error)     { return h.exit, h.session.Wait() }
 func (h *fakeHandle) Close(ctx context.Context) error { return h.session.Close(ctx) }
-func (f *fakeExecutor) Start(ctx context.Context, c Command) (Handle, error) {
+func (f *fakeExecutor) Start(ctx context.Context, c process.Command) (process.Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -30,27 +31,27 @@ func (f *fakeExecutor) Start(ctx context.Context, c Command) (Handle, error) {
 	return &fakeHandle{session: workflow.StartSession(ctx, func(ctx context.Context) error {
 		defer close(f.descendantDone)
 		if c.Output != nil {
-			if err := c.Output(ctx, Stdout, []byte("fixture stdout")); err != nil {
+			if err := c.Output(ctx, process.Stdout, []byte("fixture stdout")); err != nil {
 				return err
 			}
-			if err := c.Output(ctx, Stderr, []byte("fixture stderr")); err != nil {
+			if err := c.Output(ctx, process.Stderr, []byte("fixture stderr")); err != nil {
 				return err
 			}
 		}
 		<-ctx.Done()
 		return ctx.Err()
-	}), exit: Exit{Code: 0}}, nil
+	}), exit: process.Exit{Code: 0}}, nil
 }
 
-var _ Executor = (*fakeExecutor)(nil)
+var _ process.Executor = (*fakeExecutor)(nil)
 
 func TestFakeToolContract(t *testing.T) {
 	f := &fakeExecutor{descendantDone: make(chan struct{})}
-	var streams []Stream
+	var streams []process.Stream
 	output := make(chan struct{})
-	command := Command{Executable: "/fixture tools/tool", Args: []string{"--destination", "fixture sim 001", "/fixture apps/My App"}, Dir: "/fixture apps/My App", Environment: map[string]string{"ONLY_FIXTURE": "value with spaces"}, Output: func(_ context.Context, s Stream, b []byte) error {
+	command := process.Command{Executable: "/fixture tools/tool", Args: []string{"--destination", "fixture sim 001", "/fixture apps/My App"}, Dir: "/fixture apps/My App", Environment: map[string]string{"ONLY_FIXTURE": "value with spaces"}, Output: func(_ context.Context, s process.Stream, b []byte) error {
 		streams = append(streams, s)
-		if s == Stderr {
+		if s == process.Stderr {
 			close(output)
 		}
 		return nil
@@ -71,7 +72,7 @@ func TestFakeToolContract(t *testing.T) {
 	default:
 		t.Fatal("descendant not retired")
 	}
-	if !reflect.DeepEqual(f.got.Args, command.Args) || f.got.Dir != command.Dir || !reflect.DeepEqual(streams, []Stream{Stdout, Stderr}) {
+	if !reflect.DeepEqual(f.got.Args, command.Args) || f.got.Dir != command.Dir || !reflect.DeepEqual(streams, []process.Stream{process.Stdout, process.Stderr}) {
 		t.Fatal("command/output changed")
 	}
 	f = &fakeExecutor{}
@@ -82,7 +83,7 @@ func TestFakeToolContract(t *testing.T) {
 func TestFakeOutputFailure(t *testing.T) {
 	cause := errors.New("output rejected")
 	f := &fakeExecutor{descendantDone: make(chan struct{})}
-	h, err := f.Start(context.Background(), Command{Output: func(context.Context, Stream, []byte) error { return cause }})
+	h, err := f.Start(context.Background(), process.Command{Output: func(context.Context, process.Stream, []byte) error { return cause }})
 	if err != nil {
 		t.Fatal(err)
 	}
