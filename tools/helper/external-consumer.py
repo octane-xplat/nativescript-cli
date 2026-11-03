@@ -3,7 +3,7 @@
 import json, os, pathlib, shutil, subprocess, tempfile, zipfile
 root = pathlib.Path(__file__).resolve().parents[2]
 module = 'github.com/octane-xplat/nativescript-cli'
-version = 'v0.0.0-j1'
+version = 'v' + json.loads((root / 'package.json').read_text())['version']
 with tempfile.TemporaryDirectory(prefix='j1-distribution-') as tmp:
     work = pathlib.Path(tmp)
     proxy = work / 'proxy' / module / '@v'
@@ -28,4 +28,8 @@ with tempfile.TemporaryDirectory(prefix='j1-distribution-') as tmp:
     nodebin.mkdir()
     (nodebin / 'node').symlink_to(shutil.which('node'))
     env['PATH'] = str(nodebin)
-    subprocess.run([str(work / 'consumer-bin'), str(consumer / 'fixture.pbxproj')], cwd=work, env=env, check=True)
+    env.pop('NODE_OPTIONS', None)
+    env.pop('NODE_PATH', None)
+    fifo = work / 'blocked.pbxproj'
+    os.mkfifo(fifo)
+    subprocess.run([str(work / 'consumer-bin'), str(consumer / 'fixture.pbxproj'), str(fifo), version[1:]], cwd=work, env=env, check=True)

@@ -41,3 +41,23 @@ codes.
 Do not commit operational logs, captures or qualification snapshots. Keep plans
 and reports in their designated external project directories and operational
 progress in Silo. Record reusable constraints and rationale in repository guidance.
+
+## Local consumer and packaging qualification
+
+Run `python3 tools/packaging/qualify.py` on macOS/Linux with Node and npm. It
+builds the actual host CLI, packs private npm tarballs, installs them offline in
+an isolated consumer and runs the embedded helper. Foreign-platform payloads are
+explicit packaging fixtures, not executable or native qualification. Nothing is
+published. The launcher requires its matching optional platform package and
+never downloads a fallback binary. Node/npm are test prerequisites; ordinary Go
+consumers need only Node when invoking helper operations.
+
+`node tools/packaging/stage.mjs binaries.json EMPTY_OUTPUT` stages private
+packages from an explicit JSON map of target to absolute binary path, for example
+`{"darwin-arm64":"/tmp/xplat-ns"}`. Supported package targets are darwin/linux/
+win32 with arm64/x64. This describes packaging selection, not qualified runtime
+support: Windows process/helper execution remains unavailable. Release automation
+must supply and qualify real binaries for every advertised target. Staging keeps
+Go/npm package versions aligned and copies embedded-helper notices. Private
+helper/API versions remain independent. Publishing, signing, native runtime and
+extension interoperability remain separate gates.

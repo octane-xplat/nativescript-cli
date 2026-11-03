@@ -44,7 +44,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newClient factory) int {
 	var structured bool
 	var project, output, platform, kind, id, arch, configuration, file, cache string
-	root := &cobra.Command{Use: "xplat-ns", Short: "NativeScript project and device tooling", SilenceErrors: true, SilenceUsage: true, Args: cobra.NoArgs}
+	root := &cobra.Command{Use: "xplat-ns", Version: ns.Version, Short: "NativeScript project and device tooling", SilenceErrors: true, SilenceUsage: true, Args: cobra.NoArgs}
 	root.RunE = func(cmd *cobra.Command, _ []string) error { return cmd.Help() }
 	root.SetOut(stdout)
 	root.SetErr(stderr)

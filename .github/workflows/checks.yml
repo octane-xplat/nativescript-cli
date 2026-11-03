@@ -29,3 +29,12 @@ jobs:
       - name: External helper consumer (module zip, Node only)
         if: runner.os != 'Windows'
         run: python3 tools/helper/external-consumer.py
+      - name: Payload freshness
+        if: runner.os != 'Windows'
+        run: |
+          npm install --global bun@1.4.4
+          bun install --frozen-lockfile
+          node tools/helper/generate.mjs --check
+      - name: Local npm distribution (foreign payloads are fixtures)
+        if: runner.os != 'Windows'
+        run: python3 tools/packaging/qualify.py
