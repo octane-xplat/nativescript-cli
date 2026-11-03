@@ -1,0 +1,10 @@
+# Local tooling and build outputs
+.DS_Store
+/bin/
+/dist/
+/coverage/
+/coverage.out
+*.test
+node_modules/
+.cache/
+/research/

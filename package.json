@@ -1,0 +1,11 @@
+{
+  "name": "@octane-xplat/nativescript-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Go library and CLI for NativeScript build and device tooling",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octane-xplat/nativescript-cli"
+  }
+}
