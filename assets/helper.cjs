@@ -17578,12 +17578,20 @@ var require_xcode2 = __commonJS({
       const root = objects.PBXProject[project.hash.project.rootObject];
       const group = put("PBXGroup", "group", { name: q("NativeScript contributions"), sourceTree: q("<group>"), children: [] });
       objects.PBXGroup[root.mainGroup].children.push({ value: group, comment: "P1" });
+      for (const [, ref] of values(objects.PBXFileReference)) {
+        if (ref.path === "app" && ref.lastKnownFileType === "folder") ref.sourceTree = "SOURCE_ROOT";
+      }
       const phases = {};
       for (const kind of ["Sources", "Resources", "Frameworks"]) {
         const isa = `PBX${kind}BuildPhase`;
-        const phase = put(isa, kind, { buildActionMask: 2147483647, files: [], runOnlyForDeploymentPostprocessing: 0 });
-        target.buildPhases.push({ value: phase, comment: "P1" });
-        phases[kind] = objects[isa][phase];
+        const existing = target.buildPhases.filter((ref) => objects[isa]?.[ref.value]);
+        if (existing.length > 1) fail("unavailable");
+        if (existing.length) phases[kind] = objects[isa][existing[0].value];
+        else {
+          const phase = put(isa, kind, { buildActionMask: 2147483647, files: [], runOnlyForDeploymentPostprocessing: 0 });
+          target.buildPhases.push({ value: phase, comment: "P1" });
+          phases[kind] = objects[isa][phase];
+        }
       }
       const embedID = put("PBXCopyFilesBuildPhase", "embed", { buildActionMask: 2147483647, dstPath: q(""), dstSubfolderSpec: 10, name: q("Embed contributed frameworks"), files: [], runOnlyForDeploymentPostprocessing: 0 });
       target.buildPhases.push({ value: embedID, comment: "P1" });

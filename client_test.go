@@ -139,7 +139,7 @@ func TestPublicStageOrderingAndConversions(t *testing.T) {
 				}
 			case "prepare":
 				var p PreparedProject
-				p, err = c.Prepare(context.Background(), PrepareRequest(r))
+				p, err = c.Prepare(context.Background(), PrepareRequest{ProjectDir: r.ProjectDir, OutputDir: r.OutputDir, Target: r.Target})
 				if p.Identity.Target != r.Target {
 					t.Fatal(p)
 				}
@@ -283,7 +283,7 @@ func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal(err)
 	}
-	_, err = c.Prepare(context.Background(), PrepareRequest(r))
+	_, err = c.Prepare(context.Background(), PrepareRequest{ProjectDir: r.ProjectDir, OutputDir: r.OutputDir, Target: r.Target})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal(err)
 	}
@@ -345,7 +345,10 @@ func TestEveryOperationRejectsPreCancellation(t *testing.T) {
 	cancel()
 	checks := []func() error{
 		func() error { _, e := c.Resolve(ctx, ResolveRequest{r.ProjectDir}); return e },
-		func() error { _, e := c.Prepare(ctx, PrepareRequest(r)); return e },
+		func() error {
+			_, e := c.Prepare(ctx, PrepareRequest{ProjectDir: r.ProjectDir, OutputDir: r.OutputDir, Target: r.Target})
+			return e
+		},
 		func() error { _, e := c.Build(ctx, r); return e },
 		func() error { _, e := c.Devices(ctx, DeviceQuery{IOS}); return e },
 		func() error { _, e := c.Run(ctx, RunRequest{Build: r, DeviceID: "exact"}); return e },

@@ -19,8 +19,9 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  const file=path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj');
  let project=xcode.project(file);project.parseSync();
  const o=project.hash.project.objects;const owned=JSON.parse(fs.readFileSync(path.join(output,'.p1.json'))).ids;
+ assert.ok(Object.values(o.PBXFileReference).some(v=>v&&v.path==='app'&&v.sourceTree==='SOURCE_ROOT'));
  const sources=Object.values(o.PBXSourcesBuildPhase).filter(v=>v&&typeof v==='object');
- assert.ok(sources.some(v=>v.files.length===1 && owned.includes(v.files[0].value)));
+ assert.equal(sources.length,1); assert.ok(sources.some(v=>v.files.some(f=>owned.includes(f.value))));
  assert.ok(Object.values(o.PBXCopyFilesBuildPhase).some(v=>v&&typeof v==='object'&&v.files.length===1&&owned.includes(v.files[0].value)));
  assert.match(fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8'),/NSCameraUsageDescription/);
  assert.match(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native.h/);

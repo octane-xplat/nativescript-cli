@@ -47,7 +47,21 @@ type PrepareRequest struct {
 	OutputDir  string
 	Target     Target
 }
+
+// IOSBuildOptions selects compilation (empty Action or "build"), "archive", or
+// "export" (archive then IPA export). ExportOptionsPlist is caller-owned.
+// SigningMode is "disabled", "automatic", or "manual". Device signing must
+// be explicit; no provisioning updates or credentials are requested.
+type IOSBuildOptions struct {
+	Action              string
+	SigningMode         string
+	TeamID              string
+	Identity            string
+	ProvisioningProfile string
+	ExportOptionsPlist  string
+}
 type BuildRequest struct {
+	IOS        IOSBuildOptions
 	ProjectDir string
 	OutputDir  string
 	Target     Target

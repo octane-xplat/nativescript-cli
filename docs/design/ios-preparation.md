@@ -9,7 +9,7 @@ The template's XCFramework archive is expanded using `/usr/bin/unzip` lazily.
 
 Preparation owns one F2 project lease through J1 editing and every dependency
 child's retirement. Go consumers need no npm CLI or helper generation step.
-Android preparation remains unavailable. Build still requires a native compiler.
+Android preparation remains unavailable. The iOS compiler is described in [iOS compilation](ios-build.md).
 
 The generated native directory contains `NativeScriptApp.xcodeproj`, runtime
 scripts/frameworks/tools, `app/` (the V1 bundle destination), generated Info.plist,

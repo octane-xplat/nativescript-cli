@@ -142,7 +142,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 			case "resolve":
 				result, err = c.Resolve(ctx, ns.ResolveRequest{ProjectDir: project})
 			case "prepare":
-				result, err = c.Prepare(ctx, ns.PrepareRequest(request))
+				result, err = c.Prepare(ctx, ns.PrepareRequest{ProjectDir: request.ProjectDir, OutputDir: request.OutputDir, Target: request.Target})
 			case "build":
 				result, err = c.Build(ctx, request)
 			case "devices":

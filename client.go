@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
+	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
 	iosprepare "github.com/octane-xplat/nativescript-cli/internal/ios/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
@@ -52,10 +53,17 @@ func operationError(op string, err error) error {
 		kind = ErrUnsupportedHost
 	case errors.Is(err, workspace.ErrBusy):
 		kind = ErrContention
+	case errors.Is(err, iosbuild.ErrSigning):
+		kind = ErrSigning
 	case errors.Is(err, process.ErrStart):
 		kind = ErrToolchain
 	}
-	result := &OperationError{Operation: op, Kind: kind, Cause: err}
+	cause := err
+	var native *iosbuild.Failure
+	if errors.As(err, &native) {
+		cause = &BuildError{Stage: native.Stage, ExitCode: native.ExitCode, Cause: err}
+	}
+	result := &OperationError{Operation: op, Kind: kind, Cause: cause}
 	var diagnostic *resolver.Diagnostic
 	if errors.As(err, &diagnostic) {
 		result.Advice = diagnostic.Message
@@ -107,7 +115,7 @@ func prepared(p project.Prepared) PreparedProject {
 	return PreparedProject{Identity: publicIdentity(p.Identity), NativeDir: p.NativeDir, BundleDir: p.BundleDir}
 }
 func (c *Client) Prepare(ctx context.Context, r PrepareRequest) (PreparedProject, error) {
-	q := BuildRequest(r)
+	q := BuildRequest{ProjectDir: r.ProjectDir, OutputDir: r.OutputDir, Target: r.Target}
 	if err := ctx.Err(); err != nil {
 		return PreparedProject{}, operationError("prepare", err)
 	}
@@ -126,6 +134,9 @@ func (c *Client) Prepare(ctx context.Context, r PrepareRequest) (PreparedProject
 	return prepared(p), nil
 }
 func (c *Client) build(ctx context.Context, r BuildRequest, s workflow.Stages, n workflow.Notify) (BuildResult, error) {
+	if r.Target.Platform == IOS && s.Compiler == nil {
+		s.Compiler = iosbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: iosbuild.Options{Action: r.IOS.Action, SigningMode: r.IOS.SigningMode, TeamID: r.IOS.TeamID, Identity: r.IOS.Identity, ProvisioningProfile: r.IOS.ProvisioningProfile, ExportOptionsPlist: r.IOS.ExportOptionsPlist}}
+	}
 	resolved, err := workflow.Resolve(ctx, s, r.ProjectDir, n)
 	if err != nil {
 		return BuildResult{}, err
