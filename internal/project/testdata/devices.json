@@ -1,0 +1,1 @@
+[{"ID":"fixture-sim-001","Name":"Fixture iOS Simulator","Platform":"ios","Kind":"simulator","Architecture":"arm64","State":"booted"},{"ID":"fixture-serial-001","Name":"Fixture Android Device","Platform":"android","Kind":"device","Architecture":"arm64-v8a","State":"device"}]

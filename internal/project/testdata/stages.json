@@ -1,0 +1,4 @@
+[
+ {"Identity":{"Schema":1,"Revision":"fixture-ios-r1","ProjectDir":"/fixture apps/My App","Target":{"Platform":"ios","DestinationKind":"simulator","DestinationID":"fixture-sim-001","Architecture":"arm64","Configuration":"debug"}},"NativeDir":"/fixture outputs/ios simulator/App.xcodeproj","BundleDir":"/fixture outputs/ios simulator/bundle"},
+ {"Identity":{"Schema":1,"Revision":"fixture-android-r1","ProjectDir":"/fixture apps/My App","Target":{"Platform":"android","DestinationKind":"device","DestinationID":"fixture-serial-001","Architecture":"arm64-v8a","Configuration":"release"}},"NativeDir":"/fixture outputs/android device/gradle project","BundleDir":"/fixture outputs/android device/bundle"}
+]

@@ -1,3 +1,4 @@
-// Package nativescript is the public package for the planned NativeScript
-// build and device library. This scaffold does not expose operational APIs yet.
+// Package nativescript provides importable NativeScript operation contracts.
+// New is side-effect free; production operations currently return ErrUnavailable.
+// Component fixtures are not evidence of native build or device behavior.
 package nativescript
