@@ -183,11 +183,15 @@ func TestRealPublicOperations(t *testing.T) {
 		case "prepare", "build", "run":
 			args = append(args, targetArgs...)
 		case "devices":
-			args = append(args, "--platform", "ios")
+			args = append(args, "--platform", "android")
 		}
 		var out bytes.Buffer
 		expected := 3
 		text := `"code":"unavailable"`
+		if op == "run" {
+			expected = 2
+			text = `"code":"invalid_input"`
+		}
 		if op == "resolve" {
 			expected = 0
 			text = `"ApplicationID":"org.example.app"`

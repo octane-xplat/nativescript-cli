@@ -21,7 +21,7 @@ func TestEmbeddedEditorAndLazyNativeDiscovery(t *testing.T) {
 	}
 	root := t.TempDir()
 	cache := filepath.Join(root, "cache")
-	_, e = c.Devices(context.Background(), ns.DeviceQuery{Platform: ns.IOS})
+	_, e = c.Devices(context.Background(), ns.DeviceQuery{Platform: ns.Android})
 	if !errors.Is(e, ns.ErrUnavailable) {
 		t.Fatal(e)
 	}
@@ -78,7 +78,7 @@ func TestIndependentClientsRealHelperHaveNoGlobalEffects(t *testing.T) {
 				}
 				// Reentrant discovery stays lazy and does not share helper ownership.
 				other, _ := ns.New(ns.Options{})
-				_, err := other.Devices(ctx, ns.DeviceQuery{Platform: ns.IOS})
+				_, err := other.Devices(ctx, ns.DeviceQuery{Platform: ns.Android})
 				if !errors.Is(err, ns.ErrUnavailable) {
 					return fmt.Errorf("unexpected discovery: %w", err)
 				}

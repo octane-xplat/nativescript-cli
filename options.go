@@ -68,6 +68,12 @@ type BuildRequest struct {
 }
 type DeviceQuery struct{ Platform Platform }
 type RunRequest struct {
-	Build    BuildRequest
-	DeviceID string
+	// Artifact bypasses compilation; only compatible existing app products install.
+	Artifact *Artifact
+	// AllowBoot permits booting the exact selected shutdown simulator.
+	AllowBoot bool
+	// AllowPhysicalDevice explicitly authorizes install/launch on the selected trusted phone.
+	AllowPhysicalDevice bool
+	Build               BuildRequest
+	DeviceID            string
 }

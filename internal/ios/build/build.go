@@ -362,3 +362,26 @@ func checkMachO(file, arch, kind string) error {
 	}
 	return ErrArtifact
 }
+
+// ValidateApplication rechecks an install handoff using a caller-owned XML copy
+// of Info.plist. It does not compile, sign or modify the application.
+func ValidateApplication(app, plist, applicationID, architecture, kind string) error {
+	info, err := readInfo(plist)
+	sdk := "iphoneos"
+	if kind == "simulator" {
+		sdk = "iphonesimulator"
+	}
+	if err != nil || info.ID != applicationID || info.Executable == "" || filepath.Base(info.Executable) != info.Executable || info.Platform != sdk {
+		return ErrArtifact
+	}
+	return checkMachO(filepath.Join(app, info.Executable), architecture, kind)
+}
+
+// ApplicationExecutable reads the validated XML identity for process matching.
+func ApplicationExecutable(plist string) (string, error) {
+	info, err := readInfo(plist)
+	if err != nil || info.Executable == "" || filepath.Base(info.Executable) != info.Executable {
+		return "", ErrArtifact
+	}
+	return info.Executable, nil
+}

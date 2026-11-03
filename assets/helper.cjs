@@ -17731,6 +17731,9 @@ var require_vite = __commonJS({
         watchChange(file) {
           if (/nativescript\.config\.|package\.json$/.test(file)) failWatch?.(fail("restart_required"));
         },
+        generateBundle() {
+          this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify({ main: "bundle.js" }) });
+        },
         writeBundle(options, output) {
           const files = Object.keys(output).sort().map((name) => path2.join(p.directory, name));
           const entry = Object.values(output).find((file) => file.type === "chunk" && file.isEntry);

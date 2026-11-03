@@ -11,10 +11,11 @@ import (
 // Close cancels work once; its deadline bounds waiting, never resource cleanup.
 // Work must observe cancellation. Completion is published only after cleanup.
 type Session struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
-	err    error
+	LogBuffer *LogBuffer
+	cancel    context.CancelFunc
+	done      chan struct{}
+	once      sync.Once
+	err       error
 }
 
 func StartSession(ctx context.Context, work func(context.Context) error) *Session {

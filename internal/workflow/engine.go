@@ -190,7 +190,7 @@ func Launch(ctx context.Context, s Stages, a []project.Artifact, d project.Devic
 		}
 		for _, v := range a {
 			t := v.Identity.Target
-			if t.Platform == d.Platform && t.DestinationID == d.ID && t.DestinationKind == d.Kind && t.Architecture == d.Architecture {
+			if t.Platform == d.Platform && (t.DestinationID == d.ID || t.DestinationID == "generic") && t.DestinationKind == d.Kind && t.Architecture == d.Architecture {
 				var err error
 				session, err = s.Launcher.Launch(ctx, v, d)
 				if err == nil && session == nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
 	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
+	iosdevice "github.com/octane-xplat/nativescript-cli/internal/ios/device"
 	iosprepare "github.com/octane-xplat/nativescript-cli/internal/ios/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
@@ -29,7 +30,7 @@ func New(options Options) (*Client, error) {
 	options.Environment = maps.Clone(options.Environment)
 	files, _ := fs.Sub(helperFiles, "assets")
 	engine := workflow.Engine{Factory: func(env map[string]string) workflow.Stages {
-		return workflow.Stages{Preparer: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		return workflow.Stages{Devices: iosdevice.Adapter{Environment: env}, Launcher: iosdevice.Adapter{Environment: env}, Preparer: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }
@@ -186,6 +187,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 		return nil, operationError("run", workflow.ErrInvalid)
 	}
 	s, n := c.stages(), c.notify("run")
+	if _, ok := s.Launcher.(iosdevice.Adapter); ok {
+		s.Launcher = iosdevice.Adapter{Environment: maps.Clone(c.options.Environment), AllowBoot: r.AllowBoot, AllowPhysicalDevice: r.AllowPhysicalDevice}
+	}
 	// Exact selection is validated before a costly build or installation.
 	devices, err := workflow.Discover(ctx, s, string(r.Build.Target.Platform), n)
 	if err != nil {
@@ -205,7 +209,12 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	if s.Launcher == nil {
 		return nil, operationError("run", workflow.ErrUnavailable)
 	}
-	result, err := c.build(ctx, r.Build, s, n)
+	var result BuildResult
+	if r.Artifact != nil {
+		result.Artifacts = []Artifact{*r.Artifact}
+	} else {
+		result, err = c.build(ctx, r.Build, s, n)
+	}
 	if err != nil {
 		return nil, operationError("run", err)
 	}

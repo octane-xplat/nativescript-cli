@@ -291,10 +291,11 @@ func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Devices(context.Background(), DeviceQuery{IOS})
+	_, err = c.Devices(context.Background(), DeviceQuery{Android})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal(err)
 	}
+	r.Target.Platform = Android
 	s, err := c.Run(context.Background(), RunRequest{Build: r, DeviceID: "exact"})
 	if s != nil || !errors.Is(err, ErrUnavailable) {
 		t.Fatal(s, err)
