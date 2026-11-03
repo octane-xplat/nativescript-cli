@@ -8,6 +8,11 @@ type Identity struct {
 	Target     Target
 }
 type Project struct {
+	Config        ProjectConfig
+	Packages      []InstalledPackage
+	Dependencies  []InstalledDependency
+	Contributions []NativeContribution
+	Sources       []ProjectSource
 	Directory     string
 	Revision      string
 	ApplicationID string
@@ -34,4 +39,49 @@ type Device struct {
 	Kind         DestinationKind
 	Architecture string
 	State        string
+}
+
+// ProjectConfig contains normalized absolute app/resource directories.
+type ProjectConfig struct {
+	AppPath          string
+	AppResourcesPath string
+	Android          AndroidRuntimeConfig
+}
+type AndroidRuntimeConfig struct {
+	V8Flags     string
+	MarkingMode string
+}
+
+// InstalledPackage identifies one physical installation, including linked workspaces.
+type InstalledPackage struct {
+	IOSRequirement     string
+	AndroidRequirement string
+	Android            AndroidRuntimeConfig
+	Name               string
+	Version            string
+	Directory          string
+	Native             bool
+}
+
+// InstalledDependency retains both the lookup location and canonical target.
+type InstalledDependency struct {
+	From      string
+	Name      string
+	Directory string
+	Location  string
+}
+
+// NativeContribution is an input for preparation, not proof of a native build.
+// Kind is source, framework, pods, spm, configuration, resource or library.
+type NativeContribution struct {
+	PackageDirectory string
+	Platform         string
+	Kind             string
+	Path             string
+}
+
+// ProjectSource records SHA-256 of a read config, manifest or native file.
+type ProjectSource struct {
+	Path   string
+	Digest string
 }

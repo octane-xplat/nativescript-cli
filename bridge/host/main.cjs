@@ -12,6 +12,7 @@ function register(feature, operation, handler) {
   if (registry.has(key)) throw new Error('duplicate helper operation');
   registry.set(key, handler);
 }
+register('resolve', 'project', require('../resolve/index.cjs'));
 register('host', 'info', async () => ({ protocol, payloadVersion }));
 register('host', 'resolveDependency', async ({ projectDir, name }) => {
   if (!path.isAbsolute(projectDir || '') || typeof name !== 'string' || !name || name.startsWith('.') || path.isAbsolute(name)) {
@@ -46,5 +47,5 @@ console.log = console.info = console.warn = console.error = () => {};
 })().catch(error => {
   if (!request) { process.exitCode = 1; return; }
   // Do not forward arbitrary dependency messages, paths, environment or stack traces.
-  frame('error', { error: { code: error.code === 'invalid_input' ? 'invalid_input' : error.code === 'unavailable' ? 'unavailable' : 'operation_failed', message: 'Helper operation failed' } });
+  frame('error', { error: { code: error.code === 'invalid_input' ? 'invalid_input' : error.code === 'unavailable' ? 'unavailable' : 'operation_failed', message: error.safeResolve ? error.message : 'Helper operation failed' } });
 });

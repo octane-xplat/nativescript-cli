@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -168,8 +169,16 @@ func TestOutputFailures(t *testing.T) {
 	}
 }
 func TestRealPublicOperations(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","version":"1"}`), 0600)
+	os.WriteFile(filepath.Join(root, "nativescript.config.cjs"), []byte(`module.exports={id:'org.example.app'}`), 0600)
+	os.Mkdir(filepath.Join(root, "app"), 0700)
+	os.Mkdir(filepath.Join(root, "App_Resources"), 0700)
 	for _, op := range []string{"resolve", "prepare", "build", "devices", "run"} {
-		args := []string{op, "--json"}
+		args := []string{op, "--json", "--project", root}
+		if op == "devices" {
+			args = []string{op, "--json"}
+		}
 		switch op {
 		case "prepare", "build", "run":
 			args = append(args, targetArgs...)
@@ -177,7 +186,13 @@ func TestRealPublicOperations(t *testing.T) {
 			args = append(args, "--platform", "ios")
 		}
 		var out bytes.Buffer
-		if code := Execute(context.Background(), args, &out, io.Discard); code != 3 || !strings.Contains(out.String(), `"code":"unavailable"`) {
+		expected := 3
+		text := `"code":"unavailable"`
+		if op == "resolve" {
+			expected = 0
+			text = `"ApplicationID":"org.example.app"`
+		}
+		if code := Execute(context.Background(), args, &out, io.Discard); code != expected || !strings.Contains(out.String(), text) {
 			t.Fatalf("%s %d %s", op, code, &out)
 		}
 	}
@@ -252,7 +267,7 @@ func TestJSONFlagAfterInvalidFlag(t *testing.T) {
 func TestHumanErrorUsesOnlyStderr(t *testing.T) {
 	var out, diag bytes.Buffer
 	code := Execute(context.Background(), []string{"resolve"}, &out, &diag)
-	if code != 3 || out.Len() != 0 || !strings.Contains(diag.String(), "unavailable") {
+	if code != 2 || out.Len() != 0 || !strings.Contains(diag.String(), "check the selected project") {
 		t.Fatalf("%d %s %s", code, &out, &diag)
 	}
 }

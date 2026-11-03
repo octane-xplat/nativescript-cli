@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	ns "github.com/octane-xplat/nativescript-cli"
+	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -14,16 +16,32 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	root, err := os.MkdirTemp("", "ns-consumer-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(root)
+	for _, d := range []string{"app", "App_Resources"} {
+		if err = os.Mkdir(filepath.Join(root, d), 0700); err != nil {
+			panic(err)
+		}
+	}
+	if err = os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","version":"1"}`), 0600); err != nil {
+		panic(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "nativescript.config.cjs"), []byte(`module.exports={id:'org.example.app'}`), 0600); err != nil {
+		panic(err)
+	}
 	target := ns.Target{Platform: ns.IOS, Destination: ns.Destination{Kind: ns.Simulator, ID: "fixture-sim-001", Architecture: "arm64"}, Configuration: ns.Debug}
-	_, err = client.Build(ctx, ns.BuildRequest{ProjectDir: "/fixture apps/My App", OutputDir: "/fixture outputs", Target: target})
+	_, err = client.Build(ctx, ns.BuildRequest{ProjectDir: root, OutputDir: "/fixture outputs", Target: target})
 	var operation *ns.OperationError
 	if !errors.Is(err, ns.ErrUnavailable) || !errors.As(err, &operation) {
 		panic(fmt.Sprint(err))
 	}
-	_, _ = client.Resolve(ctx, ns.ResolveRequest{ProjectDir: "/fixture apps/My App"})
-	_, _ = client.Prepare(ctx, ns.PrepareRequest{ProjectDir: "/fixture apps/My App", OutputDir: "/fixture outputs", Target: target})
+	_, _ = client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	_, _ = client.Prepare(ctx, ns.PrepareRequest{ProjectDir: root, OutputDir: "/fixture outputs", Target: target})
 	_, _ = client.Devices(ctx, ns.DeviceQuery{Platform: ns.IOS})
-	session, err := client.Run(ctx, ns.RunRequest{DeviceID: target.Destination.ID, Build: ns.BuildRequest{Target: target}})
+	session, err := client.Run(ctx, ns.RunRequest{DeviceID: target.Destination.ID, Build: ns.BuildRequest{ProjectDir: root, OutputDir: filepath.Join(root, "outputs"), Target: target}})
 	if !errors.Is(err, ns.ErrUnavailable) || session != nil {
 		panic("unavailable run returned success")
 	}

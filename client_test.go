@@ -275,6 +275,10 @@ func TestSinkFailureBackpressureAndReentry(t *testing.T) {
 func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 	c, _, r := fixture(t)
 	c, _ = New(Options{})
+	os.WriteFile(filepath.Join(r.ProjectDir, "package.json"), []byte(`{"name":"app","version":"1"}`), 0600)
+	os.WriteFile(filepath.Join(r.ProjectDir, "nativescript.config.cjs"), []byte(`module.exports={id:'org.example.app'}`), 0600)
+	os.Mkdir(filepath.Join(r.ProjectDir, "app"), 0700)
+	os.Mkdir(filepath.Join(r.ProjectDir, "App_Resources"), 0700)
 	_, err := c.Build(context.Background(), r)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal(err)
@@ -284,7 +288,7 @@ func TestUnavailableValidationAndLazyConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = c.Resolve(context.Background(), ResolveRequest{r.ProjectDir})
-	if !errors.Is(err, ErrUnavailable) {
+	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = c.Devices(context.Background(), DeviceQuery{IOS})

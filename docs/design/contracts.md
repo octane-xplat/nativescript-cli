@@ -73,9 +73,10 @@ This protocol is separate from H1's extension API and go-plugin/gRPC protocol.
 ## W1 orchestration and adapter integration
 
 The facade now converts all five public workflows into `internal/workflow`
-operations. `New` installs no native producers yet: valid Resolve, Prepare, Build,
-Devices and Run requests return `ErrUnavailable` until the owning tracks supply
-adapters. Invalid inputs return `ErrInvalidInput`; cancellation takes precedence.
+operations. `New` installs the real R1 resolver through the embedded J1 host.
+See [resolution](resolution.md) for the supported input contract. Native producers
+remain unavailable: Prepare and Build resolve first, then return `ErrUnavailable`;
+Devices and Run remain unavailable until the owning tracks supply adapters. Invalid inputs return `ErrInvalidInput`; cancellation takes precedence.
 `InspectXcode` uses the real embedded J1 host through the workflow layer.
 
 Production composition belongs in the root constructor's private `workflow.Engine`.

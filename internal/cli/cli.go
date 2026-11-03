@@ -247,8 +247,11 @@ func classify(err error) (int, string) {
 	}
 }
 func message(err error, label string) string {
-	// Only adapter-generated validation details are safe to display verbatim.
+	// Only adapter validation and explicitly safe resolver advice are displayed.
 	var op *ns.OperationError
+	if errors.As(err, &op) && op.Advice != "" {
+		return op.Advice
+	}
 	if label == "invalid_input" && !errors.As(err, &op) {
 		return err.Error()
 	}

@@ -3,11 +3,14 @@ package nativescript
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"maps"
 	"path/filepath"
 
+	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
+	resolver "github.com/octane-xplat/nativescript-cli/internal/resolve"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
@@ -21,7 +24,11 @@ type Client struct {
 
 func New(options Options) (*Client, error) {
 	options.Environment = maps.Clone(options.Environment)
-	return &Client{options: options}, nil
+	files, _ := fs.Sub(helperFiles, "assets")
+	engine := workflow.Engine{Factory: func(env map[string]string) workflow.Stages {
+		return workflow.Stages{Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+	}}
+	return &Client{options: options, engine: engine}, nil
 }
 func operationError(op string, err error) error {
 	if err == nil {
@@ -46,7 +53,12 @@ func operationError(op string, err error) error {
 	case errors.Is(err, process.ErrStart):
 		kind = ErrToolchain
 	}
-	return &OperationError{Operation: op, Kind: kind, Cause: err}
+	result := &OperationError{Operation: op, Kind: kind, Cause: err}
+	var diagnostic *resolver.Diagnostic
+	if errors.As(err, &diagnostic) {
+		result.Advice = diagnostic.Message
+	}
+	return result
 }
 func (c *Client) notify(op string) workflow.Notify {
 	e := &emitter{sink: c.options.Sink, operation: op}
@@ -70,7 +82,21 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 	if err != nil {
 		return Project{}, operationError("resolve", err)
 	}
-	return Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID}, nil
+	result := Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID,
+		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, Android: AndroidRuntimeConfig(p.Config.Android)}}
+	for _, v := range p.Packages {
+		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, Android: AndroidRuntimeConfig(v.Android)})
+	}
+	for _, v := range p.Dependencies {
+		result.Dependencies = append(result.Dependencies, InstalledDependency(v))
+	}
+	for _, v := range p.Contributions {
+		result.Contributions = append(result.Contributions, NativeContribution(v))
+	}
+	for _, v := range p.Sources {
+		result.Sources = append(result.Sources, ProjectSource(v))
+	}
+	return result, nil
 }
 func internalRequest(r BuildRequest) workflow.Request {
 	return workflow.Request{ProjectDir: r.ProjectDir, OutputDir: r.OutputDir, Target: internalTarget(r.Target)}
