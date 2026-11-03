@@ -76,6 +76,18 @@ async function resolve({ projectDir }) {
     if (fs.existsSync(path.join(dir, 'hooks'))) fail('unavailable', 'Legacy package hooks are unsupported; migrate to the extension SDK before preparing');
     function walk(folder, platform) {
       if (!fs.existsSync(folder)) return;
+      // A native package owns its implementation subtree; do not also compile its
+      // Sources through the application target. Hash inputs without tool caches.
+      if (platform === 'ios') {
+        const manifests = fs.readdirSync(folder).filter(n => n === 'Package.swift' || n.endsWith('.podspec'));
+        if (manifests.length) {
+          const hash = p => { for (const e of fs.readdirSync(p,{withFileTypes:true})) { if (['.build','.swiftpm'].includes(e.name)) continue; const f=path.join(p,e.name); if(e.isSymbolicLink()) fail('unavailable','Native package symlinks are unsupported'); if(e.isDirectory()) hash(f); else read(f); } };
+          hash(folder);
+          if (fs.existsSync(path.join(folder,'Podfile'))) manifests.push('Podfile');
+          for (const name of manifests.sort()) contributions.push({packageDirectory:owner,platform,kind:name==='Package.swift'?'spm':'pods',path:fs.realpathSync(path.join(folder,name))});
+          return;
+        }
+      }
       for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name, 'en'))) {
         const file = path.join(folder, entry.name);
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
@@ -139,7 +151,8 @@ async function resolve({ projectDir }) {
     for (const key of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       if (pkg[key] !== undefined) object(pkg[key], key);
     }
-    const deps = { ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies };
+    const runtimes = isRoot ? Object.fromEntries(Object.entries(pkg.devDependencies || {}).filter(([name]) => ['@nativescript/ios', '@nativescript/android'].includes(name))) : {};
+    const deps = { ...runtimes, ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies };
     for (const name of Object.keys(deps).sort()) {
       if (!/^(?:@[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+$/.test(name)) fail('invalid_input', 'Invalid dependency package name');
       // Walk Node's actual lookup locations, bypassing exports/main restrictions on package.json.

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
+	iosprepare "github.com/octane-xplat/nativescript-cli/internal/ios/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
@@ -27,7 +28,7 @@ func New(options Options) (*Client, error) {
 	options.Environment = maps.Clone(options.Environment)
 	files, _ := fs.Sub(helperFiles, "assets")
 	engine := workflow.Engine{Factory: func(env map[string]string) workflow.Stages {
-		return workflow.Stages{Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		return workflow.Stages{Preparer: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }

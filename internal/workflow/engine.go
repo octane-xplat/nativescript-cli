@@ -97,6 +97,13 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if s.Preparer == nil || (build && (s.Bundler == nil || s.Compiler == nil)) {
 			return ErrUnavailable
 		}
+		if validator, ok := s.Preparer.(interface {
+			Validate(project.Resolved, project.Target) error
+		}); ok {
+			if err := validator.Validate(r, q.Target); err != nil {
+				return err
+			}
+		}
 		l, err := workspace.NewLayout(q.OutputDir, project.Identity{Schema: 1, Revision: r.Revision, ProjectDir: r.Directory, Target: q.Target})
 		if err != nil {
 			return err

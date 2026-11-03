@@ -26,6 +26,7 @@ jobs:
           npm install --global bun@1.4.4
           bun install --frozen-lockfile
           node tools/helper/generate.mjs --check
+          node --test bridge/xcode/graph.test.cjs
       - name: Build
         run: go build ./...
       - name: Vet

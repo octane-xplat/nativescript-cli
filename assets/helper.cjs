@@ -17460,6 +17460,233 @@ var require_xcode = __commonJS({
   }
 });
 
+// bridge/xcode/index.cjs
+var require_xcode2 = __commonJS({
+  "bridge/xcode/index.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    var xcode2 = require_xcode();
+    var plist = require_plist();
+    var { execFileSync } = require("node:child_process");
+    var fail = (code) => {
+      throw Object.assign(new Error(), { code });
+    };
+    var q = (value) => JSON.stringify(value);
+    var id = (value) => crypto.createHash("sha256").update(`p1:${value}`).digest("hex").slice(0, 24).toUpperCase();
+    function dynamicFramework(file) {
+      if (file.endsWith(".a")) return false;
+      if (file.endsWith(".xcframework")) {
+        let info;
+        try {
+          info = plist.parse(fs2.readFileSync(path2.join(file, "Info.plist"), "utf8"));
+        } catch {
+          fail("unavailable");
+        }
+        const kinds = (info.AvailableLibraries || []).map((lib) => dynamicFramework(path2.join(file, lib.LibraryIdentifier, lib.LibraryPath)));
+        if (!kinds.length || kinds.some((k) => k !== kinds[0])) fail("unavailable");
+        return kinds[0];
+      }
+      const binary = path2.join(file, path2.basename(file, ".framework"));
+      let fd;
+      try {
+        fd = fs2.openSync(binary, "r");
+        const b = Buffer.alloc(32);
+        if (fs2.readSync(fd, b, 0, 32, 0) !== 32) fail("unavailable");
+        let offset = 0;
+        if (b.readUInt32BE(0) === 3405691582) offset = b.readUInt32BE(16);
+        if (offset && fs2.readSync(fd, b, 0, 32, offset) !== 32) fail("unavailable");
+        if (b.subarray(0, 8).toString() === "!<arch>\n") return false;
+        const magic = b.readUInt32LE(0);
+        const le = [4277009102, 4277009103].includes(magic);
+        if (!le && ![3472551422, 3489328638].includes(magic)) fail("unavailable");
+        const type = le ? b.readUInt32LE(12) : b.readUInt32BE(12);
+        if (type !== 6 && type !== 1) fail("unavailable");
+        return type === 6;
+      } catch {
+        fail("unavailable");
+      } finally {
+        if (fd !== void 0) fs2.closeSync(fd);
+      }
+    }
+    var values = (section) => Object.entries(section || {}).filter(([key2, v]) => !key2.endsWith("_comment") && v && typeof v === "object");
+    module2.exports = async ({ resolved, directory }) => {
+      const normalize = (value) => Array.isArray(value) ? value.map(normalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k[0].toLowerCase() + k.slice(1), normalize(v)])) : value;
+      resolved = normalize(resolved);
+      if (!path2.isAbsolute(directory || "") || !resolved?.applicationID) fail("invalid_input");
+      const runtime = resolved.packages.find((p) => p.name === "@nativescript/ios");
+      if (!runtime || runtime.version !== "8.9.0") fail("unavailable");
+      const template = path2.join(runtime.directory, "framework");
+      if (!fs2.existsSync(path2.join(template, "__PROJECT_NAME__.xcodeproj/project.pbxproj"))) fail("unavailable");
+      const name = "NativeScriptApp", projectFile = path2.join(directory, `${name}.xcodeproj/project.pbxproj`);
+      const stateFile = path2.join(directory, ".p1.json");
+      const previous = fs2.existsSync(stateFile) ? JSON.parse(fs2.readFileSync(stateFile)) : { ids: [] };
+      if (previous.runtime && previous.runtime !== runtime.version) fail("unavailable");
+      if (!fs2.existsSync(projectFile)) {
+        fs2.mkdirSync(directory, { recursive: true });
+        for (const entry of fs2.readdirSync(template)) {
+          const dest = path2.join(directory, entry.replaceAll("__PROJECT_NAME__", name));
+          if (fs2.existsSync(dest)) fail("invalid_input");
+          fs2.cpSync(path2.join(template, entry), dest, { recursive: true, dereference: false, filter: (source) => !source.split(path2.sep).some((p) => p === "xcuserdata") });
+        }
+        const appDir = path2.join(directory, name);
+        for (const entry of fs2.readdirSync(appDir)) {
+          if (entry.includes("__PROJECT_NAME__")) fs2.renameSync(path2.join(appDir, entry), path2.join(appDir, entry.replaceAll("__PROJECT_NAME__", name)));
+        }
+        const schemes = path2.join(directory, `${name}.xcodeproj/xcshareddata/xcschemes`);
+        if (fs2.existsSync(schemes)) for (const file of fs2.readdirSync(schemes)) {
+          const text = fs2.readFileSync(path2.join(schemes, file), "utf8").replaceAll("__PROJECT_NAME__", name);
+          fs2.unlinkSync(path2.join(schemes, file));
+          fs2.writeFileSync(path2.join(schemes, file.replaceAll("__PROJECT_NAME__", name)), text);
+        }
+        fs2.writeFileSync(projectFile, fs2.readFileSync(projectFile, "utf8").replaceAll("__PROJECT_NAME__", name));
+      }
+      const internal = path2.join(directory, "internal");
+      const archive = path2.join(internal, "XCFrameworks.zip");
+      if (fs2.existsSync(archive) && !fs2.existsSync(path2.join(internal, "NativeScript.xcframework"))) {
+        try {
+          const names = execFileSync("/usr/bin/unzip", ["-Z1", archive], { encoding: "utf8", maxBuffer: 4 << 20 }).trim().split("\n");
+          if (names.some((n) => path2.isAbsolute(n) || n.split("/").includes(".."))) fail("invalid_input");
+          execFileSync("/usr/bin/unzip", ["-q", "-o", archive, "-d", internal], { stdio: "ignore" });
+        } catch {
+          fail("unavailable");
+        }
+        if (!fs2.existsSync(path2.join(internal, "NativeScript.xcframework/Info.plist")) || !fs2.existsSync(path2.join(internal, "TKLiveSync.xcframework/Info.plist"))) fail("unavailable");
+      }
+      const project = xcode2.project(projectFile);
+      project.parseSync();
+      const objects = project.hash.project.objects;
+      const owned = new Set(previous.ids);
+      for (const section of Object.values(objects)) {
+        for (const key2 of Object.keys(section)) if (owned.has(key2.replace(/_comment$/, ""))) delete section[key2];
+        for (const [, object] of values(section)) for (const [key2, value] of Object.entries(object)) {
+          if (Array.isArray(value)) object[key2] = value.filter((v) => !owned.has(typeof v === "string" ? v : v.value));
+        }
+      }
+      const ids = [];
+      function put(section, key2, value) {
+        const uuid = id(key2);
+        if (objects[section]?.[uuid]) fail("invalid_input");
+        (objects[section] ||= {})[uuid] = { isa: section, ...value };
+        ids.push(uuid);
+        return uuid;
+      }
+      const appTargets = values(objects.PBXNativeTarget).filter(([, v]) => v.productType === '"com.apple.product-type.application"' || v.productType === "com.apple.product-type.application");
+      if (appTargets.length !== 1) fail("unavailable");
+      const [targetID, target] = appTargets[0];
+      const root = objects.PBXProject[project.hash.project.rootObject];
+      const group = put("PBXGroup", "group", { name: q("NativeScript contributions"), sourceTree: q("<group>"), children: [] });
+      objects.PBXGroup[root.mainGroup].children.push({ value: group, comment: "P1" });
+      const phases = {};
+      for (const kind of ["Sources", "Resources", "Frameworks"]) {
+        const isa = `PBX${kind}BuildPhase`;
+        const phase = put(isa, kind, { buildActionMask: 2147483647, files: [], runOnlyForDeploymentPostprocessing: 0 });
+        target.buildPhases.push({ value: phase, comment: "P1" });
+        phases[kind] = objects[isa][phase];
+      }
+      const embedID = put("PBXCopyFilesBuildPhase", "embed", { buildActionMask: 2147483647, dstPath: q(""), dstSubfolderSpec: 10, name: q("Embed contributed frameworks"), files: [], runOnlyForDeploymentPostprocessing: 0 });
+      target.buildPhases.push({ value: embedID, comment: "P1" });
+      const headers = [], configs = [], pods = [], packages = [];
+      let info = { CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable: "$(EXECUTABLE_NAME)", CFBundleName: name, CFBundlePackageType: "APPL", CFBundleVersion: "1", CFBundleShortVersionString: "1.0", LSRequiresIPhoneOS: true };
+      let entitlements = plist.parse(fs2.readFileSync(path2.join(template, "__PROJECT_NAME__/__PROJECT_NAME__.entitlements"), "utf8"));
+      const contributions = resolved.contributions.filter((c) => c.platform === "ios").sort((a, b) => (a.packageDirectory === resolved.directory) - (b.packageDirectory === resolved.directory) || a.path.localeCompare(b.path));
+      for (const c of contributions) {
+        if (!path2.isAbsolute(c.path) || !fs2.existsSync(c.path)) fail("invalid_input");
+        const ext = path2.extname(c.path).toLowerCase();
+        if (c.kind === "pods") {
+          pods.push(c.path);
+          continue;
+        }
+        if (c.kind === "spm") {
+          let manifest;
+          try {
+            manifest = JSON.parse(execFileSync("swift", ["package", "--package-path", path2.dirname(c.path), "dump-package"], { encoding: "utf8", maxBuffer: 4 << 20, stdio: ["ignore", "pipe", "pipe"] }));
+          } catch {
+            fail("unavailable");
+          }
+          const ref2 = put("XCLocalSwiftPackageReference", c.path, { relativePath: q(path2.dirname(c.path)) });
+          (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
+          for (const product of manifest.products || []) {
+            if (!product.type?.library) fail("unavailable");
+            const dependency = put("XCSwiftPackageProductDependency", `${c.path}:${product.name}`, { package: ref2, productName: q(product.name) });
+            (target.packageProductDependencies ||= []).push({ value: dependency, comment: "P1" });
+            const build = put("PBXBuildFile", `spm:${c.path}:${product.name}`, { productRef: dependency });
+            phases.Frameworks.files.push({ value: build, comment: "P1" });
+          }
+          packages.push(c.path);
+          continue;
+        }
+        if (c.kind === "configuration") {
+          if (ext === ".xcconfig") configs.push(c.path);
+          else {
+            let data;
+            try {
+              data = plist.parse(fs2.readFileSync(c.path, "utf8"));
+            } catch {
+              fail("unavailable");
+            }
+            if (ext === ".entitlements") Object.assign(entitlements, data);
+            else if (path2.basename(c.path) === "Info.plist") Object.assign(info, data);
+            else fail("unavailable");
+          }
+        }
+        const types = { ".swift": "sourcecode.swift", ".m": "sourcecode.c.objc", ".mm": "sourcecode.cpp.objcpp", ".h": "sourcecode.c.h", ".c": "sourcecode.c.c", ".cpp": "sourcecode.cpp.cpp", ".framework": "wrapper.framework", ".xcframework": "wrapper.xcframework", ".a": "archive.ar", ".xcconfig": "text.xcconfig", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements", ".xcassets": "folder.assetcatalog" };
+        const ref = put("PBXFileReference", `file:${c.path}`, { path: q(c.path), sourceTree: q("<absolute>"), lastKnownFileType: types[ext] || (fs2.statSync(c.path).isDirectory() ? "folder" : "file") });
+        objects.PBXGroup[group].children.push({ value: ref, comment: "P1" });
+        if (ext === ".h") {
+          headers.push(c.path);
+          continue;
+        }
+        const phase = { source: "Sources", resource: "Resources", framework: "Frameworks" }[c.kind];
+        if (phase) {
+          const build = put("PBXBuildFile", `build:${c.path}`, { fileRef: ref });
+          phases[phase].files.push({ value: build, comment: "P1" });
+          if (c.kind === "framework" && dynamicFramework(c.path)) {
+            const build2 = put("PBXBuildFile", `embed:${c.path}`, { fileRef: ref, settings: { ATTRIBUTES: ["CodeSignOnCopy", "RemoveHeadersOnCopy"] } });
+            objects.PBXCopyFilesBuildPhase[embedID].files.push({ value: build2, comment: "P1" });
+          }
+        } else if (c.kind !== "configuration") fail("unavailable");
+      }
+      const configList = objects.XCConfigurationList[target.buildConfigurationList];
+      for (const entry of configList.buildConfigurations) {
+        const settings = objects.XCBuildConfiguration[entry.value].buildSettings;
+        settings.PRODUCT_BUNDLE_IDENTIFIER = q(resolved.applicationID);
+        settings.CODE_SIGN_ENTITLEMENTS = q(`${name}/${name}.entitlements`);
+        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), q(q("$(SRCROOT)/internal/NativeContributions")), ...Array.from(new Set(headers.map((p) => q(q(path2.dirname(p))))))];
+        settings.FRAMEWORK_SEARCH_PATHS = ['"$(inherited)"', ...Array.from(new Set(contributions.filter((c) => c.kind === "framework").map((c) => q(q(path2.dirname(c.path))))))];
+      }
+      const write = (file, text) => {
+        fs2.mkdirSync(path2.dirname(file), { recursive: true });
+        const temp = file + ".p1-tmp";
+        fs2.writeFileSync(temp, text);
+        fs2.renameSync(temp, file);
+      };
+      write(path2.join(directory, name, `${name}-Info.plist`), plist.build(info));
+      write(path2.join(directory, name, `${name}.entitlements`), plist.build(entitlements));
+      write(path2.join(directory, "internal/Swift-ObjC-Bridging-Header.h"), '#import <NativeScript/NativeScript.h>\n#import "NativeScriptStart.h"\n' + headers.map((p) => `#import ${q(p)}
+`).join(""));
+      write(path2.join(directory, "internal/NativeContributions/module.modulemap"), "module NativeContributions {\n" + headers.map((p) => `  header ${q(p)}
+`).join("") + "  export *\n}\n");
+      for (const mode of ["debug", "release"]) write(path2.join(directory, `plugins-${mode}.xcconfig`), `#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"
+` + configs.map((p) => `#include ${q(p)}
+`).join(""));
+      const ruby = (value) => `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
+      write(path2.join(directory, "Podfile"), `platform :ios, '13.0'
+project '${name}.xcodeproj'
+target '${name}' do
+` + pods.map((p) => path2.extname(p) === ".podspec" ? `  pod ${ruby(path2.basename(p, ".podspec"))}, :path => ${ruby(path2.dirname(p))}
+` : `  instance_eval(File.read(${ruby(p)}), ${ruby(p)})
+`).join("") + "end\n");
+      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages }, null, 2) + "\n");
+      write(projectFile, project.writeSync());
+      write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: packages.length > 0 || !!previous.spm }) + "\n");
+      fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
+      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: packages.length > 0 || !!previous.spm, target: name };
+    };
+  }
+});
+
 // bridge/vite/index.cjs
 var require_vite = __commonJS({
   "bridge/vite/index.cjs"(exports2, module2) {
@@ -17660,6 +17887,24 @@ var require_resolve = __commonJS({
         if (fs2.existsSync(path2.join(dir, "hooks"))) fail("unavailable", "Legacy package hooks are unsupported; migrate to the extension SDK before preparing");
         function walk(folder, platform) {
           if (!fs2.existsSync(folder)) return;
+          if (platform === "ios") {
+            const manifests = fs2.readdirSync(folder).filter((n) => n === "Package.swift" || n.endsWith(".podspec"));
+            if (manifests.length) {
+              const hash = (p) => {
+                for (const e of fs2.readdirSync(p, { withFileTypes: true })) {
+                  if ([".build", ".swiftpm"].includes(e.name)) continue;
+                  const f = path2.join(p, e.name);
+                  if (e.isSymbolicLink()) fail("unavailable", "Native package symlinks are unsupported");
+                  if (e.isDirectory()) hash(f);
+                  else read(f);
+                }
+              };
+              hash(folder);
+              if (fs2.existsSync(path2.join(folder, "Podfile"))) manifests.push("Podfile");
+              for (const name of manifests.sort()) contributions.push({ packageDirectory: owner, platform, kind: name === "Package.swift" ? "spm" : "pods", path: fs2.realpathSync(path2.join(folder, name)) });
+              return;
+            }
+          }
           for (const entry of fs2.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
             const file = path2.join(folder, entry.name);
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
@@ -17732,7 +17977,8 @@ var require_resolve = __commonJS({
         for (const key2 of ["dependencies", "optionalDependencies", "peerDependencies"]) {
           if (pkg[key2] !== void 0) object(pkg[key2], key2);
         }
-        const deps = { ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies };
+        const runtimes = isRoot ? Object.fromEntries(Object.entries(pkg.devDependencies || {}).filter(([name]) => ["@nativescript/ios", "@nativescript/android"].includes(name))) : {};
+        const deps = { ...runtimes, ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies };
         for (const name of Object.keys(deps).sort()) {
           if (!/^(?:@[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+$/.test(name)) fail("invalid_input", "Invalid dependency package name");
           const locations = require("node:module").Module._nodeModulePaths(dir);
@@ -17775,6 +18021,7 @@ function register(feature, operation, handler) {
   if (registry.has(key2)) throw new Error("duplicate helper operation");
   registry.set(key2, handler);
 }
+register("xcode", "prepare", require_xcode2());
 register("vite", "run", require_vite());
 register("resolve", "project", require_resolve());
 register("host", "info", async () => ({ protocol, payloadVersion }));
