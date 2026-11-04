@@ -10,6 +10,7 @@ p.add_argument('artifact', type=pathlib.Path)
 p.add_argument('consumer', type=pathlib.Path)
 p.add_argument('evidence', type=pathlib.Path)
 p.add_argument('--port', type=int, default=5588)
+p.add_argument('--sdk-baseline', action='store_true', help='qualify public createUpdates/core debug rejection, not release installation')
 a = p.parse_args()
 a.app = a.app.resolve()
 a.artifact = a.artifact.resolve()
@@ -39,6 +40,8 @@ def device(*args, check=True):
 if serial in run([adb, 'devices']).stdout:
     raise RuntimeError('serial already in use')
 record = {'boundary': 'real Android9.1 debug runtime + canonical debug-mode rejection; release OTA and public core SDK not qualified', 'serial': serial, 'avd': avd, 'artifact': artifact, 'phases': []}
+if a.sdk_baseline:
+    record['boundary'] = 'public createUpdates/core9.1.3 debug rejection with native storage; no release installer claim'
 created = False
 process = None
 child = None

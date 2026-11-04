@@ -19,6 +19,18 @@ can be staged with `stage-consumer.py --sdk`; actual native SDK execution and it
 network installer still need separate qualification. Do not bypass those responses
 or edit installed packages to manufacture full SDK acceptance.
 
+For the public SDK baseline, stage each platform with `--sdk`, compile with the
+same public consumer below, then run the corresponding device command with
+`--sdk-baseline`. iOS checks release support, embedded status, native storage and
+a live application heartbeat. Android checks public SDK rejection of a genuine
+debug binary and an advancing native heartbeat with guest network radios disabled.
+These checks do not qualify `check()`/`install()` or a release update lifecycle.
+The strict installer requires a reachable trusted HTTPS origin serving manifests
+and matching bundle archives; the baseline's `not-running.invalid` origin cannot
+provide that evidence. Android release compilation additionally requires an
+explicit approved signing choice. Never weaken HTTPS validation or create signing
+credentials merely to make these baseline checks pass.
+
 ## Preparation and compilation
 
 Build the canonical tarballs using `tools/ota/stage.py`, or supply previously

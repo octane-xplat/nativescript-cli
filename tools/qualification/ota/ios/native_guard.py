@@ -159,9 +159,15 @@ finally:
                 child.kill()
                 child.wait()
     sim('terminate', id, app_id, check=False)
-    sim('shutdown', id)
-    record['shutdown'] = True
     if root and (root / 'fixture-error').exists():
         record['fixtureError'] = (root / 'fixture-error').read_text()
-    save()
+    try:
+        if owner.exists():
+            sim('uninstall', id, app_id)
+            owner.unlink()
+            record['ownedAppUninstalled'] = True
+    finally:
+        sim('shutdown', id)
+        record['shutdown'] = True
+        save()
 print(json.dumps(record, indent=2))
