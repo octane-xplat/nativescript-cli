@@ -80,9 +80,10 @@ Repeated preparation is idempotent. No project-root .xplat record is written.
 `ota_fingerprint` remains unsupported as an arbitrary external contribution;
 the built-in adapter alone owns this semantic contract. Fixture pin tests and
 actual package/SDK checks are distinct from real dependency-manager pins, native
-compilation and OTA runtime qualification. G4–G6 remain unqualified. The canonical packages declare iOS/Android 9.1.0,
-while current preparation supports iOS 8.9.0 and Android 9.0.0. Public preparation
-correctly rejects that mismatch; this adapter does not override runtime validation.
+compilation and OTA runtime qualification. G4–G6 remain unqualified. The canonical packages declare iOS/Android 9.1.0;
+preparation supports the qualified 9.1.0 iOS and 9.1.1 Android runtime inputs
+alongside the earlier 8.9.0/9.0.0 templates. Installed runtime minimum validation
+remains enforced; this adapter does not override it.
 
 `tools/ota/qualify-pins.py INSTALLED_CONSUMER GRADLE_EXECUTABLE` runs under a
 `native_builds:1` reservation. It resolves a local Pod, a local source-control
@@ -102,3 +103,10 @@ and `--check` in CI. The embedded bundle includes dependency license notices.
 
 Tests distinguish actual Go/Node host interoperability from fixture native inputs.
 No new native/device qualification or foreign-host execution is implied.
+
+`python3 tools/helper/external-consumer.py` also qualifies all three extension
+execution forms through public preparation in a clean module consumer with only
+Node on PATH. It checks dependency ordering, pins, repeat preparation, generated
+file removal, manifest API rejection, asynchronous failure and cancellation.
+The native templates are fixtures; arbitrary native contributions, post-build
+artifact behavior and foreign-host execution remain separate acceptance work.

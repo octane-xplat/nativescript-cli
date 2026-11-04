@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -394,5 +395,72 @@ func TestNativePackageAndPlatformResolution(t *testing.T) {
 			}
 			_ = lease
 		})
+	}
+}
+
+// Independent callers must retain separate helper, server and bundle ownership.
+// This exercises real Vite and F1/F2 without claiming native HMR/device behavior.
+func TestIndependentWatchersRetainOwnership(t *testing.T) {
+	a, r, p, l := fixture(t)
+	other, r2, p2, l2 := fixture(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	s, ch, err := a.Watch(context.Background(), r, p, l, Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	ready := event(t, ch, "ready")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	s2, ch2, err := other.Watch(context.Background(), r2, p2, l2, Request{Port: port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close(context.Background())
+	ready2 := event(t, ch2, "ready")
+	if ready.Endpoint.URL == ready2.Endpoint.URL {
+		t.Fatal("independent servers share endpoint")
+	}
+	write(t, filepath.Join(r.Config.AppPath, "app.js"), `globalThis.onlyFirstCaller=true;`)
+	event(t, ch, "emitted")
+	write(t, filepath.Join(r2.Config.AppPath, "app.js"), `globalThis.onlySecondCaller=true;`)
+	event(t, ch2, "emitted")
+	first, err := os.ReadFile(filepath.Join(p.BundleDir, "bundle.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(filepath.Join(p2.BundleDir, "bundle.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), "onlyFirstCaller") || strings.Contains(string(first), "onlySecondCaller") || !strings.Contains(string(second), "onlySecondCaller") || strings.Contains(string(second), "onlyFirstCaller") {
+		t.Fatal("crossed independent bundle outputs")
+	}
+	for range 2 {
+		if err := s.Close(context.Background()); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	}
+	resp, err := http.Get(ready2.Endpoint.URL + "/@vite/client")
+	if err != nil {
+		t.Fatal("closing first caller stopped second", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.Status)
+	}
+	write(t, filepath.Join(r2.Config.AppPath, "app.js"), `globalThis.remainingCaller=true;`)
+	event(t, ch2, "emitted")
+	now, err := os.Getwd()
+	if err != nil || now != cwd || !reflect.DeepEqual(env, os.Environ()) {
+		t.Fatal("watchers changed process globals", err)
 	}
 }

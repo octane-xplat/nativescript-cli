@@ -22,7 +22,12 @@ installation or generation step. After changing helper sources or dependencies,
 run `bun install --frozen-lockfile`, `node tools/helper/generate.mjs` and
 `node tools/helper/generate.mjs --check`. Run
 `python3 tools/helper/external-consumer.py` to qualify the module distribution
-with a clean external consumer. See `internal/jsbridge/README.md`. Node is needed
+with clean external consumers. This also runs direct Go, executable Go and
+embedded Node extensions through public preparation from an isolated module zip,
+using labeled iOS runtime templates. Execution has a Node-only PATH after the
+proxy, source module cache and extension consumer source are removed. It checks
+ordering, generated file removal, API rejection, failures and cancellation; it
+does not qualify native extension contributions or device HMR. See `internal/jsbridge/README.md`. Node is needed
 for helper runtime tests; Windows helper execution remains explicitly unavailable.
 
 ## Ownership and integration

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build via a local Go module proxy zip, then execute without source or npm CLI."""
+"""Build via a local Go module proxy zip, then execute helper/extensions without source or npm CLI."""
 import json, os, pathlib, shutil, subprocess, tempfile, zipfile
 root = pathlib.Path(__file__).resolve().parents[2]
 module = 'github.com/octane-xplat/nativescript-cli'
@@ -39,6 +39,20 @@ with tempfile.TemporaryDirectory(prefix='j1-distribution-') as tmp:
     env = dict(os.environ, GOPROXY=(work / 'proxy').as_uri(), GOSUMDB='off', GOMODCACHE=str(work / 'modcache'), GOWORK='off')
     subprocess.run(['go', 'mod', 'tidy'], cwd=consumer, env=env, check=True)
     subprocess.run(['go', 'build', '-o', str(work / 'consumer-bin'), '.'], cwd=consumer, env=env, check=True)
+    extensions = work / 'extensions'
+    extensions.mkdir()
+    (extensions / 'go.mod').write_bytes((consumer / 'go.mod').read_bytes())
+    (extensions / 'main.go').write_bytes((root / 'tools/extensions/consumer/main.go').read_bytes())
+    subprocess.run(['go', 'mod', 'tidy'], cwd=extensions, env=env, check=True)
+    subprocess.run(['go', 'build', '-o', str(work / 'extension-consumer'), '.'], cwd=extensions, env=env, check=True)
+    runtime = work / 'IOS-RUNTIME-FIXTURE'
+    shutil.copytree(root / 'internal/ios/prepare/testdata/runtime', runtime)
+    # Distribution execution has no checkout cwd, compiler, npm or source module cache.
+    for directory, _, _ in os.walk(work / 'modcache'):
+        os.chmod(directory, 0o700)
+    shutil.rmtree(work / 'modcache')
+    shutil.rmtree(work / 'proxy')
+    shutil.rmtree(extensions)
     nodebin = work / 'node-only-path'
     nodebin.mkdir()
     (nodebin / 'node').symlink_to(shutil.which('node'))
@@ -48,3 +62,4 @@ with tempfile.TemporaryDirectory(prefix='j1-distribution-') as tmp:
     fifo = work / 'blocked.pbxproj'
     os.mkfifo(fifo)
     subprocess.run([str(work / 'consumer-bin'), str(consumer / 'fixture.pbxproj'), str(fifo), version[1:]], cwd=work, env=env, check=True)
+    subprocess.run([str(work / 'extension-consumer'), str(runtime)], cwd=work, env=env, check=True)
