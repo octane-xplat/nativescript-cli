@@ -13,10 +13,10 @@ No upstream CLI or generated platform tree is imported.
 The iOS fixture stages its test archives from the host. Its storage adapter uses
 actual Foundation files; it deliberately has no network/installer transport.
 The Android fixture uses real Java state/health files. Neither fixture qualifies
-the public `createUpdates`/`native.mobile` adapter. A normal core-backed SDK
-consumer currently returns unavailable because `@nativescript/core` 9.1.3 declares
-a legacy CLI hook, which needs explicit migration. Native bundling also needs a
-qualified native export/platform-module contract. Do not bypass those responses
+the public `createUpdates`/`native.mobile` adapter. The resolver now migrates only the exact reviewed core 9.1.3 compatibility hook,
+and bundling selects native/platform modules. A normal core-backed SDK baseline
+can be staged with `stage-consumer.py --sdk`; actual native SDK execution and its
+network installer still need separate qualification. Do not bypass those responses
 or edit installed packages to manufacture full SDK acceptance.
 
 ## Preparation and compilation

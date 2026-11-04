@@ -56,3 +56,17 @@ test('unqualified runtime versions fail before template materialization', async 
   assert.equal(fs.existsSync(path.join(dir,version)),false);
  }
 });
+
+test('iOS XCFramework validation ignores unrelated platform slices and retains module maps',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 core '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const framework=path.join(dir,'Probe.xcframework');const slice=path.join(framework,'ios-arm64/Probe.framework');fs.mkdirSync(slice,{recursive:true});
+ const bytes=Buffer.alloc(32);bytes.write('!<arch>\n');fs.writeFileSync(path.join(slice,'Probe'),bytes);
+ const plist=require('plist');fs.writeFileSync(path.join(framework,'Info.plist'),plist.build({AvailableLibraries:[{LibraryIdentifier:'ios-arm64',LibraryPath:'Probe.framework',SupportedPlatform:'ios'},{LibraryIdentifier:'macos',LibraryPath:'Missing.framework',SupportedPlatform:'macos'}]}));
+ const modulemap=path.join(dir,'module.modulemap');fs.writeFileSync(modulemap,'module Probe { export * }');
+ const resolved={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir},{path:modulemap,kind:'configuration',platform:'ios',packageDirectory:dir}]};
+ const output=path.join(dir,'out');await prepare({resolved,directory:output});
+ const flags=fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8');assert.match(flags,/OTHER_CFLAGS.*-fmodule-map-file=/);assert.match(flags,/OTHER_SWIFT_FLAGS.*-Xcc/);
+ resolved.contributions=[];await prepare({resolved,directory:output});assert.doesNotMatch(fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8'),/-fmodule-map-file/);
+ resolved.contributions=[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}];fs.unlinkSync(path.join(slice,'Probe'));
+ await assert.rejects(prepare({resolved,directory:path.join(dir,'invalid')}),e=>e.code==='unavailable');
+});

@@ -60,3 +60,10 @@ The numeric plugin minimum is compared with the installed supported runtime;
 9.1 requirements remain unavailable on 8.9.0. Exact versions outside the matrix
 remain unavailable. The app must set a deployment target supported by its Xcode
 SDK (the current iOS27 host requires at least 15.0 via build.xcconfig).
+
+Contributed module maps admitted by resolution feed Clang and Swift compiler
+flags and are recorded in metadata inputs; regeneration/removal updates both
+configuration files. XCFramework validation considers iOS device/simulator slices,
+including consistent static/dynamic linkage. Unrelated Catalyst/visionOS/macOS
+slices do not determine an iOS application's embedding policy. Missing or unknown
+selected iOS binaries remain unavailable.

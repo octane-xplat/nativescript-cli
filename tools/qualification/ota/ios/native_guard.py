@@ -10,6 +10,8 @@ p.add_argument('artifact', type=pathlib.Path)
 p.add_argument('consumer', type=pathlib.Path)
 p.add_argument('device')
 p.add_argument('evidence', type=pathlib.Path)
+p.add_argument('--sdk-baseline',action='store_true',help='public SDK/core release startup only; no staged payload lifecycle')
+p.add_argument('--installation-owner',type=pathlib.Path,help='existing task-owned installation marker')
 a = p.parse_args()
 a.app = a.app.resolve()
 a.artifact = a.artifact.resolve()
@@ -28,11 +30,13 @@ devices = json.loads(sim('list', 'devices', 'available', '--json').stdout)
 selected = [d for ds in devices['devices'].values() for d in ds if d['udid'] == id]
 if len(selected) != 1 or selected[0]['state'] != 'Shutdown':
     raise RuntimeError('exact shutdown simulator required')
-owner = a.evidence / 'installation-owned'
+owner = a.installation_owner or a.evidence / 'installation-owned'
 old = sim('get_app_container', id, app_id, 'data', check=False)
 if old.returncode == 0 and (not owner.exists()):
     raise RuntimeError('refusing existing unowned installation')
 record = {'boundary': 'real canonical native guard + canonical state methods with native storage; host staging; no public core SDK or installer/network claim', 'device': id, 'artifact': artifact, 'phases': []}
+if a.sdk_baseline:
+    record['boundary']='public createUpdates/core9.1.3 release baseline with native storage; no network installer or staged payload claim'
 root = None
 documents = None
 child = None
@@ -118,25 +122,31 @@ def stage(version, marker, incompatible=False, broken=False):
 try:
     sim('boot', id)
     sim('bootstatus', id, '-b')
-    launch('embedded-offline', 'P91_EMBEDDED')
-    assert (root / 'mode.txt').read_text() == 'release'
-    assert (root / 'fingerprint.txt').read_text() == json.loads((bundle / 'xplat-native.json').read_text())['hash']
-    good = stage('2.0.0', 'P91_V2')
-    launch('activate-confirm-v2', 'P91_V2')
-    assert not (root / 'pending.txt').exists() and json.loads((root / 'current.json').read_text())['sha256'] == good
-    (documents / 'p91-health.json').unlink()
-    bad = stage('3.0.0', 'P91_BAD', broken=True)
-    launch('unconfirmed-failure', crash=True)
-    launch('native-recovery-v2', 'P91_V2')
-    assert (root / 'rejected.txt').read_text() == bad
-    mismatch = stage('4.0.0', 'P91_CHANGED', incompatible=True)
-    launch('changed-native-rejected', 'P91_V2')
-    assert (root / 'rejected.txt').read_text() == mismatch and (not (root / 'executed-incompatible').exists())
-    (documents / 'p91-rollback').write_text('1')
-    launch('rollback-request', 'P91_V2')
-    assert (root / 'rollback.txt').exists()
-    launch('embedded-restored-offline', 'P91_EMBEDDED')
-    assert not (root / 'current.json').exists()
+    if a.sdk_baseline:
+        launch('public-sdk-release-baseline','P91_PUBLIC_SDK')
+        status=json.loads((root/'sdk-status').read_text())
+        assert status['supported'] is True and status['status']['currentVersion']=='1.0.0' and not status['status']['needsConfirmation']
+        record['publicSDK']=status
+    else:
+        launch('embedded-offline', 'P91_EMBEDDED')
+        assert (root / 'mode.txt').read_text() == 'release'
+        assert (root / 'fingerprint.txt').read_text() == json.loads((bundle / 'xplat-native.json').read_text())['hash']
+        good = stage('2.0.0', 'P91_V2')
+        launch('activate-confirm-v2', 'P91_V2')
+        assert not (root / 'pending.txt').exists() and json.loads((root / 'current.json').read_text())['sha256'] == good
+        (documents / 'p91-health.json').unlink()
+        bad = stage('3.0.0', 'P91_BAD', broken=True)
+        launch('unconfirmed-failure', crash=True)
+        launch('native-recovery-v2', 'P91_V2')
+        assert (root / 'rejected.txt').read_text() == bad
+        mismatch = stage('4.0.0', 'P91_CHANGED', incompatible=True)
+        launch('changed-native-rejected', 'P91_V2')
+        assert (root / 'rejected.txt').read_text() == mismatch and (not (root / 'executed-incompatible').exists())
+        (documents / 'p91-rollback').write_text('1')
+        launch('rollback-request', 'P91_V2')
+        assert (root / 'rollback.txt').exists()
+        launch('embedded-restored-offline', 'P91_EMBEDDED')
+        assert not (root / 'current.json').exists()
     record['passed'] = True
 finally:
     if child:

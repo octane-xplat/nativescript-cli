@@ -13,7 +13,7 @@ function dynamicFramework(file) {
   if (file.endsWith('.a')) return false;
   if (file.endsWith('.xcframework')) {
     let info; try { info=plist.parse(fs.readFileSync(path.join(file,'Info.plist'),'utf8')); } catch { fail('unavailable'); }
-    const kinds=(info.AvailableLibraries || []).map(lib=>dynamicFramework(path.join(file,lib.LibraryIdentifier,lib.LibraryPath)));
+    const kinds=(info.AvailableLibraries || []).filter(lib=>lib.SupportedPlatform==='ios' && [undefined,'simulator'].includes(lib.SupportedPlatformVariant)).map(lib=>dynamicFramework(path.join(file,lib.LibraryIdentifier,lib.LibraryPath)));
     if (!kinds.length || kinds.some(k=>k!==kinds[0])) fail('unavailable');
     return kinds[0];
   }
@@ -111,7 +111,7 @@ module.exports = async ({ resolved, directory }) => {
   }
   const embedID = put('PBXCopyFilesBuildPhase','embed',{buildActionMask:2147483647,dstPath:q(''),dstSubfolderSpec:10,name:q('Embed contributed frameworks'),files:[],runOnlyForDeploymentPostprocessing:0});
   target.buildPhases.push({value:embedID,comment:'P1'});
-  const headers=[], configs=[], pods=[], packages=[];
+  const headers=[], configs=[], pods=[], packages=[], modulemaps=[];
   let info = {CFBundleIdentifier:'$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleExecutable:'$(EXECUTABLE_NAME)', CFBundleName:name, CFBundlePackageType:'APPL', CFBundleVersion:'1', CFBundleShortVersionString:'1.0', LSRequiresIPhoneOS:true};
   let entitlements = plist.parse(fs.readFileSync(path.join(template,'__PROJECT_NAME__/__PROJECT_NAME__.entitlements'),'utf8'));
   const contributions = resolved.contributions.filter(c=>c.platform==='ios').sort((a,b)=>(a.packageDirectory===resolved.directory)-(b.packageDirectory===resolved.directory) || a.path.localeCompare(b.path));
@@ -135,6 +135,7 @@ module.exports = async ({ resolved, directory }) => {
       packages.push(c.path); continue;
     }
     if (c.kind === 'configuration') {
+      if(ext==='.modulemap') {modulemaps.push(c.path);continue;}
       if (ext === '.xcconfig') configs.push(c.path);
       else {
         let data; try { data=plist.parse(fs.readFileSync(c.path,'utf8')); } catch { fail('unavailable'); }
@@ -169,10 +170,10 @@ module.exports = async ({ resolved, directory }) => {
   write(path.join(directory,name,`${name}.entitlements`),plist.build(entitlements));
   write(path.join(directory,'internal/Swift-ObjC-Bridging-Header.h'), '#import <NativeScript/NativeScript.h>\n#import "NativeScriptStart.h"\n'+headers.map(p=>`#import ${q(p)}\n`).join(''));
   write(path.join(directory,'internal/NativeContributions/module.modulemap'), 'module NativeContributions {\n'+headers.map(p=>`  header ${q(p)}\n`).join('')+'  export *\n}\n');
-  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+configs.map(p=>`#include ${q(p)}\n`).join(''));
+  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+(modulemaps.length?`OTHER_CFLAGS = $(inherited) ${modulemaps.map(p=>'-fmodule-map-file='+q(p)).join(' ')}\nOTHER_SWIFT_FLAGS = $(inherited) ${modulemaps.map(p=>'-Xcc -fmodule-map-file='+q(p)).join(' ')}\n`:'')+configs.map(p=>`#include ${q(p)}\n`).join(''));
   const ruby = value => `'${value.replaceAll('\\','\\\\').replaceAll("'","\\'")}'`;
   if(pods.length || previous.pods) write(path.join(directory,'Podfile'), `platform :ios, '13.0'\nproject '${name}.xcodeproj'\ntarget '${name}' do\n`+pods.map(p=>path.extname(p)==='.podspec'?`  pod ${ruby(path.basename(p,'.podspec'))}, :path => ${ruby(path.dirname(p))}\n`:`  instance_eval(File.read(${ruby(p)}), ${ruby(p)})\n`).join('')+'end\n');
-  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages},null,2)+'\n');
+  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages},null,2)+'\n');
   write(projectFile,project.writeSync());
   write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || !!previous.spm})+'\n');
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});

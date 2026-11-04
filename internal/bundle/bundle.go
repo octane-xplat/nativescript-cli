@@ -35,6 +35,9 @@ type Event struct {
 	Endpoint Endpoint `json:"endpoint"`
 }
 type Request struct {
+	Platform       string                 `json:"platform,omitempty"`
+	AppPath        string                 `json:"appPath,omitempty"`
+	Configuration  string                 `json:"configuration,omitempty"`
 	Android        *project.AndroidConfig `json:"android,omitempty"`
 	ApplicationID  string                 `json:"applicationID,omitempty"`
 	ProjectDir     string                 `json:"projectDir"`
@@ -131,7 +134,7 @@ func request(r project.Resolved, p project.Prepared, lease workspace.Lease) (Req
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return Request{}, workflow.ErrInvalid
 	}
-	q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle"}
+	q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle", Platform: p.Identity.Target.Platform, AppPath: r.Config.AppPath, Configuration: p.Identity.Target.Configuration}
 	if p.Identity.Target.Platform == "android" {
 		config, err := project.AndroidSettings(r)
 		if err != nil {

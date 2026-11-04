@@ -12,11 +12,23 @@ module.exports = async function bundle(p, emit) {
   try { vite = await import(pathToFileURL(req.resolve('vite')).href); } catch { throw fail('unavailable'); }
   // Qualified API range. New major versions require explicit adapter qualification.
   if (!/^7\./.test(vite.version)) throw fail('unavailable');
+  if(p.platform && (!['ios','android'].includes(p.platform)||!path.isAbsolute(p.appPath||'')||!['debug','release'].includes(p.configuration))) throw fail('invalid_input');
+  const runtimePackage={main:'bundle.js',...(p.android?{id:p.applicationID,android:p.android}:{})};
   let server, watcher;
   let latest;
   let failWatch;
   const manifest = {
     name: 'xplat-emitted-manifest',
+    enforce: 'pre',
+    resolveId(source) {
+      if(p.appPath && [path.join(p.appPath,'package.json'),'~/package.json'].includes(source)) return '\0xplat-app-package';
+    },
+    load(id) {
+      if(id!=='\0xplat-app-package') return;
+      const file=path.join(p.appPath,'package.json');
+      const pkg={...(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{}),...runtimePackage};
+      return `export default ${JSON.stringify(pkg)};`;
+    },
     buildStart() {
       for (const name of ['package.json', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.ts']) {
         const file = path.join(p.projectDir, name); if (fs.existsSync(file)) this.addWatchFile(file);
@@ -28,7 +40,7 @@ module.exports = async function bundle(p, emit) {
       if (/nativescript\.config\.|package\.json$/.test(file)) failWatch?.(fail('restart_required'));
     },
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'package.json', source: JSON.stringify({ main: 'bundle.js', ...(p.android ? { id: p.applicationID, android: p.android } : {}) }) });
+      this.emitFile({ type: 'asset', fileName: 'package.json', source: JSON.stringify(runtimePackage) });
     },
     writeBundle(options, output) {
       const files = Object.keys(output).sort().map(name => path.join(p.directory, name));
@@ -40,6 +52,10 @@ module.exports = async function bundle(p, emit) {
   };
   const config = {
     root: p.projectDir, configFile: false, logLevel: 'silent', mode: p.mode === 'watch' ? 'development' : 'production',
+    ...(p.platform ? {
+      resolve: { conditions: ['native', p.platform], extensions: [`.${p.platform}.ts`, `.${p.platform}.js`, '.ts', '.tsx', '.js', '.jsx', '.mjs', '.json'], alias: { '~': p.appPath } },
+      define: { 'global.isIOS': String(p.platform==='ios'), 'global.isAndroid': String(p.platform==='android'), '__IOS__': String(p.platform==='ios'), '__ANDROID__': String(p.platform==='android'), '__DEV__': String(p.configuration==='debug') },
+    } : {}),
     plugins: [manifest],
     build: { outDir: p.directory, emptyOutDir: false, minify: false,
       lib: { entry: p.entry, formats: ['iife'], name: 'NativeScriptApp', fileName: () => 'bundle.js' },
@@ -50,6 +66,7 @@ module.exports = async function bundle(p, emit) {
   try {
     if (!p.callerEndpoint) {
       server = await vite.createServer({ root: p.projectDir, configFile: false, logLevel: 'silent',
+        resolve:config.resolve, define:config.define, plugins:[manifest],
         server: { host: '127.0.0.1', port: p.port || 0, strictPort: true, open: false,
           hmr: { host: p.hmrHost || '127.0.0.1', clientPort: p.hmrPort || undefined, path: '/__xplat_hmr' } } });
       try { await server.listen(); } catch (error) { if (/^Port \d+ is already in use$/.test(error.message || '')) throw fail('EADDRINUSE'); throw error; }

@@ -6,6 +6,7 @@ p.add_argument('platform', choices=['ios', 'android'])
 p.add_argument('updates', type=pathlib.Path)
 p.add_argument('fingerprint', type=pathlib.Path)
 p.add_argument('output', type=pathlib.Path)
+p.add_argument('--sdk', action='store_true', help='use public SDK/core 9.1.3 baseline instead of the private guard state fixture')
 a = p.parse_args()
 dest = a.output.resolve()
 if dest.exists():
@@ -13,6 +14,9 @@ if dest.exists():
 source = pathlib.Path(__file__).resolve().parent / a.platform / 'app'
 shutil.copytree(source, dest)
 manifest = {'name': 'p91-' + a.platform + '-guard', 'version': '1.0.0', 'private': True, 'dependencies': {'@octane-xplat/updates': 'file:' + str(a.updates.resolve()), '@octane-xplat/fingerprint': 'file:' + str(a.fingerprint.resolve()), 'p91-native-' + ('health' if a.platform == 'ios' else 'android-health'): 'file:./native-plugin'}, 'devDependencies': {'@nativescript/' + a.platform: '9.1.0' if a.platform == 'ios' else '9.1.1', 'vite': '7.3.1'}}
+if a.sdk:
+    manifest['dependencies']['@nativescript/core']='9.1.3'
+    shutil.copy2(pathlib.Path(__file__).resolve().parent/'sdk'/(a.platform+'.js'),dest/'app/app.js')
 (dest / 'package.json').write_text(json.dumps(manifest, indent=2) + '\n')
 if a.platform == 'android':
     nonce = str(uuid.uuid4())

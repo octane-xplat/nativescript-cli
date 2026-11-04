@@ -53,3 +53,13 @@ preparer/compiler are explicitly component fixtures, with no native build or
 reused platform tree. Tests execute the emitted JavaScript in Node, request the
 real HMR client, check source/bootstrap rebuilds, cold readiness, port contention,
 server crash, config restart, cancellation and preservation of a borrowed server.
+
+Native requests carry the target platform, build configuration and authored app
+path. Vite selects the `native`/platform export conditions, resolves extensionless
+platform-specific `.ios`/`.android` modules before generic modules, and defines
+NativeScript's platform/development flags. `~/` resolves within the selected app
+path. `~/package.json` uses the authored app package when present and otherwise a
+virtual runtime entry manifest, so importing core does not require an extra
+source manifest. No installed package files are edited or upstream CLI spawned.
+The existing emitted `bundle.js` contract remains unchanged; downloaded canonical
+OTA archives have their own entry/package contract.

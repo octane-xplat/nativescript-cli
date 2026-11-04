@@ -17607,7 +17607,7 @@ var require_xcode2 = __commonJS({
         } catch {
           fail("unavailable");
         }
-        const kinds = (info.AvailableLibraries || []).map((lib) => dynamicFramework(path2.join(file, lib.LibraryIdentifier, lib.LibraryPath)));
+        const kinds = (info.AvailableLibraries || []).filter((lib) => lib.SupportedPlatform === "ios" && [void 0, "simulator"].includes(lib.SupportedPlatformVariant)).map((lib) => dynamicFramework(path2.join(file, lib.LibraryIdentifier, lib.LibraryPath)));
         if (!kinds.length || kinds.some((k) => k !== kinds[0])) fail("unavailable");
         return kinds[0];
       }
@@ -17718,7 +17718,7 @@ var require_xcode2 = __commonJS({
       }
       const embedID = put("PBXCopyFilesBuildPhase", "embed", { buildActionMask: 2147483647, dstPath: q(""), dstSubfolderSpec: 10, name: q("Embed contributed frameworks"), files: [], runOnlyForDeploymentPostprocessing: 0 });
       target.buildPhases.push({ value: embedID, comment: "P1" });
-      const headers = [], configs = [], pods = [], packages = [];
+      const headers = [], configs = [], pods = [], packages = [], modulemaps = [];
       let info = { CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable: "$(EXECUTABLE_NAME)", CFBundleName: name, CFBundlePackageType: "APPL", CFBundleVersion: "1", CFBundleShortVersionString: "1.0", LSRequiresIPhoneOS: true };
       let entitlements = plist.parse(fs2.readFileSync(path2.join(template, "__PROJECT_NAME__/__PROJECT_NAME__.entitlements"), "utf8"));
       const contributions = resolved.contributions.filter((c) => c.platform === "ios").sort((a, b) => (a.packageDirectory === resolved.directory) - (b.packageDirectory === resolved.directory) || a.path.localeCompare(b.path));
@@ -17749,6 +17749,10 @@ var require_xcode2 = __commonJS({
           continue;
         }
         if (c.kind === "configuration") {
+          if (ext === ".modulemap") {
+            modulemaps.push(c.path);
+            continue;
+          }
           if (ext === ".xcconfig") configs.push(c.path);
           else {
             let data;
@@ -17800,7 +17804,9 @@ var require_xcode2 = __commonJS({
       write(path2.join(directory, "internal/NativeContributions/module.modulemap"), "module NativeContributions {\n" + headers.map((p) => `  header ${q(p)}
 `).join("") + "  export *\n}\n");
       for (const mode of ["debug", "release"]) write(path2.join(directory, `plugins-${mode}.xcconfig`), `#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"
-` + configs.map((p) => `#include ${q(p)}
+` + (modulemaps.length ? `OTHER_CFLAGS = $(inherited) ${modulemaps.map((p) => "-fmodule-map-file=" + q(p)).join(" ")}
+OTHER_SWIFT_FLAGS = $(inherited) ${modulemaps.map((p) => "-Xcc -fmodule-map-file=" + q(p)).join(" ")}
+` : "") + configs.map((p) => `#include ${q(p)}
 `).join(""));
       const ruby = (value) => `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
       if (pods.length || previous.pods) write(path2.join(directory, "Podfile"), `platform :ios, '13.0'
@@ -17809,7 +17815,7 @@ target '${name}' do
 ` + pods.map((p) => path2.extname(p) === ".podspec" ? `  pod ${ruby(path2.basename(p, ".podspec"))}, :path => ${ruby(path2.dirname(p))}
 ` : `  instance_eval(File.read(${ruby(p)}), ${ruby(p)})
 `).join("") + "end\n");
-      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages }, null, 2) + "\n");
+      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages }, null, 2) + "\n");
       write(projectFile, project.writeSync());
       write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || !!previous.spm }) + "\n");
       fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
@@ -17840,11 +17846,23 @@ var require_vite = __commonJS({
         throw fail("unavailable");
       }
       if (!/^7\./.test(vite.version)) throw fail("unavailable");
+      if (p.platform && (!["ios", "android"].includes(p.platform) || !path2.isAbsolute(p.appPath || "") || !["debug", "release"].includes(p.configuration))) throw fail("invalid_input");
+      const runtimePackage = { main: "bundle.js", ...p.android ? { id: p.applicationID, android: p.android } : {} };
       let server, watcher;
       let latest;
       let failWatch;
       const manifest = {
         name: "xplat-emitted-manifest",
+        enforce: "pre",
+        resolveId(source) {
+          if (p.appPath && [path2.join(p.appPath, "package.json"), "~/package.json"].includes(source)) return "\0xplat-app-package";
+        },
+        load(id) {
+          if (id !== "\0xplat-app-package") return;
+          const file = path2.join(p.appPath, "package.json");
+          const pkg = { ...fs2.existsSync(file) ? JSON.parse(fs2.readFileSync(file, "utf8")) : {}, ...runtimePackage };
+          return `export default ${JSON.stringify(pkg)};`;
+        },
         buildStart() {
           for (const name of ["package.json", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.ts"]) {
             const file = path2.join(p.projectDir, name);
@@ -17857,7 +17875,7 @@ var require_vite = __commonJS({
           if (/nativescript\.config\.|package\.json$/.test(file)) failWatch?.(fail("restart_required"));
         },
         generateBundle() {
-          this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify({ main: "bundle.js", ...p.android ? { id: p.applicationID, android: p.android } : {} }) });
+          this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify(runtimePackage) });
         },
         writeBundle(options, output) {
           const files = Object.keys(output).sort().map((name) => path2.join(p.directory, name));
@@ -17872,6 +17890,10 @@ var require_vite = __commonJS({
         configFile: false,
         logLevel: "silent",
         mode: p.mode === "watch" ? "development" : "production",
+        ...p.platform ? {
+          resolve: { conditions: ["native", p.platform], extensions: [`.${p.platform}.ts`, `.${p.platform}.js`, ".ts", ".tsx", ".js", ".jsx", ".mjs", ".json"], alias: { "~": p.appPath } },
+          define: { "global.isIOS": String(p.platform === "ios"), "global.isAndroid": String(p.platform === "android"), "__IOS__": String(p.platform === "ios"), "__ANDROID__": String(p.platform === "android"), "__DEV__": String(p.configuration === "debug") }
+        } : {},
         plugins: [manifest],
         build: {
           outDir: p.directory,
@@ -17891,6 +17913,9 @@ var require_vite = __commonJS({
             root: p.projectDir,
             configFile: false,
             logLevel: "silent",
+            resolve: config.resolve,
+            define: config.define,
+            plugins: [manifest],
             server: {
               host: "127.0.0.1",
               port: p.port || 0,
@@ -17937,6 +17962,29 @@ var require_vite = __commonJS({
   }
 });
 
+// bridge/resolve/core.cjs
+var require_core = __commonJS({
+  "bridge/resolve/core.cjs"(exports2) {
+    "use strict";
+    var crypto = require("node:crypto");
+    var path2 = require("node:path");
+    exports2.supported = (pkg, dir, read) => {
+      if (pkg.name !== "@nativescript/core" || pkg.version !== "9.1.3") return false;
+      const hooks = pkg.nativescript?.hooks;
+      const h = Array.isArray(hooks) && hooks.length === 1 && hooks[0];
+      if (!h || Object.keys(h).sort().join(",") !== "inject,name,script,type" || h.name !== "nativescript-core" || h.type !== "before-checkForChanges" || h.script !== "cli-hooks/before-checkForChanges.mjs" || h.inject !== true) return false;
+      let source;
+      try {
+        source = read(path2.join(dir, h.script));
+      } catch {
+        return false;
+      }
+      return crypto.createHash("sha256").update(source).digest("hex") === "97baeb497a77db8909e7fd39f58dd5f3390516aadf9cb85bd30db58009c7bdd7";
+    };
+    exports2.inventory = (relative) => relative === "platforms/ios/native-api-usage.json" || relative === "platforms/android/native-api-usage.json" || relative.startsWith("platforms/ios/typings/") && relative.endsWith(".d.ts");
+  }
+});
+
 // bridge/resolve/index.cjs
 var require_resolve = __commonJS({
   "bridge/resolve/index.cjs"(exports2, module2) {
@@ -17945,6 +17993,7 @@ var require_resolve = __commonJS({
     var path2 = require("node:path");
     var crypto = require("node:crypto");
     var { stripTypeScriptTypes } = require("node:module");
+    var coreAdapter = require_core();
     var { pathToFileURL } = require("node:url");
     var configNames = ["nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"];
     var safeFailures = /* @__PURE__ */ new WeakSet();
@@ -18015,7 +18064,7 @@ var require_resolve = __commonJS({
         if (!fs2.existsSync(resolved) || !fs2.statSync(resolved).isDirectory()) fail("invalid_input", "Configured app/resources directory does not exist; create it or correct its config path");
         return fs2.realpathSync(resolved);
       }
-      function collect(dir, owner, cfg2, resources) {
+      function collect(dir, owner, cfg2, resources, core = false) {
         keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android"], "config");
         if (cfg2.ios !== void 0) keys(cfg2.ios, [], "iOS config");
         if (cfg2.android !== void 0) keys(cfg2.android, ["v8Flags", "markingMode"], "Android config");
@@ -18044,6 +18093,10 @@ var require_resolve = __commonJS({
           for (const entry of fs2.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
             const file = path2.join(folder, entry.name);
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
+            if (core && coreAdapter.inventory(path2.relative(dir, file).split(path2.sep).join("/"))) {
+              read(file);
+              continue;
+            }
             if (entry.isDirectory() && !/\.(framework|xcframework|xcassets|bundle)$/.test(entry.name)) {
               walk(file, platform);
               continue;
@@ -18051,7 +18104,8 @@ var require_resolve = __commonJS({
             let kind;
             const ext = path2.extname(entry.name).toLowerCase();
             if (platform === "ios") {
-              if (entry.name === "Podfile" || ext === ".podspec") kind = "pods";
+              if (core && path2.relative(dir, file).split(path2.sep).join("/") === "platforms/ios/src/module.modulemap") kind = "configuration";
+              else if (entry.name === "Podfile" || ext === ".podspec") kind = "pods";
               else if (entry.name === "Package.swift") kind = "spm";
               else if ([".swift", ".m", ".mm", ".h", ".c", ".cpp"].includes(ext)) kind = "source";
               else if ([".framework", ".xcframework", ".a"].includes(ext)) kind = "framework";
@@ -18113,14 +18167,16 @@ var require_resolve = __commonJS({
         const item = { name: pkg.name, version: pkg.version, directory: dir, native };
         packages.set(dir, item);
         if (!isRoot && native) {
-          keys(pkg.nativescript, ["platforms"], "package nativescript metadata");
+          const core = pkg.name === "@nativescript/core";
+          if (core && !coreAdapter.supported(pkg, dir, read)) fail("unavailable", "NativeScript core requires the reviewed 9.1.3 compatibility-hook contract");
+          keys(pkg.nativescript, core ? ["platforms", "hooks"] : ["platforms"], "package nativescript metadata");
           if (pkg.nativescript.platforms) {
             keys(pkg.nativescript.platforms, ["ios", "android"], "package platforms");
             for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== "string") fail("invalid_input", "Native platform versions must be strings");
           }
           const pluginConfig = await config(dir, false);
           for (const key2 of ["id", "appPath", "appResourcesPath"]) if (pluginConfig[key2] !== void 0) fail("unavailable", "App-only fields in plugin config are unsupported; move them to the application config");
-          collect(dir, dir, pluginConfig);
+          collect(dir, dir, pluginConfig, void 0, core);
           item.android = pluginConfig.android ?? {};
           item.iosRequirement = pkg.nativescript.platforms?.ios ?? "";
           item.androidRequirement = pkg.nativescript.platforms?.android ?? "";

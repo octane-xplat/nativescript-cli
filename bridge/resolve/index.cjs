@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { stripTypeScriptTypes } = require('node:module');
+const coreAdapter=require('./core.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
 const safeFailures = new WeakSet();
@@ -68,7 +69,7 @@ async function resolve({ projectDir }) {
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) fail('invalid_input', 'Configured app/resources directory does not exist; create it or correct its config path');
     return fs.realpathSync(resolved);
   }
-  function collect(dir, owner, cfg, resources) {
+  function collect(dir, owner, cfg, resources, core=false) {
     keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android'], 'config');
     if (cfg.ios !== undefined) keys(cfg.ios, [], 'iOS config');
     if (cfg.android !== undefined) keys(cfg.android, ['v8Flags', 'markingMode'], 'Android config');
@@ -91,11 +92,13 @@ async function resolve({ projectDir }) {
       for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name, 'en'))) {
         const file = path.join(folder, entry.name);
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
+        if(core && coreAdapter.inventory(path.relative(dir,file).split(path.sep).join('/'))) { read(file); continue; }
         if (entry.isDirectory() && !/\.(framework|xcframework|xcassets|bundle)$/.test(entry.name)) { walk(file, platform); continue; }
         let kind;
         const ext = path.extname(entry.name).toLowerCase();
         if (platform === 'ios') {
-          if (entry.name === 'Podfile' || ext === '.podspec') kind = 'pods';
+          if(core && path.relative(dir,file).split(path.sep).join('/')==='platforms/ios/src/module.modulemap') kind='configuration';
+          else if (entry.name === 'Podfile' || ext === '.podspec') kind = 'pods';
           else if (entry.name === 'Package.swift') kind = 'spm';
           else if (['.swift', '.m', '.mm', '.h', '.c', '.cpp'].includes(ext)) kind = 'source';
           else if (['.framework', '.xcframework', '.a'].includes(ext)) kind = 'framework';
@@ -147,14 +150,16 @@ async function resolve({ projectDir }) {
     const item = { name: pkg.name, version: pkg.version, directory: dir, native };
     packages.set(dir, item);
     if (!isRoot && native) {
-      keys(pkg.nativescript, ['platforms'], 'package nativescript metadata');
+      const core=pkg.name==='@nativescript/core';
+      if(core&&!coreAdapter.supported(pkg,dir,read)) fail('unavailable','NativeScript core requires the reviewed 9.1.3 compatibility-hook contract');
+      keys(pkg.nativescript, core?['platforms','hooks']:['platforms'], 'package nativescript metadata');
       if (pkg.nativescript.platforms) {
         keys(pkg.nativescript.platforms, ['ios','android'], 'package platforms');
         for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== 'string') fail('invalid_input','Native platform versions must be strings');
       }
       const pluginConfig = await config(dir, false);
       for (const key of ['id', 'appPath', 'appResourcesPath']) if (pluginConfig[key] !== undefined) fail('unavailable', 'App-only fields in plugin config are unsupported; move them to the application config');
-      collect(dir, dir, pluginConfig);
+      collect(dir, dir, pluginConfig, undefined, core);
       item.android = pluginConfig.android ?? {};
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';
       item.androidRequirement = pkg.nativescript.platforms?.android ?? '';

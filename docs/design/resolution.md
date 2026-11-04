@@ -60,3 +60,22 @@ config, environment config, TypeScript, peer/optional lookup, source changes,
 plugin removal, failure redaction and cancellation. Native library files in tests
 are component fixtures. These tests do not qualify native preparation, compilation,
 Pods/SPM execution, device behavior, or external build extensions.
+
+## Pinned core compatibility migration
+
+The published `@nativescript/core` 9.1.3 package has one explicitly migrated hook:
+`nativescript-core` / `before-checkForChanges` / injected
+`cli-hooks/before-checkForChanges.mjs`. The exact descriptor and reviewed script
+SHA-256 must match. The hook is read/fingerprinted but never executed: it only
+checks upstream CLI/Angular-webpack versions, while this backend owns its exact
+runtime matrix and Vite contract. Other core versions, altered scripts/descriptors
+and arbitrary package hooks remain unavailable. This is not legacy-hook execution
+support or Angular/webpack interoperability.
+
+For this pinned core package, native API-use inventories and iOS declaration
+files are hashed inputs rather than runtime resources. Metadata generation remains
+complete; inventory-driven pruning is not implemented. The core module map is a
+configuration input passed to Clang and Swift by iOS preparation. Native source,
+framework and Android AAR/resource ownership otherwise uses the normal contracts.
+Resolution and bundle evidence do not by themselves qualify native compilation or
+the public SDK installer on devices.

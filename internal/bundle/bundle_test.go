@@ -343,3 +343,56 @@ func TestAndroidBundleRetainsRuntimeSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestNativePackageAndPlatformResolution(t *testing.T) {
+	for _, platform := range []string{"ios", "android"} {
+		t.Run(platform, func(t *testing.T) {
+			a, r, p, lease := fixture(t)
+			modules := filepath.Join(r.Directory, "node_modules")
+			vite, e := filepath.EvalSymlinks(filepath.Join(modules, "vite"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e = os.Remove(modules); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.MkdirAll(filepath.Join(modules, "native-package"), 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.Symlink(vite, filepath.Join(modules, "vite")); e != nil {
+				t.Fatal(e)
+			}
+			write(t, filepath.Join(modules, "native-package/package.json"), `{"name":"native-package","exports":{".":{"native":"./native.js","default":"./web.js"}}}`)
+			write(t, filepath.Join(modules, "native-package/native.js"), `export const target="native-selected";`)
+			write(t, filepath.Join(modules, "native-package/web.js"), `throw new Error("web branch selected");`)
+			for _, osname := range []string{"ios", "android"} {
+				write(t, filepath.Join(r.Config.AppPath, "choice."+osname+".js"), `export const platform="`+osname+`-selected";`)
+			}
+			write(t, filepath.Join(r.Config.AppPath, "app.js"), `import {target} from 'native-package';import {platform} from './choice';import pkg from '~/package.json';globalThis.nativeResult=[target,platform,pkg.main,global.isIOS,global.isAndroid,__DEV__];`)
+			if platform == "android" {
+				write(t, filepath.Join(r.Config.AppPath, "package.json"), `{"main":"app.js","profiling":"fixture"}`)
+			}
+			q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: filepath.Join(r.Config.AppPath, "app.js"), Mode: "bundle", Platform: platform, AppPath: r.Config.AppPath, Configuration: "release"}
+			m, e := a.call(context.Background(), q, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			data, e := os.ReadFile(m.Entry)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if !strings.Contains(string(data), "native-selected") || !strings.Contains(string(data), platform+"-selected") || strings.Contains(string(data), "web branch selected") {
+				t.Fatal(string(data))
+			}
+			out, e := exec.Command("node", "-e", string(data)+`;console.log(JSON.stringify(globalThis.nativeResult));`).CombinedOutput()
+			if e != nil {
+				t.Fatal(e, string(out))
+			}
+			expected := `["native-selected","` + platform + `-selected","bundle.js",` + map[bool]string{true: "true,false", false: "false,true"}[platform == "ios"] + `,false]`
+			if strings.TrimSpace(string(out)) != expected {
+				t.Fatalf("%s != %s", out, expected)
+			}
+			_ = lease
+		})
+	}
+}
