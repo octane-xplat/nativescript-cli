@@ -100,5 +100,26 @@ device evidence. No origin is provisioned or authorized by this tool. Offline
 contract checks run with:
 
 ```sh
-python3 -m unittest discover -s tools/qualification/ota -p preflight_test.py
+python3 -B -m unittest discover -s tools/qualification/ota -p '*_test.py'
 ```
+
+An already running, trusted Portless HTTPS proxy can front the maintained local
+fixture backend. Confirm that proxy with `portless doctor` first; configuring a
+new proxy, CA, system hosts entries or guest trust is a separate explicit action.
+With a caller-owned root containing `manifest.json` and immutable
+`bundles/<sha256>` files:
+
+```sh
+PORTLESS_SYNC_HOSTS=0 portless ns-ota-qualification python3 -B tools/qualification/ota/serve.py /absolute/fixture-root
+```
+
+The backend binds loopback only, takes the HTTPS origin and assigned port from
+Portless, exposes no upload API and performs no trust/proxy configuration. It
+serves canonical available, up-to-date and native-incompatible responses; manifests
+use `no-store`, while archives use immutable caching and fail if bytes disagree
+with their hash path. Replace the manifest atomically when advancing a scenario.
+The port is part of the HTTPS origin when the proxy uses a nonstandard port.
+
+Host CA trust and host name resolution do not establish guest trust/reachability.
+Probe those separately before a native installer run; never bypass certificate
+validation or treat an internal loopback backend as the external OTA origin.

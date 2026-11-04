@@ -42,4 +42,4 @@ jobs:
         run: python3 tools/packaging/qualify.py
       - name: OTA host preflight contracts (offline fixtures)
         if: runner.os != 'Windows'
-        run: python3 -B -m unittest discover -s tools/qualification/ota -p preflight_test.py
+        run: python3 -B -m unittest discover -s tools/qualification/ota -p '*_test.py'
