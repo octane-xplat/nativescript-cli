@@ -31,8 +31,11 @@ On macOS/Linux every launch receives its own process group. Cleanup sends TERM,
 waits 150 milliseconds, then sends KILL to that group, including after the parent
 exits successfully or unsuccessfully. A one-second group-retirement check follows
 KILL; a still-present group (including unreaped orphan zombies) returns ErrCleanup,
-so callers must not treat that result as successful ownership release. The
-direct child is reaped; output drains
+so callers must not treat that result as successful ownership release.
+The retirement check also follows signal/probe errors: observed group absence is
+successful cleanup, while persistent presence or denied inspection retains a
+cleanup failure. A signal error alone does not prove that a group survived.
+The direct child is reaped; output drains
 before completion. The OS must complete KILL/reaping, and the sink must cooperate.
 Tools/extensions must keep owned descendants in that group. Detached sessions or
 process groups are outside this lifecycle contract; this is not a security

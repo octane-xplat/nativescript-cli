@@ -1,5 +1,13 @@
 # Native development qualification
 
+`development-consumer reject-ios APP EXACT_SHUTDOWN_UDID EVIDENCE_JSON` qualifies
+the native-completed observer-rejection boundary. It performs a real debug build,
+hands the reservation to an owned simulator boot, then rejects before app install
+or launch. It requires ErrSink plus the observer cause, no ErrCleanup, a retired
+server port and no app installation; the harness retires its boot and grants.
+Use a fresh task-owned simulator and delete it only after verified shutdown.
+This is native build/failure cleanup evidence, not application startup evidence.
+
 The root dependency fixture supplies core9.1.3, NativeScript Vite8.0.21,
 Vite8.3.0 and the native WebSocket dependency for host tests. Its Go test native
 compiler/device adapters are fixtures; see docs/design/bundling.md for the host

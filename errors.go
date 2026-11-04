@@ -11,6 +11,7 @@ var (
 	ErrSigning         = errors.New("invalid signing configuration")
 	ErrBuild           = errors.New("build failed")
 	ErrSink            = errors.New("event sink failed")
+	ErrCleanup         = errors.New("owned resource cleanup failed")
 )
 
 // OperationError preserves both category and underlying cause for Is/As.

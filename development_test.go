@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -187,5 +188,33 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 			t.Fatalf("cancelled compiler failed before cancellation branch: session=%v error=%v cause=%T %v", failed, err, op.Cause, op.Cause)
 		}
 		t.Fatal("cancelled compiler returned success or launched app", failed, err)
+	}
+	// Reject the same native-completed boundary that failed in native testing.
+	// The installed engine/helper are real; compilation and devices remain fixtures.
+	for attempt := 0; attempt < 3; attempt++ {
+		native = &developmentNativeFixture{}
+		rejected := errors.New("qualification observer rejected native completion")
+		c.options.Sink = func(_ context.Context, event Event) error {
+			if event.Stage == "native" && event.Kind == StageCompleted {
+				return rejected
+			}
+			return nil
+		}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		address := listener.Addr().String()
+		port := listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+		failed, err := c.Run(ctx, RunRequest{Development: &DevelopmentOptions{Port: port}, DeviceID: "fixture", Build: BuildRequest{ProjectDir: dir, OutputDir: filepath.Join(dir, ".generated"), Target: Target{Platform: IOS, Configuration: Debug, Destination: Destination{Kind: Simulator, ID: "fixture", Architecture: "arm64"}}}})
+		if failed != nil || !errors.Is(err, ErrSink) || !errors.Is(err, rejected) || errors.Is(err, ErrCleanup) || native.compiled.Load() != 1 || native.launched.Load() != 0 {
+			t.Fatalf("observer rejection/retirement: session=%v error=%v compiled=%d launched=%d", failed, err, native.compiled.Load(), native.launched.Load())
+		}
+		listener, err = net.Listen("tcp", address)
+		if err != nil {
+			t.Fatal("rejected operation retained its server port", err)
+		}
+		listener.Close()
 	}
 }

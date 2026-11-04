@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -135,10 +136,16 @@ func run() (result error) {
 	if len(os.Args) > 1 && os.Args[1] == "android" {
 		return runAndroid(os.Args[2:])
 	}
-	if len(os.Args) != 4 {
+	args := os.Args[1:]
+	rejectNative := len(args) == 4 && args[0] == "reject-ios"
+	if rejectNative {
+		args = args[1:]
+	}
+	if len(args) != 3 {
 		return errors.New("usage: development-consumer APP EXACT_SHUTDOWN_SIMULATOR EVIDENCE_JSON")
 	}
-	app, id, saved := os.Args[1], os.Args[2], os.Args[3]
+	app, id, saved := args[0], args[1], args[2]
+	rejected := errors.New("qualification observer rejected native completion")
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, cancel := context.WithTimeout(signalContext, 15*time.Minute)
@@ -149,6 +156,9 @@ func run() (result error) {
 	reservation := &reservation{device: id}
 	var healthLocation atomic.Value
 	evidence := map[string]any{"boundary": "real public-library iOS development startup/HMR; no OTA/release/physical claim"}
+	if rejectNative {
+		evidence["boundary"] = "real iOS debug compilation and observer rejection before install/launch; no runtime startup claim"
+	}
 	defer func() {
 		result = errors.Join(result, reservation.cleanup())
 		now, _ := os.Getwd()
@@ -180,7 +190,13 @@ func run() (result error) {
 				return reservation.acquire(ctx, false)
 			}
 			if event.Kind == ns.StageCompleted {
-				return reservation.acquire(ctx, true)
+				if err := reservation.acquire(ctx, true); err != nil {
+					return err
+				}
+				if rejectNative {
+					evidence["nativeCompleted"] = true
+					return rejected
+				}
 			}
 		}
 		return nil
@@ -203,7 +219,39 @@ func run() (result error) {
 	}
 	request := ns.RunRequest{Development: &ns.DevelopmentOptions{}, DeviceID: id, Build: ns.BuildRequest{
 		ProjectDir: app, OutputDir: filepath.Join(app, "state"), Target: ns.Target{Platform: ns.IOS, Configuration: ns.Debug, Destination: ns.Destination{Kind: ns.Simulator, ID: id, Architecture: "arm64"}}, IOS: ns.IOSBuildOptions{SigningMode: "disabled"}}}
+	address := ""
+	if rejectNative {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return err
+		}
+		address = listener.Addr().String()
+		request.Development.Port = listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+	}
 	session, err := client.Run(ctx, request)
+	if rejectNative {
+		if session != nil {
+			session.Close(context.Background())
+			return errors.New("rejected operation returned a session")
+		}
+		if !errors.Is(err, ns.ErrSink) || !errors.Is(err, rejected) || errors.Is(err, ns.ErrCleanup) {
+			return fmt.Errorf("observer failure/cleanup identity: %w", err)
+		}
+		listener, bindErr := net.Listen("tcp", address)
+		if bindErr != nil {
+			return bindErr
+		}
+		listener.Close()
+		if _, err := exec.Command("xcrun", "simctl", "get_app_container", id, "org.example.godevelopment", "app").Output(); err == nil {
+			return errors.New("rejected operation installed an app")
+		}
+		evidence["observerErrorPreserved"] = true
+		evidence["serverPortRetired"] = true
+		evidence["noAppInstalled"] = true
+		fmt.Println("PASS native compile, observer rejection, helper retirement and no app installation")
+		return nil
+	}
 	if err != nil {
 		var operation *ns.OperationError
 		if errors.As(err, &operation) {

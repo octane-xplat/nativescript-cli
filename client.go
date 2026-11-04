@@ -53,6 +53,9 @@ func operationError(op string, err error) error {
 	kind := ErrBuild
 	switch {
 	case errors.Is(err, ErrSink):
+		if errors.Is(err, process.ErrCleanup) && !errors.Is(err, ErrCleanup) {
+			return errors.Join(err, ErrCleanup)
+		}
 		return err
 	case errors.Is(err, context.Canceled):
 		kind = context.Canceled
@@ -79,6 +82,11 @@ func operationError(op string, err error) error {
 	var android *androidbuild.Failure
 	if errors.As(err, &android) {
 		cause = &BuildError{Stage: android.Stage, ExitCode: android.ExitCode, Cause: err}
+	}
+	// Cleanup can fail alongside the initiating sink/build/cancellation error.
+	// Expose that independent ownership failure without replacing its category.
+	if errors.Is(err, process.ErrCleanup) {
+		cause = errors.Join(ErrCleanup, cause)
 	}
 	result := &OperationError{Operation: op, Kind: kind, Cause: cause}
 	if errors.Is(err, androidbuild.ErrArtifact) {
