@@ -478,15 +478,33 @@ func (a Adapter) launchSimulator(ctx context.Context, root string, artifact proj
 	if err = read(); err != nil {
 		return nil, errors.Join(err, stop())
 	}
+	// NativeScript's iOS console also writes through unified logging. Stdio
+	// redirection alone misses those diagnostics. Follow only this launched PID;
+	// the reader is an owned child and shares the session's bounded log buffer.
+	reader, err := a.executor().Start(ctx, process.Command{Executable: "xcrun", Args: []string{"simctl", "spawn", d.ID, "log", "stream", "--level", "debug", "--style", "ndjson", "--predicate", fmt.Sprintf("processIdentifier == %d", pid)}, Dir: root, Environment: a.Environment, Output: logs.Append})
+	if err != nil {
+		return nil, errors.Join(err, stop())
+	}
+	readerDone := make(chan error, 1)
+	go func() { _, err := reader.Wait(); readerDone <- err }()
+	readerExited := false
 	alive := func() bool { app, e := os.FindProcess(pid); return e == nil && app.Signal(syscall.Signal(0)) == nil }
 	session := workflow.StartSession(ctx, func(work context.Context) (result error) {
 		defer func() {
+			readerErr := reader.Close(context.Background())
+			if !readerExited {
+				<-readerDone
+			}
+			result = errors.Join(result, readerErr)
 			if alive() {
 				result = errors.Join(result, stop())
 			}
 			if alive() {
 				result = errors.Join(result, process.ErrCleanup)
 				return
+			}
+			if errors.Is(readerErr, process.ErrCleanup) {
+				return // Retain ownership if the log reader failed to retire.
 			}
 			result = errors.Join(result, read(), os.RemoveAll(dir), cleanup())
 		}()
@@ -496,6 +514,9 @@ func (a Adapter) launchSimulator(ctx context.Context, root string, artifact proj
 			select {
 			case <-work.Done():
 				return work.Err()
+			case err := <-readerDone:
+				readerExited = true
+				return errors.Join(process.ErrExit, err)
 			case <-tick.C:
 				if e := read(); e != nil {
 					return e

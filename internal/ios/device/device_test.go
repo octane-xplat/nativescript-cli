@@ -78,6 +78,7 @@ type fakeExecutor struct {
 	physical      bool
 	booted        bool
 	console       chan struct{}
+	logReader     *fakeHandle
 }
 type fakeHandle struct {
 	err  error
@@ -147,6 +148,12 @@ func (f *fakeExecutor) Start(ctx context.Context, c process.Command) (process.Ha
 			c.Output(ctx, process.Stdout, []byte(output))
 		}
 		return &fakeHandle{done: f.console}, nil
+	case strings.Contains(args, "log stream"):
+		if c.Output != nil {
+			c.Output(ctx, process.Stdout, []byte("fixture unified application diagnostic\n"))
+		}
+		f.logReader = &fakeHandle{done: make(chan struct{})}
+		return f.logReader, nil
 	}
 	if c.Output != nil {
 		if err := c.Output(ctx, process.Stdout, []byte(output)); err != nil {
@@ -187,10 +194,22 @@ func TestLaunchOwnershipFailuresAndCancellation(t *testing.T) {
 	if len(s.LogBuffer.Logs()) == 0 {
 		t.Fatal("missing console output")
 	}
+	foundUnified := false
+	for _, line := range s.LogBuffer.Logs() {
+		foundUnified = foundUnified || strings.Contains(line.Text, "fixture unified application diagnostic")
+	}
+	if !foundUnified || !strings.Contains(strings.Join(f.calls, "\n"), "spawn exact log stream --level debug --style ndjson --predicate processIdentifier == 2147483647") {
+		t.Fatal("missing PID-scoped simulator diagnostics", f.calls)
+	}
 	if err = s.Close(context.Background()); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	s.Close(context.Background())
+	select {
+	case <-f.logReader.done:
+	default:
+		t.Fatal("owned simulator log reader survived Close")
+	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "shutdown exact") {
 		t.Fatal("shutdown missing")
 	}
@@ -276,5 +295,22 @@ func TestObservedAppExitRetiresConsole(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "launch --stdout=") {
 		t.Fatal("missing owned log launch")
+	}
+}
+
+func TestSimulatorLogReaderFailureRetiresOwnedBoot(t *testing.T) {
+	f := &fakeExecutor{fail: "log stream"}
+	a := Adapter{Executor: f, AllowBoot: true}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	s, err := a.Launch(ctx, fixtureArtifact(t), project.Device{ID: "exact", Platform: "ios", Kind: "simulator", Architecture: "arm64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Wait(); !errors.Is(err, process.ErrExit) {
+		t.Fatal("missing log-reader failure", err)
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "shutdown exact") {
+		t.Fatal("log-reader failure retained owned simulator boot", f.calls)
 	}
 }
