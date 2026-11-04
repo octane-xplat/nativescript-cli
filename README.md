@@ -4,16 +4,17 @@ A scaffold for NativeScript build and device tooling in Go, maintained by
 Octane Xplat. The repository will provide an importable Go library, the
 `xplat-ns` executable, and JavaScript/Go build-extension SDKs.
 
-The public Go library and `xplat-ns` command interface are implemented. The
-embedded Node Xcode parser and installed project resolution are operational; native
-preparation, builds, device operations and build-extension execution remain unavailable.
+The public Go library and `xplat-ns` command interface implement installed project
+resolution, native preparation/builds, device discovery/run and build extensions.
+Target-specific support and qualification limits are documented by the owning
+packages; simulator/emulator evidence does not establish physical-device or release acceptance.
 See [installed resolution](docs/design/resolution.md) for supported config and native inputs.
 See the [command interface](internal/cli/README.md) for usage, JSON output and
 exit codes.
 
 ## Development
 
-Use Go 1.26 or newer. Node is required by the embedded parser, executable configuration and future
+Use Go 1.26 or newer. Node is required by the embedded parser, executable configuration and
 operations that use Vite or JavaScript extensions.
 Cobra is confined to the CLI. The selected external extension framework is documented in
 [the extension framework decision](docs/design/extensions.md).

@@ -88,7 +88,14 @@ type DeviceQuery struct{ Platform Platform }
 
 // AndroidReverse reserves a device TCP port for a caller-owned host service.
 type AndroidReverse struct{ DevicePort, HostPort int }
+
+// DevelopmentOptions enables the installed NativeScript Vite HMR engine for a
+// debug simulator/emulator session. Port zero selects an available loopback port.
+// The project supplies @nativescript/vite 8.0.21 and Vite 8; no tools are installed.
+type DevelopmentOptions struct{ Port int }
+
 type RunRequest struct {
+	Development    *DevelopmentOptions
 	AndroidReverse []AndroidReverse
 	// Artifact bypasses compilation; only compatible existing app products install.
 	Artifact *Artifact

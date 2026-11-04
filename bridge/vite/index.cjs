@@ -5,6 +5,7 @@ const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const fail = code => Object.assign(new Error(), { code });
 module.exports = async function bundle(p, emit) {
+  if (p.mode === 'native') return require('./native.cjs')(p, emit);
   for (const key of ['projectDir', 'directory', 'entry']) if (!path.isAbsolute(p[key] || '')) throw fail('invalid_input');
   if (!['bundle', 'watch'].includes(p.mode)) throw fail('invalid_input');
   const req = createRequire(path.join(p.projectDir, 'package.json'));

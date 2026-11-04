@@ -30,7 +30,7 @@ to a bounded queue and never invokes application callbacks under the lease.
 Events close on completion; overflow fails and cancels the owned helper. Callers
 inspect Wait for terminal errors. Close is idempotent; cancellation returns the
 context error after cleanup. This internal API is intended for device owners;
-it does not add a second public root development-session API.
+public native development uses the separate ownership path described below.
 
 The emitted event follows each successful watched disk write. The ready event
 follows initial output and server listening and includes that manifest and HTTP
@@ -63,3 +63,50 @@ virtual runtime entry manifest, so importing core does not require an extra
 source manifest. No installed package files are edited or upstream CLI spawned.
 The existing emitted `bundle.js` contract remains unchanged; downloaded canonical
 OTA archives have their own entry/package contract.
+
+## Public native development sessions
+
+`RunRequest.Development = &DevelopmentOptions{Port: 0}` opts into the installed
+`@nativescript/vite` 8.0.21 engine with project-local Vite 8. This is distinct from
+the Vite 7 IIFE bundler above: the native engine emits `bundle.mjs` and serves its
+native `/ns/*` module graph and `/ns-hmr` WebSocket. The CLI exposes `run --hmr`
+and `--hmr-port`. The root package's `main` must identify an entry inside appPath.
+The caller installs core, engine, Vite and any runtime WebSocket dependencies;
+the library never installs packages or invokes the upstream NativeScript CLI.
+Installed native runtimes older than 9.1 reject. Physical HMR and borrowed native
+servers are not implemented by this path and fail explicitly.
+
+The helper uses its own process environment/argv for the engine and owns a
+private content directory under the NativeScript CLI cache. It binds loopback,
+with a strict selected port. Only the completed initial output is copied into
+the native workspace under its existing writer lease; the server does not hold
+that lease while native compilation runs. Android's device session owns reverse
+forwarding for the selected port. The embedding process keeps its cwd, environment
+and global logging unchanged. Arbitrary Vite config/framework presets remain
+unavailable; the current engine adapter selects the TypeScript/XML preset.
+
+JavaScript updates use the engine's native HMR path. Native resources,
+configuration, manifests and installed plugin platform inputs are watched
+separately, including node_modules paths Vite normally ignores. A native edit
+retires the current server/app before resolving, preparing, compiling and launching
+again. Server failure cancels native work or the running app; cleanup failure
+terminates the session instead of starting another owner. `Session.Close` cancels
+the entire lifetime, including rebuilds. `Session.DevelopmentEndpoint()` snapshots
+the current endpoint (empty while rebuilding/after completion), and `Logs()` keeps
+a bounded history across app launches. Stage events retain their existing ordering
+and callback ownership contract.
+
+To run the real-engine host checks:
+
+```sh
+bun install --cwd tools/qualification/development --frozen-lockfile --ignore-scripts
+NS_NATIVE_VITE_DIR="$PWD/tools/qualification/development" go test . ./internal/bundle -run 'TestPublicNativeDevelopmentLifecycle|TestInstalledNativeDevelopmentServer' -count=1
+```
+
+The dependency fixture provides exact installed engine/core versions. The tests
+create independent apps and run real resolution, extraction, engine startup,
+native bootstrap emission and HTTP entry serving. Public lifecycle tests use
+fixture native compiler/device adapters and check serialized rebuild/relaunch,
+port rejection, retirement, repeated close and embedding globals. They do not
+establish actual native HMR application, simulator startup or full G5 acceptance;
+those require separate real platform runs. CI labels the same boundary explicitly.

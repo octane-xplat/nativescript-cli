@@ -57,6 +57,26 @@ func factoryFor(f *fakeLibrary) factory {
 
 var targetArgs = []string{"--platform", "ios", "--output", "generated path", "--destination", "simulator", "--device", "exact", "--arch", "arm64"}
 
+func TestNativeDevelopmentFlags(t *testing.T) {
+	for _, extra := range [][]string{{"--hmr", "--hmr-port", "51234"}, {"--hmr", "--configuration", "release"}, {"--hmr-port", "51234"}, {"--hmr", "--hmr-port", "65536"}} {
+		f := &fakeLibrary{}
+		args := append(append([]string{"run"}, targetArgs...), extra...)
+		var out, diag bytes.Buffer
+		code := execute(context.Background(), args, &out, &diag, factoryFor(f))
+		if len(extra) == 3 && extra[0] == "--hmr" && extra[2] == "51234" {
+			if code != 0 {
+				t.Fatal(code, diag.String())
+			}
+			r := f.request.(ns.RunRequest)
+			if r.Development == nil || r.Development.Port != 51234 {
+				t.Fatal(r)
+			}
+		} else if code != 2 || f.operation != "" {
+			t.Fatal("invalid development request reached library", extra, code, f.operation)
+		}
+	}
+}
+
 func TestCommands(t *testing.T) {
 	for _, op := range []string{"resolve", "prepare", "build", "devices", "run", "inspect-xcode"} {
 		for _, structured := range []bool{false, true} {

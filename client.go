@@ -211,9 +211,15 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	if !validBuild(r.Build) || r.DeviceID == "" || r.DeviceID != r.Build.Target.Destination.ID {
 		return nil, operationError("run", workflow.ErrInvalid)
 	}
+	if r.Development != nil && (r.Artifact != nil || r.Build.Target.Configuration != Debug || r.Development.Port < 0 || r.Development.Port > 65535) {
+		return nil, operationError("run", workflow.ErrInvalid)
+	}
+	if r.Development != nil && r.Build.Target.Destination.Kind != Simulator {
+		return nil, operationError("run", workflow.ErrUnavailable)
+	}
 	s, n := c.stages(), c.notify("run")
 	if _, ok := s.Launcher.(platformDevices); ok {
-		s.Launcher = platformDevices{env: maps.Clone(c.options.Environment), boot: r.AllowBoot, physical: r.AllowPhysicalDevice, reverse: r.AndroidReverse}
+		s.Launcher = platformDevices{env: maps.Clone(c.options.Environment), boot: r.AllowBoot, physical: r.AllowPhysicalDevice, reverse: append([]AndroidReverse(nil), r.AndroidReverse...)}
 	}
 	if _, ok := s.Launcher.(iosdevice.Adapter); ok {
 		s.Launcher = iosdevice.Adapter{Environment: maps.Clone(c.options.Environment), AllowBoot: r.AllowBoot, AllowPhysicalDevice: r.AllowPhysicalDevice}
@@ -236,6 +242,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	}
 	if s.Launcher == nil {
 		return nil, operationError("run", workflow.ErrUnavailable)
+	}
+	if r.Development != nil {
+		return c.runDevelopment(ctx, r, s, n, *selected)
 	}
 	var result BuildResult
 	if r.Artifact != nil {

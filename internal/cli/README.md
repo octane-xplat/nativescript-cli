@@ -5,7 +5,7 @@
 validation do not construct a client or discover tools. The library and extension
 SDK do not import Cobra or this package.
 
-The currently supported operation is the embedded Node Xcode parser:
+The embedded Node Xcode parser can be invoked independently:
 
 ```sh
 go run ./cmd/xplat-ns inspect-xcode --project /absolute/app \
@@ -13,8 +13,8 @@ go run ./cmd/xplat-ns inspect-xcode --project /absolute/app \
 ```
 
 Relative paths resolve against the invocation directory. No operation changes
-process cwd or environment. Other workflow commands currently return unavailable
-until their producers are integrated into the library. A complete target looks like:
+process cwd or environment. Native operations use installed project dependencies
+and platform tools through the public library. A complete target looks like:
 
 ```sh
 xplat-ns build --project ./app --output ./generated --platform ios \
@@ -25,6 +25,12 @@ xplat-ns build --project ./app --output ./generated --platform ios \
 SIGINT and SIGTERM cancel its context and close only that session, waiting for
 owned cleanup. Signal registration and process exit live exclusively in `main`.
 No device is automatically selected or booted by the adapter.
+
+`run --hmr` selects the installed NativeScript Vite development engine for debug
+simulators/emulators. `--hmr-port PORT` selects a strict server port; zero selects
+an available port. The library owns the server, app and Android reverse forwarding,
+and rebuilds/relaunches after native input/config changes. See
+[development support and evidence](../../docs/design/bundling.md).
 
 ## Output contract
 

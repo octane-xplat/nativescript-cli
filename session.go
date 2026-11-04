@@ -12,7 +12,21 @@ import (
 // processes/forwarding are stopped, never caller servers or shared device services.
 // Apple sessions terminate their launched app and shut down only their owned boot.
 // Do not Wait/Close from a callback on the same session. The zero value is complete.
-type Session struct{ owned *workflow.Session }
+type Session struct {
+	owned       *workflow.Session
+	development *developmentState
+}
+
+// DevelopmentEndpoint is the currently running native HMR server. A native input
+// rebuild can replace it; query again after the next launch-completed event.
+type DevelopmentEndpoint struct{ URL, HMRURL string }
+
+func (s *Session) DevelopmentEndpoint() DevelopmentEndpoint {
+	if s == nil || s.development == nil {
+		return DevelopmentEndpoint{}
+	}
+	return s.development.endpoint()
+}
 
 func (s *Session) Wait() error {
 	if s == nil {
@@ -38,7 +52,11 @@ func (s *Session) Logs() []SessionLog {
 		return nil
 	}
 	var out []SessionLog
-	for _, v := range s.owned.LogBuffer.Logs() {
+	logs := s.owned.LogBuffer.Logs()
+	if s.development != nil {
+		logs = s.development.logs()
+	}
+	for _, v := range logs {
 		out = append(out, SessionLog(v))
 	}
 	return out

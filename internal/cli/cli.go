@@ -43,6 +43,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newClient factory) int {
 	var structured bool
+	var hmr bool
+	var hmrPort int
 	var project, output, platform, kind, id, arch, configuration, file, cache string
 	root := &cobra.Command{Use: "xplat-ns", Version: ns.Version, Short: "NativeScript project and device tooling", SilenceErrors: true, SilenceUsage: true, Args: cobra.NoArgs}
 	root.RunE = func(cmd *cobra.Command, _ []string) error { return cmd.Help() }
@@ -91,6 +93,10 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 			command.Flags().StringVar(&file, "file", "", "Xcode project file (required)")
 			command.Flags().StringVar(&cache, "cache", "", "Writable helper cache directory (required)")
 		}
+		if name == "run" {
+			command.Flags().BoolVar(&hmr, "hmr", false, "Use the installed NativeScript Vite HMR engine (debug simulators/emulators)")
+			command.Flags().IntVar(&hmrPort, "hmr-port", 0, "Strict native HMR server port (zero selects an available port)")
+		}
 		command.RunE = func(cmd *cobra.Command, _ []string) error {
 			operation = cmd.Name()
 			if err := ctx.Err(); err != nil {
@@ -133,6 +139,9 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 					return invalid("--cache is required")
 				}
 			}
+			if operation == "run" && (hmrPort < 0 || hmrPort > 65535 || (!hmr && hmrPort != 0) || (hmr && (configuration != "debug" || kind != "simulator"))) {
+				return invalid("--hmr requires debug simulator/emulator output; --hmr-port requires --hmr and a port from 0 to 65535")
+			}
 			c, err := client()
 			if err != nil {
 				return err
@@ -151,7 +160,11 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 				result, err = c.InspectXcode(ctx, ns.XcodeInspectionRequest{ProjectDir: project, File: file, CacheDir: cache})
 			case "run":
 				var session *ns.Session
-				session, err = c.Run(ctx, ns.RunRequest{Build: request, DeviceID: id})
+				run := ns.RunRequest{Build: request, DeviceID: id}
+				if hmr {
+					run.Development = &ns.DevelopmentOptions{Port: hmrPort}
+				}
+				session, err = c.Run(ctx, run)
 				if err == nil {
 					if session == nil {
 						return errors.New("library returned no session")
@@ -310,7 +323,7 @@ func jsonMode(args []string) bool {
 			continue
 		}
 		switch name {
-		case "--project", "--output", "--platform", "--destination", "--device", "--arch", "--configuration", "--file", "--cache":
+		case "--project", "--output", "--platform", "--destination", "--device", "--arch", "--configuration", "--file", "--cache", "--hmr-port":
 			if !hasValue {
 				i++
 			}

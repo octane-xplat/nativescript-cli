@@ -17826,6 +17826,126 @@ target '${name}' do
   }
 });
 
+// bridge/vite/native.cjs
+var require_native = __commonJS({
+  "bridge/vite/native.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var { createRequire: createRequire2 } = require("node:module");
+    var { pathToFileURL } = require("node:url");
+    var fail = (code) => Object.assign(new Error(), { code });
+    module2.exports = async function native(p, emit) {
+      if (!["ios", "android"].includes(p.platform) || p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 || !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path2.isAbsolute)) throw fail("invalid_input");
+      const req = createRequire2(path2.join(p.projectDir, "package.json"));
+      const pkg = JSON.parse(fs2.readFileSync(path2.join(p.projectDir, "package.json"), "utf8"));
+      if (typeof pkg.main !== "string" || fs2.realpathSync(path2.resolve(p.projectDir, pkg.main)) !== p.entry) throw fail("invalid_input");
+      process.env.NS_VITE_DIST_DIR = p.directory;
+      process.env.NS_HMR_PORT = String(p.port);
+      process.env.NS_HMR_HOST = p.hmrHost || "127.0.0.1";
+      process.env.NS_HTTPS = "false";
+      process.env.NATIVESCRIPT_BUNDLER_ENV = JSON.stringify({ [p.platform]: true, hmr: true });
+      process.argv.push("--", `--env.${p.platform}`, "--env.hmr");
+      let engine, vite;
+      try {
+        const engineFile = req.resolve("@nativescript/vite");
+        const enginePkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(engineFile), "package.json"), "utf8"));
+        if (enginePkg.version !== "8.0.21") throw fail("unavailable");
+        engine = await import(pathToFileURL(req.resolve("@nativescript/vite/typescript")).href);
+        vite = await import(pathToFileURL(req.resolve("vite")).href);
+        if (!/^8\./.test(vite.version)) throw fail("unavailable");
+      } catch (error) {
+        throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
+      }
+      function config() {
+        const result = engine.typescriptConfig({ mode: "development" }, { typeCheck: false });
+        const runtime = { main: "bundle.mjs", id: p.applicationID, ...p.android ? { android: p.android } : {} };
+        const metadata = {
+          name: "xplat-native-runtime-manifest",
+          enforce: "pre",
+          resolveId(id) {
+            if (id === "~/package.json") return "\0xplat-native-package";
+          },
+          load(id) {
+            if (id === "\0xplat-native-package") return `export default ${JSON.stringify(runtime)};`;
+          },
+          generateBundle() {
+            this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify(runtime) });
+          }
+        };
+        result.plugins = [metadata, ...result.plugins.flat(Infinity).filter((plugin) => plugin?.name !== "nsvite-nsconfig-as-json")];
+        result.root = p.projectDir;
+        result.configFile = false;
+        result.cacheDir = p.cacheDirectory;
+        result.logLevel = "silent";
+        result.server = { ...result.server, host: "127.0.0.1", port: p.port, strictPort: true, open: false, https: void 0 };
+        result.build = { ...result.build, outDir: p.directory, emptyOutDir: true, watch: null };
+        return result;
+      }
+      let server;
+      const nativeWatchers = [];
+      let terminalError;
+      let rejectLifetime;
+      const lifetime = new Promise((_, reject) => {
+        rejectLifetime = (error) => {
+          terminalError = error;
+          reject(error);
+        };
+      });
+      lifetime.catch(() => {
+      });
+      try {
+        let walk = function(dir) {
+          for (const entry of fs2.readdirSync(dir, { withFileTypes: true })) {
+            const file = path2.join(dir, entry.name);
+            if (entry.isDirectory()) walk(file);
+            else if (entry.isFile()) files.push(file);
+            else throw fail("operation_failed");
+          }
+        };
+        server = await vite.createServer(config());
+        server.httpServer.on("close", () => rejectLifetime(fail("server_closed")));
+        server.httpServer.on("error", rejectLifetime);
+        const directories = /* @__PURE__ */ new Map();
+        for (const input of p.nativeInputs) {
+          const recursive = fs2.existsSync(input) && fs2.statSync(input).isDirectory();
+          const dir = recursive ? input : path2.dirname(input);
+          directories.set(dir, recursive || directories.get(dir) || false);
+        }
+        for (const [dir, recursive] of directories) {
+          if (!fs2.existsSync(dir)) continue;
+          const watcher = fs2.watch(dir, { recursive }, (_event, name) => {
+            const file = name && path2.resolve(dir, String(name));
+            if (!file || p.nativeInputs.some((input) => file === input || file.startsWith(input + path2.sep))) rejectLifetime(fail("restart_required"));
+          });
+          watcher.on("error", () => rejectLifetime(fail("restart_required")));
+          nativeWatchers.push(watcher);
+        }
+        try {
+          await server.listen();
+        } catch (error) {
+          if (/^Port \d+ is already in use$/.test(error.message || "")) throw fail("EADDRINUSE");
+          throw error;
+        }
+        await vite.build(config());
+        if (terminalError) throw terminalError;
+        const files = [];
+        walk(p.directory);
+        if (!files.includes(path2.join(p.directory, "bundle.mjs"))) throw fail("operation_failed");
+        emit({
+          type: "ready",
+          manifest: { directory: p.directory, entry: path2.join(p.directory, "bundle.mjs"), files: files.sort() },
+          endpoint: { url: `http://127.0.0.1:${p.port}`, hmrURL: `ws://${p.hmrHost || "127.0.0.1"}:${p.port}/ns-hmr` }
+        });
+        await lifetime;
+      } finally {
+        for (const watcher of nativeWatchers) watcher.close();
+        await server?.close();
+      }
+    };
+  }
+});
+
 // bridge/vite/index.cjs
 var require_vite = __commonJS({
   "bridge/vite/index.cjs"(exports2, module2) {
@@ -17836,6 +17956,7 @@ var require_vite = __commonJS({
     var { pathToFileURL } = require("node:url");
     var fail = (code) => Object.assign(new Error(), { code });
     module2.exports = async function bundle(p, emit) {
+      if (p.mode === "native") return require_native()(p, emit);
       for (const key2 of ["projectDir", "directory", "entry"]) if (!path2.isAbsolute(p[key2] || "")) throw fail("invalid_input");
       if (!["bundle", "watch"].includes(p.mode)) throw fail("invalid_input");
       const req = createRequire2(path2.join(p.projectDir, "package.json"));

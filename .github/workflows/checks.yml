@@ -43,3 +43,10 @@ jobs:
       - name: OTA host preflight contracts (offline fixtures)
         if: runner.os != 'Windows'
         run: python3 -B -m unittest discover -s tools/qualification/ota -p '*_test.py'
+      - name: Installed native Vite engine and public dev ownership (native adapters are fixtures)
+        if: runner.os != 'Windows'
+        env:
+          NS_NATIVE_VITE_DIR: ${{ github.workspace }}/tools/qualification/development
+        run: |
+          bun install --cwd tools/qualification/development --frozen-lockfile --ignore-scripts
+          go test . ./internal/bundle -run 'TestPublicNativeDevelopmentLifecycle|TestInstalledNativeDevelopmentServer' -count=1
