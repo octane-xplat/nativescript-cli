@@ -4,7 +4,8 @@ option go_package = "github.com/octane-xplat/nativescript-cli/extension/transpor
 message Empty {}
 message Manifest { string id=1; string version=2; string api=3; repeated string phases=4; repeated string after=5; repeated string platforms=6; repeated string required=7; }
 message Pin { string name=1; string version=2; }
-message Input { string phase=1; string project=2; string platform=3; string configuration=4; string revision=5; repeated Pin pins=6; }
+message Artifact { string path=1; string kind=2; string applicationId=3; }
+message Input { string phase=1; string project=2; string platform=3; string configuration=4; string revision=5; repeated Pin pins=6; repeated Artifact artifacts=7; }
 message File { string path=1; string content=2; }
 message Result { repeated File files=1; repeated string diagnostics=2; }
 service Extension { rpc Describe(Empty) returns(Manifest); rpc Invoke(Input) returns(Result); }

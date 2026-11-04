@@ -201,6 +201,66 @@ func (x *Pin) GetVersion() string {
 	return ""
 }
 
+type Artifact struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	ApplicationId string                 `protobuf:"bytes,3,opt,name=applicationId,proto3" json:"applicationId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Artifact) Reset() {
+	*x = Artifact{}
+	mi := &file_extension_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Artifact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Artifact) ProtoMessage() {}
+
+func (x *Artifact) ProtoReflect() protoreflect.Message {
+	mi := &file_extension_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Artifact.ProtoReflect.Descriptor instead.
+func (*Artifact) Descriptor() ([]byte, []int) {
+	return file_extension_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Artifact) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *Artifact) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Artifact) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
 type Input struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Phase         string                 `protobuf:"bytes,1,opt,name=phase,proto3" json:"phase,omitempty"`
@@ -209,13 +269,14 @@ type Input struct {
 	Configuration string                 `protobuf:"bytes,4,opt,name=configuration,proto3" json:"configuration,omitempty"`
 	Revision      string                 `protobuf:"bytes,5,opt,name=revision,proto3" json:"revision,omitempty"`
 	Pins          []*Pin                 `protobuf:"bytes,6,rep,name=pins,proto3" json:"pins,omitempty"`
+	Artifacts     []*Artifact            `protobuf:"bytes,7,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Input) Reset() {
 	*x = Input{}
-	mi := &file_extension_proto_msgTypes[3]
+	mi := &file_extension_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -227,7 +288,7 @@ func (x *Input) String() string {
 func (*Input) ProtoMessage() {}
 
 func (x *Input) ProtoReflect() protoreflect.Message {
-	mi := &file_extension_proto_msgTypes[3]
+	mi := &file_extension_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -240,7 +301,7 @@ func (x *Input) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Input.ProtoReflect.Descriptor instead.
 func (*Input) Descriptor() ([]byte, []int) {
-	return file_extension_proto_rawDescGZIP(), []int{3}
+	return file_extension_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Input) GetPhase() string {
@@ -285,6 +346,13 @@ func (x *Input) GetPins() []*Pin {
 	return nil
 }
 
+func (x *Input) GetArtifacts() []*Artifact {
+	if x != nil {
+		return x.Artifacts
+	}
+	return nil
+}
+
 type File struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -295,7 +363,7 @@ type File struct {
 
 func (x *File) Reset() {
 	*x = File{}
-	mi := &file_extension_proto_msgTypes[4]
+	mi := &file_extension_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -307,7 +375,7 @@ func (x *File) String() string {
 func (*File) ProtoMessage() {}
 
 func (x *File) ProtoReflect() protoreflect.Message {
-	mi := &file_extension_proto_msgTypes[4]
+	mi := &file_extension_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -320,7 +388,7 @@ func (x *File) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use File.ProtoReflect.Descriptor instead.
 func (*File) Descriptor() ([]byte, []int) {
-	return file_extension_proto_rawDescGZIP(), []int{4}
+	return file_extension_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *File) GetPath() string {
@@ -347,7 +415,7 @@ type Result struct {
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_extension_proto_msgTypes[5]
+	mi := &file_extension_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +427,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_extension_proto_msgTypes[5]
+	mi := &file_extension_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +440,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_extension_proto_rawDescGZIP(), []int{5}
+	return file_extension_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Result) GetFiles() []*File {
@@ -405,14 +473,19 @@ const file_extension_proto_rawDesc = "" +
 	"\brequired\x18\a \x03(\tR\brequired\"3\n" +
 	"\x03Pin\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"\xc9\x01\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"X\n" +
+	"\bArtifact\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12$\n" +
+	"\rapplicationId\x18\x03 \x01(\tR\rapplicationId\"\x8c\x02\n" +
 	"\x05Input\x12\x14\n" +
 	"\x05phase\x18\x01 \x01(\tR\x05phase\x12\x18\n" +
 	"\aproject\x18\x02 \x01(\tR\aproject\x12\x1a\n" +
 	"\bplatform\x18\x03 \x01(\tR\bplatform\x12$\n" +
 	"\rconfiguration\x18\x04 \x01(\tR\rconfiguration\x12\x1a\n" +
 	"\brevision\x18\x05 \x01(\tR\brevision\x122\n" +
-	"\x04pins\x18\x06 \x03(\v2\x1e.nativescript.extension.v1.PinR\x04pins\"4\n" +
+	"\x04pins\x18\x06 \x03(\v2\x1e.nativescript.extension.v1.PinR\x04pins\x12A\n" +
+	"\tartifacts\x18\a \x03(\v2#.nativescript.extension.v1.ArtifactR\tartifacts\"4\n" +
 	"\x04File\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\"a\n" +
@@ -435,27 +508,29 @@ func file_extension_proto_rawDescGZIP() []byte {
 	return file_extension_proto_rawDescData
 }
 
-var file_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_extension_proto_goTypes = []any{
 	(*Empty)(nil),    // 0: nativescript.extension.v1.Empty
 	(*Manifest)(nil), // 1: nativescript.extension.v1.Manifest
 	(*Pin)(nil),      // 2: nativescript.extension.v1.Pin
-	(*Input)(nil),    // 3: nativescript.extension.v1.Input
-	(*File)(nil),     // 4: nativescript.extension.v1.File
-	(*Result)(nil),   // 5: nativescript.extension.v1.Result
+	(*Artifact)(nil), // 3: nativescript.extension.v1.Artifact
+	(*Input)(nil),    // 4: nativescript.extension.v1.Input
+	(*File)(nil),     // 5: nativescript.extension.v1.File
+	(*Result)(nil),   // 6: nativescript.extension.v1.Result
 }
 var file_extension_proto_depIdxs = []int32{
 	2, // 0: nativescript.extension.v1.Input.pins:type_name -> nativescript.extension.v1.Pin
-	4, // 1: nativescript.extension.v1.Result.files:type_name -> nativescript.extension.v1.File
-	0, // 2: nativescript.extension.v1.Extension.Describe:input_type -> nativescript.extension.v1.Empty
-	3, // 3: nativescript.extension.v1.Extension.Invoke:input_type -> nativescript.extension.v1.Input
-	1, // 4: nativescript.extension.v1.Extension.Describe:output_type -> nativescript.extension.v1.Manifest
-	5, // 5: nativescript.extension.v1.Extension.Invoke:output_type -> nativescript.extension.v1.Result
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 1: nativescript.extension.v1.Input.artifacts:type_name -> nativescript.extension.v1.Artifact
+	5, // 2: nativescript.extension.v1.Result.files:type_name -> nativescript.extension.v1.File
+	0, // 3: nativescript.extension.v1.Extension.Describe:input_type -> nativescript.extension.v1.Empty
+	4, // 4: nativescript.extension.v1.Extension.Invoke:input_type -> nativescript.extension.v1.Input
+	1, // 5: nativescript.extension.v1.Extension.Describe:output_type -> nativescript.extension.v1.Manifest
+	6, // 6: nativescript.extension.v1.Extension.Invoke:output_type -> nativescript.extension.v1.Result
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_extension_proto_init() }
@@ -469,7 +544,7 @@ func file_extension_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_extension_proto_rawDesc), len(file_extension_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

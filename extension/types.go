@@ -25,13 +25,22 @@ type Pin struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
+
+// Artifact describes a completed compiler output, available only in PostBuild.
+// Extensions may inspect it but must not mutate the artifact or project files.
+type Artifact struct {
+	Path          string `json:"path"`
+	Kind          string `json:"kind"`
+	ApplicationID string `json:"applicationId"`
+}
 type Input struct {
-	Phase         Phase  `json:"phase"`
-	Project       string `json:"project"`
-	Platform      string `json:"platform"`
-	Configuration string `json:"configuration"`
-	Revision      string `json:"revision"`
-	Pins          []Pin  `json:"pins"`
+	Phase         Phase      `json:"phase"`
+	Project       string     `json:"project"`
+	Platform      string     `json:"platform"`
+	Configuration string     `json:"configuration"`
+	Revision      string     `json:"revision"`
+	Pins          []Pin      `json:"pins"`
+	Artifacts     []Artifact `json:"artifacts"`
 }
 
 // Files are declarative writes below a host-owned extension directory, never arbitrary paths.

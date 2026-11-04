@@ -190,6 +190,9 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 			}
 		}
 		input.Phase = extension.PostBuild
+		for _, artifact := range a {
+			input.Artifacts = append(input.Artifacts, extension.Artifact{Path: artifact.Path, Kind: artifact.Kind, ApplicationID: artifact.ApplicationID})
+		}
 		postFiles, err := registry.Invoke(ctx, input)
 		if err != nil {
 			return err

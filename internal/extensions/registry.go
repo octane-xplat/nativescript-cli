@@ -48,8 +48,17 @@ func New(ctx context.Context, implementations []extension.Extension, platform st
 			}
 		}
 		for _, c := range m.Required {
-			if c != "generated_files" {
+			if c != "generated_files" && c != "build_artifacts" {
 				return nil, fmt.Errorf("required unsupported contribution %s", c)
+			}
+			if c == "build_artifacts" {
+				found := false
+				for _, phase := range m.Phases {
+					found = found || phase == extension.PostBuild
+				}
+				if !found {
+					return nil, fmt.Errorf("build_artifacts requires post_build phase")
+				}
 			}
 		}
 		entries[m.ID] = entry{m, impl}
@@ -96,6 +105,9 @@ func New(ctx context.Context, implementations []extension.Extension, platform st
 // Invoke returns all validated files in deterministic ownership namespaces. It
 // never applies partial results when a later extension fails.
 func (r *Registry) Invoke(ctx context.Context, in extension.Input) ([]extension.File, error) {
+	if len(in.Artifacts) > 0 && in.Phase != extension.PostBuild {
+		return nil, fmt.Errorf("artifacts are available only in post_build")
+	}
 	var files []extension.File
 	seen := map[string]bool{}
 	for _, v := range r.entries {
@@ -109,7 +121,10 @@ func (r *Registry) Invoke(ctx context.Context, in extension.Input) ([]extension.
 		if e := ctx.Err(); e != nil {
 			return nil, e
 		}
-		out, e := v.impl.Invoke(ctx, in)
+		ownedInput := in
+		ownedInput.Pins = append([]extension.Pin(nil), in.Pins...)
+		ownedInput.Artifacts = append([]extension.Artifact(nil), in.Artifacts...)
+		out, e := v.impl.Invoke(ctx, ownedInput)
 		if e != nil {
 			return nil, e
 		}

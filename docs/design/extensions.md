@@ -10,7 +10,7 @@ operations. They are trusted code, not sandboxed.
 The host validates exact API `1`, package identity, platform applicability,
 required capabilities, missing dependencies and cycles before preparation.
 `after` edges order dependencies first; unrelated IDs sort lexically. Only
-`generated_files` is supported. Injection of upstream services and undeclared
+`generated_files` and `build_artifacts` are supported. Injection of upstream services and undeclared
 lifecycle phases reject. Package version, extension API, go-plugin application
 protocol `1`, framework core protocol `1` and private helper `0.1.0` are independent.
 
@@ -23,6 +23,20 @@ only the reserved directory. Native preparation and compilation are not rolled
 back if a later phase fails. Extension removal clears reserved files on the next
 preparation, including preparation without registrations. Native input contributions outside this narrow
 capability require a future explicit typed contract and currently reject.
+
+Post-build handlers receive `Input.Artifacts`, typed descriptors containing each
+completed compiler output's absolute path, kind and application ID. Earlier
+phases receive no artifacts. Extensions which use these descriptors must require
+`build_artifacts` and declare `post_build`, so older hosts reject them rather than
+silently providing incomplete context. This is an additive API1 capability; the
+private helper and go-plugin protocol versions are unchanged. Go, gRPC and Node
+carry the same fields. Descriptors and native pins are copied per handler, so a
+direct registration cannot alter the context seen by another extension or the
+host's result by editing a slice. Implementations remain trusted, must not mutate
+artifact/project files, and may return ancillary reports under their owned output
+directory. Failed inspection fails the build operation with no artifact result;
+the already compiled artifact is not rolled back or deleted. This does not add
+native source membership, arbitrary artifact mutation or signing authority.
 
 Go consumers implement `extension.Extension` and register directly. External
 Go executables call `transport.Serve(implementation)` from main. Hosts use

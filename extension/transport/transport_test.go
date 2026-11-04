@@ -59,6 +59,15 @@ func TestRealGoAndNodeEquivalent(t *testing.T) {
 			if _, e = impl.Invoke(ctx, extension.Input{Revision: "fail"}); e == nil {
 				t.Fatal("async failure lost")
 			}
+			artifactPath := filepath.Join(t.TempDir(), "app with spaces.apk")
+			if e = os.WriteFile(artifactPath, []byte("fixture compiler bytes"), 0600); e != nil {
+				t.Fatal(e)
+			}
+			out, e = impl.Invoke(ctx, extension.Input{Phase: extension.PostBuild, Artifacts: []extension.Artifact{{Path: artifactPath, Kind: "apk", ApplicationID: "org.example.artifact"}}})
+			want := artifactPath + "\napk\norg.example.artifact\nfixture compiler bytes"
+			if e != nil || !reflect.DeepEqual(out.Files, []extension.File{{Path: "artifact.txt", Content: want}}) {
+				t.Fatal("artifact context/read", out, e)
+			}
 			canceled, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 			defer cancel()
 			if _, e = impl.Invoke(canceled, extension.Input{Revision: "cancel"}); !errors.Is(e, context.DeadlineExceeded) {
@@ -75,9 +84,14 @@ func TestRealGoAndNodeEquivalent(t *testing.T) {
 type direct struct{}
 
 func (direct) Manifest(context.Context) (extension.Manifest, error) {
-	return extension.Manifest{ID: "fixture", API: "1", Version: "1.0.0", Phases: []extension.Phase{extension.Collect}}, nil
+	return extension.Manifest{ID: "fixture", API: "1", Version: "1.0.0", Phases: []extension.Phase{extension.Collect, extension.PostBuild}, Required: []string{"generated_files", "build_artifacts"}}, nil
 }
 func (direct) Invoke(ctx context.Context, in extension.Input) (extension.Result, error) {
+	if in.Phase == extension.PostBuild {
+		a := in.Artifacts[0]
+		data, e := os.ReadFile(a.Path)
+		return extension.Result{Files: []extension.File{{Path: "artifact.txt", Content: a.Path + "\n" + a.Kind + "\n" + a.ApplicationID + "\n" + string(data)}}}, e
+	}
 	if in.Revision == "fail" {
 		return extension.Result{}, errors.New("async failure")
 	}

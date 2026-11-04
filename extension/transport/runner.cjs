@@ -29804,6 +29804,7 @@ var require_extension_pb = __commonJS({
       }
       return Function("return this")();
     }.call(null);
+    goog2.exportSymbol("proto.nativescript.extension.v1.Artifact", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Empty", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.File", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Input", null, global2);
@@ -29830,6 +29831,13 @@ var require_extension_pb = __commonJS({
     goog2.inherits(proto.nativescript.extension.v1.Pin, jspb2.Message);
     if (goog2.DEBUG && !COMPILED) {
       proto.nativescript.extension.v1.Pin.displayName = "proto.nativescript.extension.v1.Pin";
+    }
+    proto.nativescript.extension.v1.Artifact = function(opt_data) {
+      jspb2.Message.initialize(this, opt_data, 0, -1, null, null);
+    };
+    goog2.inherits(proto.nativescript.extension.v1.Artifact, jspb2.Message);
+    if (goog2.DEBUG && !COMPILED) {
+      proto.nativescript.extension.v1.Artifact.displayName = "proto.nativescript.extension.v1.Artifact";
     }
     proto.nativescript.extension.v1.Input = function(opt_data) {
       jspb2.Message.initialize(this, opt_data, 0, -1, proto.nativescript.extension.v1.Input.repeatedFields_, null);
@@ -30212,7 +30220,119 @@ var require_extension_pb = __commonJS({
     proto.nativescript.extension.v1.Pin.prototype.setVersion = function(value) {
       return jspb2.Message.setProto3StringField(this, 2, value);
     };
-    proto.nativescript.extension.v1.Input.repeatedFields_ = [6];
+    if (jspb2.Message.GENERATE_TO_OBJECT) {
+      proto.nativescript.extension.v1.Artifact.prototype.toObject = function(opt_includeInstance) {
+        return proto.nativescript.extension.v1.Artifact.toObject(opt_includeInstance, this);
+      };
+      proto.nativescript.extension.v1.Artifact.toObject = function(includeInstance, msg) {
+        var f, obj = {
+          path: jspb2.Message.getFieldWithDefault(msg, 1, ""),
+          kind: jspb2.Message.getFieldWithDefault(msg, 2, ""),
+          applicationid: jspb2.Message.getFieldWithDefault(msg, 3, "")
+        };
+        if (includeInstance) {
+          obj.$jspbMessageInstance = msg;
+        }
+        return obj;
+      };
+    }
+    proto.nativescript.extension.v1.Artifact.deserializeBinary = function(bytes) {
+      var reader = new jspb2.BinaryReader(bytes);
+      var msg = new proto.nativescript.extension.v1.Artifact();
+      return proto.nativescript.extension.v1.Artifact.deserializeBinaryFromReader(msg, reader);
+    };
+    proto.nativescript.extension.v1.Artifact.deserializeBinaryFromReader = function(msg, reader) {
+      while (reader.nextField()) {
+        if (reader.isEndGroup()) {
+          break;
+        }
+        var field = reader.getFieldNumber();
+        switch (field) {
+          case 1:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setPath(value);
+            break;
+          case 2:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setKind(value);
+            break;
+          case 3:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setApplicationid(value);
+            break;
+          default:
+            reader.skipField();
+            break;
+        }
+      }
+      return msg;
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.serializeBinary = function() {
+      var writer = new jspb2.BinaryWriter();
+      proto.nativescript.extension.v1.Artifact.serializeBinaryToWriter(this, writer);
+      return writer.getResultBuffer();
+    };
+    proto.nativescript.extension.v1.Artifact.serializeBinaryToWriter = function(message, writer) {
+      var f = void 0;
+      f = message.getPath();
+      if (f.length > 0) {
+        writer.writeString(
+          1,
+          f
+        );
+      }
+      f = message.getKind();
+      if (f.length > 0) {
+        writer.writeString(
+          2,
+          f
+        );
+      }
+      f = message.getApplicationid();
+      if (f.length > 0) {
+        writer.writeString(
+          3,
+          f
+        );
+      }
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.getPath = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 1, "")
+      );
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.setPath = function(value) {
+      return jspb2.Message.setProto3StringField(this, 1, value);
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.getKind = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 2, "")
+      );
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.setKind = function(value) {
+      return jspb2.Message.setProto3StringField(this, 2, value);
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.getApplicationid = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 3, "")
+      );
+    };
+    proto.nativescript.extension.v1.Artifact.prototype.setApplicationid = function(value) {
+      return jspb2.Message.setProto3StringField(this, 3, value);
+    };
+    proto.nativescript.extension.v1.Input.repeatedFields_ = [6, 7];
     if (jspb2.Message.GENERATE_TO_OBJECT) {
       proto.nativescript.extension.v1.Input.prototype.toObject = function(opt_includeInstance) {
         return proto.nativescript.extension.v1.Input.toObject(opt_includeInstance, this);
@@ -30227,6 +30347,11 @@ var require_extension_pb = __commonJS({
           pinsList: jspb2.Message.toObjectList(
             msg.getPinsList(),
             proto.nativescript.extension.v1.Pin.toObject,
+            includeInstance
+          ),
+          artifactsList: jspb2.Message.toObjectList(
+            msg.getArtifactsList(),
+            proto.nativescript.extension.v1.Artifact.toObject,
             includeInstance
           )
         };
@@ -30288,6 +30413,11 @@ var require_extension_pb = __commonJS({
             reader.readMessage(value, proto.nativescript.extension.v1.Pin.deserializeBinaryFromReader);
             msg.addPins(value);
             break;
+          case 7:
+            var value = new proto.nativescript.extension.v1.Artifact();
+            reader.readMessage(value, proto.nativescript.extension.v1.Artifact.deserializeBinaryFromReader);
+            msg.addArtifacts(value);
+            break;
           default:
             reader.skipField();
             break;
@@ -30343,6 +30473,14 @@ var require_extension_pb = __commonJS({
           6,
           f,
           proto.nativescript.extension.v1.Pin.serializeBinaryToWriter
+        );
+      }
+      f = message.getArtifactsList();
+      if (f.length > 0) {
+        writer.writeRepeatedMessage(
+          7,
+          f,
+          proto.nativescript.extension.v1.Artifact.serializeBinaryToWriter
         );
       }
     };
@@ -30405,6 +30543,21 @@ var require_extension_pb = __commonJS({
     };
     proto.nativescript.extension.v1.Input.prototype.clearPinsList = function() {
       return this.setPinsList([]);
+    };
+    proto.nativescript.extension.v1.Input.prototype.getArtifactsList = function() {
+      return (
+        /** @type{!Array<!proto.nativescript.extension.v1.Artifact>} */
+        jspb2.Message.getRepeatedWrapperField(this, proto.nativescript.extension.v1.Artifact, 7)
+      );
+    };
+    proto.nativescript.extension.v1.Input.prototype.setArtifactsList = function(value) {
+      return jspb2.Message.setRepeatedWrapperField(this, 7, value);
+    };
+    proto.nativescript.extension.v1.Input.prototype.addArtifacts = function(opt_value, opt_index) {
+      return jspb2.Message.addToRepeatedWrapperField(this, 7, opt_value, proto.nativescript.extension.v1.Artifact, opt_index);
+    };
+    proto.nativescript.extension.v1.Input.prototype.clearArtifactsList = function() {
+      return this.setArtifactsList([]);
     };
     if (jspb2.Message.GENERATE_TO_OBJECT) {
       proto.nativescript.extension.v1.File.prototype.toObject = function(opt_includeInstance) {
@@ -31406,7 +31559,7 @@ async function main() {
       call.on("cancelled", () => controller.abort());
       try {
         const v = call.request;
-        const input = { phase: v.getPhase(), project: v.getProject(), platform: v.getPlatform(), configuration: v.getConfiguration(), revision: v.getRevision(), pins: v.getPinsList().map((p) => ({ name: p.getName(), version: p.getVersion() })) };
+        const input = { phase: v.getPhase(), project: v.getProject(), platform: v.getPlatform(), configuration: v.getConfiguration(), revision: v.getRevision(), pins: v.getPinsList().map((p) => ({ name: p.getName(), version: p.getVersion() })), artifacts: v.getArtifactsList().map((a2) => ({ path: a2.getPath(), kind: a2.getKind(), applicationId: a2.getApplicationid() })) };
         const out = await impl.invoke(input, { signal: controller.signal });
         const result = new wire.Result();
         result.setFilesList((out.files || []).map((f) => {
