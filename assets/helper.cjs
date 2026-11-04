@@ -17639,7 +17639,7 @@ var require_xcode2 = __commonJS({
       resolved = normalize(resolved);
       if (!path2.isAbsolute(directory || "") || !resolved?.applicationID) fail("invalid_input");
       const runtime = resolved.packages.find((p) => p.name === "@nativescript/ios");
-      if (!runtime || runtime.version !== "8.9.0") fail("unavailable");
+      if (!runtime || !["8.9.0", "9.1.0"].includes(runtime.version)) fail("unavailable");
       const template = path2.join(runtime.directory, "framework");
       if (!fs2.existsSync(path2.join(template, "__PROJECT_NAME__.xcodeproj/project.pbxproj"))) fail("unavailable");
       const name = "NativeScriptApp", projectFile = path2.join(directory, `${name}.xcodeproj/project.pbxproj`);
@@ -17803,7 +17803,7 @@ var require_xcode2 = __commonJS({
 ` + configs.map((p) => `#include ${q(p)}
 `).join(""));
       const ruby = (value) => `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-      write(path2.join(directory, "Podfile"), `platform :ios, '13.0'
+      if (pods.length || previous.pods) write(path2.join(directory, "Podfile"), `platform :ios, '13.0'
 project '${name}.xcodeproj'
 target '${name}' do
 ` + pods.map((p) => path2.extname(p) === ".podspec" ? `  pod ${ruby(path2.basename(p, ".podspec"))}, :path => ${ruby(path2.dirname(p))}
@@ -17811,9 +17811,11 @@ target '${name}' do
 `).join("") + "end\n");
       write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages }, null, 2) + "\n");
       write(projectFile, project.writeSync());
-      write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: packages.length > 0 || !!previous.spm }) + "\n");
+      write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || !!previous.spm }) + "\n");
       fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
-      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: packages.length > 0 || !!previous.spm, target: name };
+      const bundlePackage = path2.join(directory, "app/package.json");
+      if (!fs2.existsSync(bundlePackage)) write(bundlePackage, JSON.stringify({ main: "bundle.js" }));
+      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || !!previous.spm, target: name };
     };
   }
 });

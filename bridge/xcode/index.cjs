@@ -37,7 +37,7 @@ module.exports = async ({ resolved, directory }) => {
   resolved = normalize(resolved);
   if (!path.isAbsolute(directory || '') || !resolved?.applicationID) fail('invalid_input');
   const runtime = resolved.packages.find(p => p.name === '@nativescript/ios');
-  if (!runtime || runtime.version !== '8.9.0') fail('unavailable');
+  if (!runtime || !['8.9.0','9.1.0'].includes(runtime.version)) fail('unavailable');
   const template = path.join(runtime.directory, 'framework');
   if (!fs.existsSync(path.join(template, '__PROJECT_NAME__.xcodeproj/project.pbxproj'))) fail('unavailable');
   const name = 'NativeScriptApp', projectFile = path.join(directory, `${name}.xcodeproj/project.pbxproj`);
@@ -171,10 +171,12 @@ module.exports = async ({ resolved, directory }) => {
   write(path.join(directory,'internal/NativeContributions/module.modulemap'), 'module NativeContributions {\n'+headers.map(p=>`  header ${q(p)}\n`).join('')+'  export *\n}\n');
   for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+configs.map(p=>`#include ${q(p)}\n`).join(''));
   const ruby = value => `'${value.replaceAll('\\','\\\\').replaceAll("'","\\'")}'`;
-  write(path.join(directory,'Podfile'), `platform :ios, '13.0'\nproject '${name}.xcodeproj'\ntarget '${name}' do\n`+pods.map(p=>path.extname(p)==='.podspec'?`  pod ${ruby(path.basename(p,'.podspec'))}, :path => ${ruby(path.dirname(p))}\n`:`  instance_eval(File.read(${ruby(p)}), ${ruby(p)})\n`).join('')+'end\n');
+  if(pods.length || previous.pods) write(path.join(directory,'Podfile'), `platform :ios, '13.0'\nproject '${name}.xcodeproj'\ntarget '${name}' do\n`+pods.map(p=>path.extname(p)==='.podspec'?`  pod ${ruby(path.basename(p,'.podspec'))}, :path => ${ruby(path.dirname(p))}\n`:`  instance_eval(File.read(${ruby(p)}), ${ruby(p)})\n`).join('')+'end\n');
   write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages},null,2)+'\n');
   write(projectFile,project.writeSync());
-  write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:packages.length>0 || !!previous.spm})+'\n');
+  write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || !!previous.spm})+'\n');
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});
-  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:packages.length>0 || !!previous.spm,target:name};
+  const bundlePackage=path.join(directory,'app/package.json');
+  if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.js'}));
+  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || !!previous.spm,target:name};
 };

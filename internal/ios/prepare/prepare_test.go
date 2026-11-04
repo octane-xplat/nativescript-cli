@@ -89,3 +89,23 @@ func TestDependencyToolRetainsLeaseUntilRetirement(t *testing.T) {
 	}
 	replacement.Release()
 }
+
+func TestInstalledRuntimeControlsPackageMinimum(t *testing.T) {
+	dir, e := filepath.Abs("testdata/runtime")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, tc := range []struct {
+		version, minimum string
+		supported        bool
+	}{
+		{"8.9.0", "8", true}, {"8.9.0", "9.1.0", false}, {"9.1.0", "9.1.0", true},
+		{"9.1.0", "9.1.1", false}, {"9.1.1", "9", false},
+	} {
+		r := project.Resolved{Packages: []project.Package{{Name: "@nativescript/ios", Version: tc.version, Directory: dir}, {Name: "plugin", IOSRequirement: tc.minimum}}}
+		e := (Adapter{}).Validate(r, project.Target{Platform: "ios"})
+		if (e == nil) != tc.supported {
+			t.Fatalf("%+v: %v", tc, e)
+		}
+	}
+}

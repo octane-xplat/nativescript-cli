@@ -1,7 +1,10 @@
 # iOS preparation
 
 Public `Client.Prepare` now resolves the installed project and prepares the
-unmodified published `@nativescript/ios` **8.9.0** runtime template. Other runtime
+published `@nativescript/ios` **8.9.0** and **9.1.0** runtime templates.
+The 9.1.0 template owns an exact NativeScript SwiftPM dependency; preparation
+resolves it with Xcode, retains Package.resolved, and preserves its product link.
+The 8.9.0 template retains its bundled XCFramework contract. Other runtime
 versions return unavailable until qualified. Plugin iOS minimums accept plain
 one-to-three-part numeric versions; newer or unrecognized requirements fail. The runtime is an explicit installed
 app dependency or devDependency; nothing downloads or invokes an upstream CLI.
@@ -9,7 +12,7 @@ The template's XCFramework archive is expanded using `/usr/bin/unzip` lazily.
 
 Preparation owns one F2 project lease through J1 editing and every dependency
 child's retirement. Go consumers need no npm CLI or helper generation step.
-Android preparation remains unavailable. The iOS compiler is described in [iOS compilation](ios-build.md).
+Android preparation is described in [Android preparation](android-preparation.md). The iOS compiler is described in [iOS compilation](ios-build.md).
 
 The generated native directory contains `NativeScriptApp.xcodeproj`, runtime
 scripts/frameworks/tools, `app/` (the V1 bundle destination), generated Info.plist,
@@ -42,9 +45,18 @@ survive. Once a workspace has used Pods/SPM, subsequent preparation also invokes
 tools, including removal and retries, to retire integrations and retain pins.
 P1 owns its generated settings and files; callers should contribute through their
 app resources instead of editing those files. Arbitrary multi-target workspaces,
-remote SPM declarations, runtime upgrades, localized variant-group merging and
+arbitrary remote SPM contributions, in-place runtime upgrades, localized variant-group merging and
 binary plist merging are unavailable. Preparation is not a rollback transaction:
 a failed operation can leave incomplete generated files, but returns no success;
 retry uses retained ownership state. Source packages must remain immutable during
 a call. Native compilation, signing, metadata correctness on a device and G2–G6
 remain separate qualification gates.
+
+An empty native dependency graph does not create a Podfile. Explicit Prepare
+creates the runtime entry package.json when no bundle has supplied one. With
+OTAStartup enabled, the canonical installed producer runs after real runtime
+SwiftPM and contributed Pod/SPM resolution under the same project lease.
+The numeric plugin minimum is compared with the installed supported runtime;
+9.1 requirements remain unavailable on 8.9.0. Exact versions outside the matrix
+remain unavailable. The app must set a deployment target supported by its Xcode
+SDK (the current iOS27 host requires at least 15.0 via build.xcconfig).

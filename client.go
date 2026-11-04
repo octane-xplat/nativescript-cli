@@ -42,7 +42,7 @@ func New(options Options) (*Client, error) {
 		if options.OTAStartup {
 			ota = extensions.OTAStartup{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}
 		}
-		return workflow.Stages{OTA: ota, Extensions: options.Extensions, Devices: platformDevices{env: env}, Launcher: platformDevices{env: env}, Preparer: platformPreparer{ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		return workflow.Stages{OTA: ota, Extensions: options.Extensions, Devices: platformDevices{env: env}, Launcher: platformDevices{env: env}, Preparer: platformPreparer{android: androidprepare.Adapter{ResolveDependencies: options.OTAStartup, Environment: env}, ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }
@@ -268,17 +268,20 @@ func publicIdentity(i project.Identity) Identity {
 }
 
 // platformPreparer selects only the adapter for the explicit target.
-type platformPreparer struct{ ios iosprepare.Adapter }
+type platformPreparer struct {
+	ios     iosprepare.Adapter
+	android androidprepare.Adapter
+}
 
 func (p platformPreparer) Validate(r project.Resolved, t project.Target) error {
 	if t.Platform == "android" {
-		return (androidprepare.Adapter{}).Validate(r, t)
+		return p.android.Validate(r, t)
 	}
 	return p.ios.Validate(r, t)
 }
 func (p platformPreparer) Prepare(ctx context.Context, r project.Resolved, l workspace.Lease) (project.Prepared, error) {
 	if l.Layout().Identity.Target.Platform == "android" {
-		return (androidprepare.Adapter{}).Prepare(ctx, r, l)
+		return p.android.Prepare(ctx, r, l)
 	}
 	return p.ios.Prepare(ctx, r, l)
 }

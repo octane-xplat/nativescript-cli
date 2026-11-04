@@ -1,9 +1,9 @@
 # Android preparation
 
 Public `Client.Prepare` supports Android using the explicitly installed
-`@nativescript/android` 9.0.0 runtime. It copies published runtime templates,
+`@nativescript/android` 9.0.0 or 9.1.1 runtime. It copies published runtime templates,
 wrapper, AARs and binding/metadata tools; it does not use an upstream CLI or
-existing generated platform tree. Node is needed by resolution. Java, the SDK
+existing generated platform tree. Node is needed by resolution. For ordinary preparation, Java, the SDK
 and Gradle dependency downloads are deferred to compilation.
 
 Preparation holds the real F2 project lease, builds a fresh staging tree and
@@ -34,7 +34,23 @@ settings outside the bundle tree.
 
 Unrecognized Gradle/property contributions, native C/C++ sources without an
 explicit supported build contract, and symlinks within native trees return
-explicit unavailable errors. No dependency installation, signing, native
+explicit unavailable errors. Ordinary Prepare performs no dependency installation, signing, native
 compilation, metadata execution or device qualification is implied by Prepare.
 B2 owns compilation/artifact detection; D2 owns device operations. Real Android
 build/runtime health, release artifacts and G3–G6 remain separate gates.
+
+OTAStartup preparation additionally runs the copied runtime wrapper offline,
+under the F2 lease, before publishing the staged generation. It locks and
+resolves the selected debug/release compile and runtime dependency graph and
+external artifacts; project contribution artifacts remain compiler-owned. A
+missing cached dependency fails preparation, retaining the previous generation.
+The canonical producer then reads the real Gradle locks and publishes startup,
+stamp and fingerprint outputs. No synthetic lockfile substitutes for resolution.
+
+9.1.1 retains its published Gradle 8.14.3 wrapper, Android Gradle plugin 8.12.1,
+SDK/build tools 35/35.0.0, Java17 bytecode and template Kotlin 2.4.10 settings.
+Use the actual template settings, not the stale Kotlin 2.0.0 package version_info.
+Plugin numeric minimums compare with the installed supported runtime; 9.1
+requirements remain unavailable on 9.0.0. Other exact runtimes, including the
+unqualified 9.1.0 Android package, remain unavailable. Native build success
+and device/offline OTA acceptance require their own evidence.

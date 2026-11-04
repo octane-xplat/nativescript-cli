@@ -205,3 +205,53 @@ func TestAndroidPrepareActualPublishedRuntime(t *testing.T) {
 	}
 	t.Log("Published runtime templates/tools/AARs + real R1/F2/public Prepare; no Gradle compile or device assertion")
 }
+
+// A real failing dependency child must not publish a replacement generation or
+// proceed to OTA; this also verifies that the public option reaches P2.
+func TestAndroidOTADependencyFailurePreservesGeneration(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("Unix wrapper fixture")
+	}
+	root, c, q := androidApp(t, false)
+	before, e := c.Prepare(context.Background(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	wrapper := filepath.Join(root, "node_modules/@nativescript/android/framework/gradlew")
+	if e = os.WriteFile(wrapper, []byte("#!/bin/sh\nexit 17\n"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	ota, e := ns.New(ns.Options{OTAStartup: true})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = ota.Prepare(context.Background(), q); !errors.Is(e, ns.ErrBuild) {
+		t.Fatalf("dependency failure: %v", e)
+	}
+	if _, e = os.Stat(filepath.Join(before.NativeDir, "dependencies.json")); e != nil {
+		t.Fatal("previous generation lost", e)
+	}
+	if _, e = c.Prepare(context.Background(), q); e != nil {
+		t.Fatal("lease not released", e)
+	}
+}
+
+func TestAndroidRuntimeMinimumMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		version, minimum string
+		supported        bool
+	}{
+		{"9.0.0", "9", true}, {"9.0.0", "9.1.0", false}, {"9.1.1", "9.1.0", true},
+		{"9.1.1", "9.1.2", false}, {"9.1.0", "9.1.0", false}, {"9.2.0", "9", false},
+	} {
+		t.Run(tc.version+"_"+tc.minimum, func(t *testing.T) {
+			root, c, q := androidApp(t, false)
+			resolutionFile(t, root, "node_modules/@nativescript/android/package.json", `{"name":"@nativescript/android","version":"`+tc.version+`"}`)
+			resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1.0.0","nativescript":{"platforms":{"android":"`+tc.minimum+`"}}}`)
+			_, e := c.Prepare(context.Background(), q)
+			if (e == nil) != tc.supported {
+				t.Fatalf("%+v: %v", tc, e)
+			}
+		})
+	}
+}

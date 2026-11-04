@@ -16,6 +16,8 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  }
  const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions};
  const output=path.join(dir,'generated');const q={directory:output,resolved:r};await prepare(q);
+ assert.equal(fs.existsSync(path.join(output,'Podfile')),false);
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output,'app/package.json'))),{main:'bundle.js'});
  const file=path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj');
  let project=xcode.project(file);project.parseSync();
  const o=project.hash.project.objects;const owned=JSON.parse(fs.readFileSync(path.join(output,'.p1.json'))).ids;
@@ -43,4 +45,14 @@ test('Pods and local SPM membership and removal',{skip:process.platform!=='darwi
  const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');assert.match(fs.readFileSync(file,'utf8'),/XCLocalSwiftPackageReference/);assert.match(fs.readFileSync(file,'utf8'),/productName = "Example"/);assert.match(fs.readFileSync(path.join(q.directory,'Podfile'),'utf8'),/instance_eval/);
  const original=fs.readFileSync(file,'utf8');await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),original);
  r.contributions=[];const removed=await prepare(q);assert.equal(removed.pods,true);assert.equal(removed.spm,true);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Example"/);
+});
+
+test('unqualified runtime versions fail before template materialization', async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1-version-'));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const prepare=require('./index.cjs');
+ for(const version of ['9.0.0','9.1.1','10.0.0']) {
+  await assert.rejects(prepare({resolved:{applicationID:'org.example.test',packages:[{name:'@nativescript/ios',version,directory:path.resolve('internal/ios/prepare/testdata/runtime')}]},directory:path.join(dir,version)}),e=>e.code==='unavailable');
+  assert.equal(fs.existsSync(path.join(dir,version)),false);
+ }
 });

@@ -11,21 +11,26 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
-const RuntimeVersion = "9.0.0"
+const supportedRuntimeVersions = "9.0.0 or 9.1.1"
 
-type Adapter struct{}
+type Adapter struct {
+	// ResolveDependencies records the real variant graph before canonical OTA stamping.
+	ResolveDependencies bool
+	Environment         map[string]string
+	Executor            process.Executor
+}
 
 func runtimeDir(r project.Resolved) string {
 	for _, p := range r.Packages {
-		if p.Name == "@nativescript/android" && p.Version == RuntimeVersion {
+		if p.Name == "@nativescript/android" && project.RuntimeSupported("android", p.Version) {
 			return filepath.Join(p.Directory, "framework")
 		}
 	}
@@ -40,37 +45,30 @@ func (Adapter) Validate(r project.Resolved, t project.Target) error {
 	}
 	dir := runtimeDir(r)
 	if dir == "" {
-		return fmt.Errorf("install @nativescript/android %s explicitly: %w", RuntimeVersion, workflow.ErrUnavailable)
+		return fmt.Errorf("install @nativescript/android %s explicitly: %w", supportedRuntimeVersions, workflow.ErrUnavailable)
 	}
 	for _, name := range []string{"build.gradle", "settings.gradle", "app/build.gradle", "gradlew", "gradle/wrapper/gradle-wrapper.jar", "build-tools/static-binding-generator.jar", "build-tools/android-metadata-generator.jar"} {
 		if st, e := os.Stat(filepath.Join(dir, name)); e != nil || !st.Mode().IsRegular() {
 			return fmt.Errorf("Android runtime template incomplete: %w", workflow.ErrUnavailable)
 		}
 	}
+	var installed string
 	for _, p := range r.Packages {
-		if p.AndroidRequirement != "" {
-			parts := strings.Split(p.AndroidRequirement, ".")
-			if len(parts) > 3 {
-				return workflow.ErrUnavailable
-			}
-			v := [3]int{}
-			for i, s := range parts {
-				n, e := strconv.Atoi(s)
-				if e != nil || n < 0 {
-					return workflow.ErrUnavailable
-				}
-				v[i] = n
-			}
-			if v[0] > 9 || v[0] == 9 && (v[1] > 0 || v[2] > 0) {
-				return workflow.ErrUnavailable
-			}
+		if p.Name == "@nativescript/android" {
+			installed = p.Version
 		}
 	}
+	for _, p := range r.Packages {
+		if p.AndroidRequirement != "" && !project.RuntimeSatisfies(installed, p.AndroidRequirement) {
+			return workflow.ErrUnavailable
+		}
+	}
+
 	return nil
 }
 
-// Prepare never invokes Gradle or installs dependencies. Failed staging leaves the
-// previously published generation intact; all paths consumed by Gradle are local.
+// Prepare resolves cached Gradle dependencies only for OTA-enabled callers.
+// Failed staging leaves the previously published generation intact.
 func (a Adapter) Prepare(ctx context.Context, r project.Resolved, l workspace.Lease) (project.Prepared, error) {
 	if err := ctx.Err(); err != nil {
 		return project.Prepared{}, err
@@ -99,6 +97,38 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, l workspace.Le
 	dir := stage.State.NativeDir
 	if err = materialize(ctx, r, dir); err != nil {
 		return project.Prepared{}, err
+	}
+	if a.ResolveDependencies {
+		// Resolve, rather than Gradle's diagnostic dependencies task: unresolved
+		// artifacts must fail before a generation or compatibility stamp is published.
+		script := `
+allprojects { dependencyLocking { lockAllConfigurations() } }
+project(':app') { tasks.register('resolveNativeDependencies') { doLast {
+ ['` + layout.Identity.Target.Configuration + `CompileClasspath','` + layout.Identity.Target.Configuration + `RuntimeClasspath'].each { name ->
+ def config = configurations.getByName(name)
+ config.incoming.resolutionResult.allDependencies.each { dep -> if (dep instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) { throw dep.failure } }
+ config.incoming.artifactView { componentFilter { id -> !(id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier) } }.files.files
+ }
+} } }
+`
+		b, e := os.ReadFile(filepath.Join(dir, "build.gradle"))
+		if e != nil {
+			return project.Prepared{}, e
+		}
+		if e = write(dir, "build.gradle", append(b, []byte(script)...)); e != nil {
+			return project.Prepared{}, e
+		}
+		executor := a.Executor
+		if executor == nil {
+			executor = process.Runner{}
+		}
+		child, e := executor.Start(ctx, process.Command{Executable: filepath.Join(dir, "gradlew"), Args: []string{"--offline", "--no-daemon", "--console=plain", "--max-workers=2", ":app:resolveNativeDependencies", "--write-locks"}, Dir: dir, Environment: a.Environment})
+		if e != nil {
+			return project.Prepared{}, e
+		}
+		if _, e = child.Wait(); e != nil {
+			return project.Prepared{}, fmt.Errorf("Android dependency resolution: %w", e)
+		}
 	}
 	state, err := stage.Commit(ctx)
 	if err != nil {

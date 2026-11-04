@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
@@ -68,7 +66,7 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 			var remote *jsbridge.RemoteError
 			if errors.As(err, &remote) {
 				if remote.Failure.Code == "unavailable" {
-					return fmt.Errorf("iOS preparation requires installed @nativescript/ios 8.9.0 and supported native inputs/tools: %w", workflow.ErrUnavailable)
+					return fmt.Errorf("iOS preparation requires installed @nativescript/ios 8.9.0 or 9.1.0 and supported native inputs/tools: %w", workflow.ErrUnavailable)
 				}
 				if remote.Failure.Code == "invalid_input" {
 					return workflow.ErrInvalid
@@ -107,7 +105,7 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 			}
 		}
 		if result.SPM {
-			args := []string{"-resolvePackageDependencies", "-scheme", result.Target}
+			args := []string{"-resolvePackageDependencies", "-skipPackageUpdates", "-scheme", result.Target}
 			if result.Pods {
 				args = append(args, "-workspace", filepath.Join(dir, result.Target+".xcworkspace"))
 			} else {
@@ -130,31 +128,23 @@ func (a Adapter) Validate(r project.Resolved, target project.Target) error {
 	if target.Platform != "ios" {
 		return workflow.ErrUnavailable
 	}
+	var installed string
 	for _, p := range r.Packages {
-		if p.IOSRequirement != "" {
-			parts := strings.Split(p.IOSRequirement, ".")
-			if len(parts) > 3 {
-				return workflow.ErrUnavailable
-			}
-			version := [3]int{}
-			for i, part := range parts {
-				n, err := strconv.Atoi(part)
-				if err != nil || n < 0 {
-					return fmt.Errorf("unsupported iOS runtime requirement: %w", workflow.ErrUnavailable)
-				}
-				version[i] = n
-			}
-			if version[0] > 8 || (version[0] == 8 && (version[1] > 9 || (version[1] == 9 && version[2] > 0))) {
-				return fmt.Errorf("native package requires a newer iOS runtime: %w", workflow.ErrUnavailable)
-			}
+		if p.Name == "@nativescript/ios" && project.RuntimeSupported("ios", p.Version) {
+			installed = p.Version
 		}
 	}
 	for _, p := range r.Packages {
-		if p.Name == "@nativescript/ios" && p.Version == "8.9.0" {
+		if p.IOSRequirement != "" && !project.RuntimeSatisfies(installed, p.IOSRequirement) {
+			return fmt.Errorf("native package requires an unsupported iOS runtime: %w", workflow.ErrUnavailable)
+		}
+	}
+	for _, p := range r.Packages {
+		if p.Name == "@nativescript/ios" && project.RuntimeSupported("ios", p.Version) {
 			if st, err := os.Stat(filepath.Join(p.Directory, "framework", "__PROJECT_NAME__.xcodeproj", "project.pbxproj")); err == nil && st.Mode().IsRegular() {
 				return nil
 			}
 		}
 	}
-	return fmt.Errorf("install @nativescript/ios 8.9.0 explicitly before preparing: %w", workflow.ErrUnavailable)
+	return fmt.Errorf("install @nativescript/ios 8.9.0 or 9.1.0 explicitly before preparing: %w", workflow.ErrUnavailable)
 }
