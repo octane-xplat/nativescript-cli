@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Stage a fresh, independently installed canonical native-guard fixture offline."""
+import argparse, json, pathlib, shutil, subprocess, uuid
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('platform', choices=['ios', 'android'])
+p.add_argument('updates', type=pathlib.Path)
+p.add_argument('fingerprint', type=pathlib.Path)
+p.add_argument('output', type=pathlib.Path)
+a = p.parse_args()
+dest = a.output.resolve()
+if dest.exists():
+    raise RuntimeError('output must be new; never reuse generated native trees')
+source = pathlib.Path(__file__).resolve().parent / a.platform / 'app'
+shutil.copytree(source, dest)
+manifest = {'name': 'p91-' + a.platform + '-guard', 'version': '1.0.0', 'private': True, 'dependencies': {'@octane-xplat/updates': 'file:' + str(a.updates.resolve()), '@octane-xplat/fingerprint': 'file:' + str(a.fingerprint.resolve()), 'p91-native-' + ('health' if a.platform == 'ios' else 'android-health'): 'file:./native-plugin'}, 'devDependencies': {'@nativescript/' + a.platform: '9.1.0' if a.platform == 'ios' else '9.1.1', 'vite': '7.3.1'}}
+(dest / 'package.json').write_text(json.dumps(manifest, indent=2) + '\n')
+if a.platform == 'android':
+    nonce = str(uuid.uuid4())
+    f = dest / 'app/app.js'
+    f.write_text(f.read_text().replace('P91_ANDROID_NONCE', nonce))
+    (dest / 'nonce').write_text(nonce)
+subprocess.run(['bun', 'install', '--offline', '--ignore-scripts'], cwd=dest, check=True)
+for f in (dest / 'node_modules').rglob('package.json'):
+    try:
+        name = json.loads(f.read_text()).get('name')
+    except (OSError, ValueError):
+        continue
+    if name in ['nativescript', '@nativescript/cli']:
+        raise RuntimeError('upstream CLI installed')
+print('PASS fresh installed canonical fixture:', dest)
