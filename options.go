@@ -40,7 +40,7 @@ type Target struct {
 // Options are copied at construction. No tools are discovered until an operation.
 // Sink may be called concurrently by independent operations.
 type Options struct {
-	// OTAStartup opts into installed @octane-xplat/updates 0.14 release startup wiring.
+	// OTAStartup opts into installed canonical @octane-xplat/updates and fingerprint 0.19.0 preparation.
 	// Automatic native compatibility fingerprinting is unavailable.
 	OTAStartup bool
 	// Extensions are explicit registrations; IDs must be unique across all execution forms.

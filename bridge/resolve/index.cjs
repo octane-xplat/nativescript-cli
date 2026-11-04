@@ -69,7 +69,7 @@ async function resolve({ projectDir }) {
     return fs.realpathSync(resolved);
   }
   function collect(dir, owner, cfg, resources) {
-    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'ios', 'android'], 'config');
+    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android'], 'config');
     if (cfg.ios !== undefined) keys(cfg.ios, [], 'iOS config');
     if (cfg.android !== undefined) keys(cfg.android, ['v8Flags', 'markingMode'], 'Android config');
     for (const key of ['v8Flags', 'markingMode']) if (cfg.android?.[key] !== undefined && typeof cfg.android[key] !== 'string') fail('invalid_input', 'Android runtime settings must be strings');
@@ -127,7 +127,18 @@ async function resolve({ projectDir }) {
   const app = json(path.join(root, 'package.json'));
   const cfg = await config(root, true);
   if (typeof cfg.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(cfg.id)) fail('invalid_input', 'Config id must be a dotted application identifier');
-  const normalized = { appPath: directory(root, cfg.appPath, 'app'), appResourcesPath: directory(root, cfg.appResourcesPath, 'App_Resources'), android: cfg.android ?? {} };
+  // The OTA handoff must preserve every evaluated value; JSON omission is not
+  // a supported normalization for canonical fingerprint inputs.
+  function serializable(value) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+    if (typeof value === 'number' && Number.isFinite(value)) return;
+    if (Array.isArray(value)) { for (const item of value) serializable(item); return; }
+    if (value && Object.getPrototypeOf(value) === Object.prototype) { for (const item of Object.values(value)) serializable(item); return; }
+    fail('unavailable', 'Native config must contain finite JSON values without omitted fields');
+  }
+  serializable(cfg);
+  if (cfg.buildPath !== undefined && (typeof cfg.buildPath !== 'string' || !cfg.buildPath)) fail('invalid_input', 'Config buildPath must be a nonempty string');
+  const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, 'app'), appResourcesPath: directory(root, cfg.appResourcesPath, 'App_Resources'), android: cfg.android ?? {} };
   collect(root, root, cfg, normalized.appResourcesPath);
   async function visit(dir, pkg, isRoot = false) {
     if (packages.has(dir)) return;

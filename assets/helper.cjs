@@ -17460,39 +17460,125 @@ var require_xcode = __commonJS({
   }
 });
 
+// bridge/extensions/canonical.json
+var require_canonical = __commonJS({
+  "bridge/extensions/canonical.json"(exports2, module2) {
+    module2.exports = {
+      "updates/native/boot.java": "8af30beb727b63060de36608f4aaeb53bd342bfb56941e71592edad52e01b893",
+      "updates/native/boot.m": "ff7184b275db852140b6a1e1539032e9c3985698543098236501e0c16189b22e",
+      "updates/prepare.cjs": "81cfc62fba12a37b84d45cef0bb2f1e3b05eb2959fe4282bda3e06f0060f29da",
+      "fingerprint/dist/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "fingerprint/dist/native-resolutions.js": "411a06ec66bb9adf8bea01dde1530eb43a2f2f2c8e8a4c2357f3b8d22d3b067a",
+      "fingerprint/dist/index.js": "d39ac04919ae0782cc0367d4f8d37db8250a1dbc2e4c1e8096050452bb00583c",
+      "fingerprint/dist/native-config.js": "52ba7cd597505ce6bc4b131e0aab71eb4a159c11a5278e80b4ee647dc9295ccb",
+      "fingerprint/dist/cli.js": "9c2c3bf872fa3776382d75a776e30d3dc6790a8a499f30ae03c8c6933247d0e3",
+      "fingerprint/dist/toolchain.js": "43c60db9a6229ec4dc6492d257321683f08b86d4e008e22773a73e7583a89a06"
+    };
+  }
+});
+
 // bridge/extensions/ota.cjs
 var require_ota = __commonJS({
   "bridge/extensions/ota.cjs"(exports2, module2) {
     "use strict";
     var fs2 = require("node:fs");
     var path2 = require("node:path");
-    var os = require("node:os");
     var { createRequire: createRequire2 } = require("node:module");
-    module2.exports = async function({ projectDir, nativeDir, platform, configuration, appResourcesPath, fingerprint }) {
-      if (fingerprint) throw Object.assign(new Error("canonical fingerprint producer unavailable"), { code: "unavailable" });
-      if (configuration !== "release") return { files: [], skipped: true };
-      if (![projectDir, nativeDir, appResourcesPath].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !["ios", "android"].includes(platform)) throw Object.assign(new Error(), { code: "invalid_input" });
+    var { pathToFileURL } = require("node:url");
+    var { createHash } = require("node:crypto");
+    function fail(code = "invalid_input") {
+      throw Object.assign(new Error("Canonical OTA preparation failed"), { code });
+    }
+    function inside(root, file) {
+      const rel = path2.relative(root, file);
+      return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
+    }
+    module2.exports = async function(p) {
+      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind } = p;
+      if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
       const req = createRequire2(path2.join(projectDir, "package.json"));
-      let file;
+      let producer, fingerprintFile;
       try {
-        file = req.resolve("@octane-xplat/updates/prepare");
+        producer = req.resolve("@octane-xplat/updates/prepare");
+        fingerprintFile = req.resolve("@octane-xplat/fingerprint");
       } catch {
-        throw Object.assign(new Error(), { code: "unavailable" });
+        fail("unavailable");
       }
-      const pkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(file), "package.json"), "utf8"));
-      if (pkg.version !== "0.14.0") throw Object.assign(new Error(), { code: "unavailable" });
-      const rel = platform === "ios" ? "internal/main.m" : "app/src/main/java/com/tns/NativeScriptApplication.java";
-      const shim = fs2.mkdtempSync(path2.join(os.tmpdir(), "nativescript-ota-"));
-      try {
-        const native = path2.join(shim, "platforms", platform);
-        fs2.mkdirSync(path2.dirname(native), { recursive: true });
-        fs2.cpSync(nativeDir, native, { recursive: true, dereference: true });
-        fs2.symlinkSync(appResourcesPath, path2.join(shim, "App_Resources"), "dir");
-        await req(file)({ projectDir: shim, platform });
-        return { files: [{ path: rel, content: fs2.readFileSync(path2.join(native, rel), "utf8") }], skipped: false };
-      } finally {
-        fs2.rmSync(shim, { recursive: true, force: true });
+      if (JSON.parse(fs2.readFileSync(path2.join(path2.dirname(producer), "package.json"))).version !== "0.19.0" || JSON.parse(fs2.readFileSync(path2.join(path2.dirname(fingerprintFile), "../package.json"))).version !== "0.19.0") fail("unavailable");
+      for (const [name, expected] of Object.entries(require_canonical())) {
+        const [pkg, ...parts] = name.split("/");
+        const base = pkg === "updates" ? path2.dirname(producer) : path2.resolve(path2.dirname(fingerprintFile), "..");
+        if (createHash("sha256").update(fs2.readFileSync(path2.join(base, ...parts))).digest("hex") !== expected) fail("unavailable");
       }
+      const canonical = await import(pathToFileURL(fingerprintFile).href);
+      const evaluated = await canonical.resolveNativeConfigAsync(projectDir);
+      const stable = (v) => JSON.stringify(v, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
+      if (stable(evaluated) !== stable(nativeConfig)) fail("unavailable");
+      for (const key2 of ["appPath", "appResourcesPath"]) {
+        const selected = nativeConfig[key2];
+        if (selected !== void 0 && (typeof selected !== "string" || !inside(projectDir, path2.resolve(projectDir, selected)))) fail("unavailable");
+      }
+      const buildRoot = path2.resolve(projectDir, nativeConfig.buildPath ?? "platforms");
+      if (!inside(projectDir, buildRoot) || buildRoot === projectDir) fail("unavailable");
+      const view = path2.join(stageDir, "project");
+      fs2.mkdirSync(view);
+      const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".xplat", ".xplat-ns"]);
+      const digest = (root) => {
+        const h = createHash("sha256");
+        function walk(dir) {
+          for (const e of fs2.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+            const f = path2.join(dir, e.name);
+            if (dir === root && ignored.has(e.name) || inside(buildRoot, f) || inside(stageDir, f)) continue;
+            if (e.isSymbolicLink()) fail("unavailable");
+            h.update(path2.relative(root, f));
+            if (e.isDirectory()) walk(f);
+            else h.update(fs2.readFileSync(f));
+          }
+        }
+        walk(root);
+        return h.digest("hex");
+      };
+      const before = digest(projectDir);
+      for (const e of fs2.readdirSync(projectDir)) {
+        const f = path2.join(projectDir, e);
+        if (ignored.has(e) || inside(buildRoot, f) || inside(stageDir, f)) continue;
+        fs2.cpSync(f, path2.join(view, e), { recursive: true, dereference: false, filter: (source) => !inside(buildRoot, source) && !inside(stageDir, source) });
+      }
+      fs2.symlinkSync(path2.join(projectDir, "node_modules"), path2.join(view, "node_modules"), "dir");
+      const rebase = (v) => typeof v === "string" ? v.replaceAll(projectDir, view) : Array.isArray(v) ? v.map(rebase) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebase(x)])) : v;
+      const config = rebase(nativeConfig);
+      const platforms = path2.resolve(view, config.buildPath ?? "platforms");
+      const native = path2.join(platforms, platform);
+      fs2.mkdirSync(path2.dirname(native), { recursive: true });
+      fs2.cpSync(nativeDir, native, { recursive: true, dereference: true });
+      const projectName = "NativeScriptApp";
+      const emitted = platform === "ios" ? path2.join(native, projectName, "app") : path2.join(native, "app/src/main/assets/app");
+      if (platform === "ios") {
+        fs2.mkdirSync(path2.dirname(emitted), { recursive: true });
+        fs2.cpSync(bundleDir, emitted, { recursive: true });
+      }
+      if (!fs2.existsSync(path2.join(emitted, "package.json"))) fail("unavailable");
+      if (platform === "ios" && fs2.existsSync(path2.join(native, "Podfile")) && !fs2.existsSync(path2.join(native, "Podfile.lock"))) fail("unavailable");
+      if (platform === "android" && !Array.from(fs2.globSync("**/{gradle.lockfile,dependency-locks/*.lockfile}", { cwd: native, exclude: ["**/build/**", "**/.gradle/**"] })).length) fail("unavailable");
+      const toolchain = await canonical.captureNativeToolchainAsync(projectDir, platform);
+      process.argv.push(destinationKind === "device" ? "--for-device" : "--emulator", "--arch", architecture);
+      await req(producer)({ projectDir: view, platform, projectName, platformsDir: platforms, nativeConfig: config, toolchain, release: configuration === "release" });
+      const recordFile = path2.join(view, ".xplat/fingerprints", platform + ".json");
+      const record = JSON.parse(fs2.readFileSync(recordFile));
+      const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
+      if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
+      const stamp = JSON.parse(fs2.readFileSync(path2.join(emitted, "xplat-native.json")));
+      if (stamp.hash !== record.hash || stamp.release !== (configuration === "release")) fail();
+      const output = path2.join(stageDir, "native");
+      fs2.cpSync(nativeDir, output, { recursive: true, dereference: true });
+      const boot = platform === "ios" ? "internal/main.m" : "app/src/main/java/com/tns/NativeScriptApplication.java";
+      fs2.copyFileSync(path2.join(native, boot), path2.join(output, boot));
+      const outputBundle = path2.join(output, path2.relative(nativeDir, bundleDir));
+      fs2.copyFileSync(path2.join(emitted, "xplat-native.json"), path2.join(outputBundle, "xplat-native.json"));
+      const records = path2.join(output, ".xplat/fingerprints");
+      fs2.mkdirSync(records, { recursive: true });
+      fs2.copyFileSync(recordFile, path2.join(records, platform + ".json"));
+      return { hash: record.hash, format: record.format, release: stamp.release };
     };
   }
 });
@@ -17928,7 +18014,7 @@ var require_resolve = __commonJS({
         return fs2.realpathSync(resolved);
       }
       function collect(dir, owner, cfg2, resources) {
-        keys(cfg2, ["id", "appPath", "appResourcesPath", "ios", "android"], "config");
+        keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android"], "config");
         if (cfg2.ios !== void 0) keys(cfg2.ios, [], "iOS config");
         if (cfg2.android !== void 0) keys(cfg2.android, ["v8Flags", "markingMode"], "Android config");
         for (const key2 of ["v8Flags", "markingMode"]) if (cfg2.android?.[key2] !== void 0 && typeof cfg2.android[key2] !== "string") fail("invalid_input", "Android runtime settings must be strings");
@@ -18001,7 +18087,22 @@ var require_resolve = __commonJS({
       const app = json(path2.join(root, "package.json"));
       const cfg = await config(root, true);
       if (typeof cfg.id !== "string" || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(cfg.id)) fail("invalid_input", "Config id must be a dotted application identifier");
-      const normalized = { appPath: directory(root, cfg.appPath, "app"), appResourcesPath: directory(root, cfg.appResourcesPath, "App_Resources"), android: cfg.android ?? {} };
+      function serializable(value) {
+        if (value === null || typeof value === "string" || typeof value === "boolean") return;
+        if (typeof value === "number" && Number.isFinite(value)) return;
+        if (Array.isArray(value)) {
+          for (const item of value) serializable(item);
+          return;
+        }
+        if (value && Object.getPrototypeOf(value) === Object.prototype) {
+          for (const item of Object.values(value)) serializable(item);
+          return;
+        }
+        fail("unavailable", "Native config must contain finite JSON values without omitted fields");
+      }
+      serializable(cfg);
+      if (cfg.buildPath !== void 0 && (typeof cfg.buildPath !== "string" || !cfg.buildPath)) fail("invalid_input", "Config buildPath must be a nonempty string");
+      const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, "app"), appResourcesPath: directory(root, cfg.appResourcesPath, "App_Resources"), android: cfg.android ?? {} };
       collect(root, root, cfg, normalized.appResourcesPath);
       async function visit(dir, pkg, isRoot = false) {
         if (packages.has(dir)) return;

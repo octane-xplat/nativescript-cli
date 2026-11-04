@@ -1,0 +1,11 @@
+{
+  "updates/native/boot.java": "8af30beb727b63060de36608f4aaeb53bd342bfb56941e71592edad52e01b893",
+  "updates/native/boot.m": "ff7184b275db852140b6a1e1539032e9c3985698543098236501e0c16189b22e",
+  "updates/prepare.cjs": "81cfc62fba12a37b84d45cef0bb2f1e3b05eb2959fe4282bda3e06f0060f29da",
+  "fingerprint/dist/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+  "fingerprint/dist/native-resolutions.js": "411a06ec66bb9adf8bea01dde1530eb43a2f2f2c8e8a4c2357f3b8d22d3b067a",
+  "fingerprint/dist/index.js": "d39ac04919ae0782cc0367d4f8d37db8250a1dbc2e4c1e8096050452bb00583c",
+  "fingerprint/dist/native-config.js": "52ba7cd597505ce6bc4b131e0aab71eb4a159c11a5278e80b4ee647dc9295ccb",
+  "fingerprint/dist/cli.js": "9c2c3bf872fa3776382d75a776e30d3dc6790a8a499f30ae03c8c6933247d0e3",
+  "fingerprint/dist/toolchain.js": "43c60db9a6229ec4dc6492d257321683f08b86d4e008e22773a73e7583a89a06"
+}

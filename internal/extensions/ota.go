@@ -3,28 +3,49 @@ package extensions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/octane-xplat/nativescript-cli/extension"
-	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
-	"github.com/octane-xplat/nativescript-cli/internal/project"
-	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
+	"github.com/octane-xplat/nativescript-cli/internal/process"
+	"github.com/octane-xplat/nativescript-cli/internal/project"
+	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
-// OTAStartup invokes the explicitly supported installed startup adapter. It does
-// not claim native-compatibility fingerprinting, absent from that producer.
+// ErrOTAUnavailable identifies missing or incompatible installed prerequisites.
+var ErrOTAUnavailable = errors.New("canonical OTA prerequisites unavailable")
+
+// OTAStartup preserves the installed canonical producer's fingerprint and boot
+// contract. All outputs replace one owned native directory after helper retirement.
 type OTAStartup struct{ Host jsbridge.Host }
+type otaRequest struct {
+	ProjectDir      string          `json:"projectDir"`
+	NativeDir       string          `json:"nativeDir"`
+	BundleDir       string          `json:"bundleDir"`
+	StageDir        string          `json:"stageDir"`
+	Platform        string          `json:"platform"`
+	Configuration   string          `json:"configuration"`
+	NativeConfig    json.RawMessage `json:"nativeConfig"`
+	Architecture    string          `json:"architecture"`
+	DestinationKind string          `json:"destinationKind"`
+}
 
 func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Prepared, l workspace.Lease) error {
-	if p.Identity.Target.Configuration != "release" {
-		return nil
+	if l == nil || !p.Identity.Compatible(l.Layout().Identity) || r.Revision != p.Identity.Revision || len(r.Config.NativeConfig) == 0 {
+		return fmt.Errorf("invalid OTA handoff")
 	}
 	owner, ok := l.(interface {
 		RunHelper(context.Context, func(context.Context) error) error
 	})
 	if !ok {
 		return fmt.Errorf("OTA requires workspace ownership")
+	}
+	rel, err := filepath.Rel(l.Layout().GeneratedRoot, p.NativeDir)
+	if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid OTA native output")
 	}
 	h := a.Host
 	h.ProjectDir = r.Directory
@@ -35,42 +56,46 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 		}
 		h.CacheDir = filepath.Join(cache, "octane-xplat", "nativescript-cli", "helper")
 	}
-	payload, _ := json.Marshal(map[string]interface{}{"projectDir": r.Directory, "nativeDir": p.NativeDir, "platform": p.Identity.Target.Platform, "configuration": p.Identity.Target.Configuration, "appResourcesPath": r.Config.AppResourcesPath})
 	return owner.RunHelper(ctx, func(ctx context.Context) error {
+		stage, e := os.MkdirTemp(filepath.Dir(p.NativeDir), ".ota-")
+		if e != nil {
+			return e
+		}
+		retained := false
+		defer func() {
+			if !retained {
+				_ = os.RemoveAll(stage)
+			}
+		}()
+		payload, e := json.Marshal(otaRequest{r.Directory, p.NativeDir, p.BundleDir, stage, p.Identity.Target.Platform, p.Identity.Target.Configuration, r.Config.NativeConfig, p.Identity.Target.Architecture, p.Identity.Target.DestinationKind})
+		if e != nil {
+			return e
+		}
 		f, e := h.Call(ctx, jsbridge.Request{Version: jsbridge.ProtocolVersion, ID: "ota", Feature: "extensions", Operation: "otaStartup", Payload: payload}, nil)
 		if e != nil {
+			retained = errors.Is(e, process.ErrCleanup)
+			var remote *jsbridge.RemoteError
+			if errors.As(e, &remote) && remote.Failure.Code == "unavailable" {
+				return errors.Join(ErrOTAUnavailable, e)
+			}
 			return e
 		}
-		var out struct{ Files []extension.File }
-		if e = json.Unmarshal(f.Payload, &out); e != nil {
-			return e
+		var out struct {
+			Hash    string
+			Format  string
+			Release bool
 		}
-		if len(out.Files) != 1 {
-			return fmt.Errorf("invalid OTA result")
-		}
-		file := out.Files[0]
-		expected := "internal/main.m"
-		if p.Identity.Target.Platform == "android" {
-			expected = "app/src/main/java/com/tns/NativeScriptApplication.java"
-		}
-		if file.Path != expected {
-			return fmt.Errorf("invalid OTA startup path")
-		}
-		temp, e := os.CreateTemp(filepath.Join(p.NativeDir, filepath.Dir(expected)), ".ota-")
-		if e != nil {
-			return e
-		}
-		defer os.Remove(temp.Name())
-		if _, e = temp.WriteString(file.Content); e != nil {
-			temp.Close()
-			return e
-		}
-		if e = temp.Close(); e != nil {
-			return e
+		if json.Unmarshal(f.Payload, &out) != nil || len(out.Hash) != 64 || out.Format != "octane-xplat.native-fingerprint.v1" || out.Release != (p.Identity.Target.Configuration == "release") {
+			return fmt.Errorf("invalid canonical OTA result")
 		}
 		if e = ctx.Err(); e != nil {
 			return e
 		}
-		return os.Rename(temp.Name(), filepath.Join(p.NativeDir, expected))
+		// Atomic directory exchange keeps the complete old generation available
+		// even if this process stops during publication. The staged path then owns it.
+		if e = swapNative(filepath.Join(stage, "native"), p.NativeDir); e != nil {
+			return e
+		}
+		return nil
 	})
 }

@@ -60,7 +60,7 @@ func operationError(op string, err error) error {
 		kind = context.DeadlineExceeded
 	case errors.Is(err, workflow.ErrInvalid), errors.Is(err, workspace.ErrInvalid), errors.Is(err, process.ErrInvalid):
 		kind = ErrInvalidInput
-	case errors.Is(err, workflow.ErrUnavailable):
+	case errors.Is(err, workflow.ErrUnavailable), errors.Is(err, extensions.ErrOTAUnavailable):
 		kind = ErrUnavailable
 	case errors.Is(err, process.ErrUnavailable), errors.Is(err, workspace.ErrUnavailable):
 		kind = ErrUnsupportedHost

@@ -221,3 +221,12 @@ func TestResolveAppResourceIdentity(t *testing.T) {
 		t.Fatal("resource source not tracked", err)
 	}
 }
+
+func TestResolveRejectsLossyCanonicalConfig(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.test.ota',appPath:'app',ios:undefined}`)
+	client, _ := ns.New(ns.Options{})
+	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatalf("lossy config accepted: %v", err)
+	}
+}

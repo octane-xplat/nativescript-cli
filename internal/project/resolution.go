@@ -1,10 +1,14 @@
 package project
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Resolution data is read-only input to platform preparation. A successful
 // resolution describes files; it does not assert that they have been prepared.
 type Config struct {
+	NativeConfig     json.RawMessage
 	AppPath          string
 	AppResourcesPath string
 	Android          AndroidConfig

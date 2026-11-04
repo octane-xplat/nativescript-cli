@@ -146,7 +146,7 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if !p.Identity.Compatible(l.Identity) || !filepath.IsAbs(p.NativeDir) || !filepath.IsAbs(p.BundleDir) {
 			return ErrHandoff
 		}
-		if s.OTA != nil {
+		if s.OTA != nil && !build {
 			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
 				return err
 			}
@@ -171,6 +171,11 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		}
 		if err = ctx.Err(); err != nil {
 			return err
+		}
+		if s.OTA != nil {
+			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
+				return err
+			}
 		}
 		a, err = s.Compiler.Compile(ctx, p, b, lease)
 		if err != nil {
