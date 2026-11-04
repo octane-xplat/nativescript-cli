@@ -54,7 +54,8 @@ module.exports = async function bundle(p, emit) {
     root: p.projectDir, configFile: false, logLevel: 'silent', mode: p.mode === 'watch' ? 'development' : 'production',
     ...(p.platform ? {
       resolve: { conditions: ['native', p.platform], extensions: [`.${p.platform}.ts`, `.${p.platform}.js`, '.ts', '.tsx', '.js', '.jsx', '.mjs', '.json'], alias: { '~': p.appPath } },
-      define: { 'global.isIOS': String(p.platform==='ios'), 'global.isAndroid': String(p.platform==='android'), '__IOS__': String(p.platform==='ios'), '__ANDROID__': String(p.platform==='android'), '__DEV__': String(p.configuration==='debug') },
+      // Core's native modules read these at startup; this adapter emits an ESM-derived IIFE.
+      define: { 'global.isIOS': String(p.platform==='ios'), 'global.isAndroid': String(p.platform==='android'), '__IOS__': String(p.platform==='ios'), '__ANDROID__': String(p.platform==='android'), '__APPLE__': String(p.platform==='ios'), '__VISIONOS__': 'false', '__COMMONJS__': 'false', '__DEV__': String(p.configuration==='debug') },
     } : {}),
     plugins: [manifest],
     build: { outDir: p.directory, emptyOutDir: false, minify: false,

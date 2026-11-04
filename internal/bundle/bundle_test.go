@@ -368,7 +368,7 @@ func TestNativePackageAndPlatformResolution(t *testing.T) {
 			for _, osname := range []string{"ios", "android"} {
 				write(t, filepath.Join(r.Config.AppPath, "choice."+osname+".js"), `export const platform="`+osname+`-selected";`)
 			}
-			write(t, filepath.Join(r.Config.AppPath, "app.js"), `import {target} from 'native-package';import {platform} from './choice';import pkg from '~/package.json';globalThis.nativeResult=[target,platform,pkg.main,global.isIOS,global.isAndroid,__DEV__];`)
+			write(t, filepath.Join(r.Config.AppPath, "app.js"), `import {target} from 'native-package';import {platform} from './choice';import pkg from '~/package.json';globalThis.nativeResult=[target,platform,pkg.main,global.isIOS,global.isAndroid,__DEV__,__IOS__,__ANDROID__,__APPLE__,__VISIONOS__,__COMMONJS__];`)
 			if platform == "android" {
 				write(t, filepath.Join(r.Config.AppPath, "package.json"), `{"main":"app.js","profiling":"fixture"}`)
 			}
@@ -388,7 +388,7 @@ func TestNativePackageAndPlatformResolution(t *testing.T) {
 			if e != nil {
 				t.Fatal(e, string(out))
 			}
-			expected := `["native-selected","` + platform + `-selected","bundle.js",` + map[bool]string{true: "true,false", false: "false,true"}[platform == "ios"] + `,false]`
+			expected := `["native-selected","` + platform + `-selected","bundle.js",` + map[bool]string{true: "true,false", false: "false,true"}[platform == "ios"] + `,false,` + map[bool]string{true: "true,false,true,false,false", false: "false,true,false,false,false"}[platform == "ios"] + `]`
 			if strings.TrimSpace(string(out)) != expected {
 				t.Fatalf("%s != %s", out, expected)
 			}
