@@ -39,7 +39,8 @@ func TestInstalledNativeDevelopmentServer(t *testing.T) {
 	}
 	write(t, filepath.Join(dir, "package.json"), `{"name":"native-dev-fixture","version":"1.0.0","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3"}}`)
 	write(t, filepath.Join(dir, "nativescript.config.ts"), `export default {id:'org.example.nativedev',appPath:'app',appResourcesPath:'App_Resources'};`)
-	write(t, filepath.Join(dir, "app/app.ts"), `export const nativeDevFixture = 41;`)
+	write(t, filepath.Join(dir, "app/app.ts"), `import {nativeValue} from './value'; export const nativeDevFixture = nativeValue;`)
+	write(t, filepath.Join(dir, "app/value.ts"), `export const nativeValue = "native-value-before";`)
 	if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +67,40 @@ func TestInstalledNativeDevelopmentServer(t *testing.T) {
 	response.Body.Close()
 	if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), "/ns/entry-rt") {
 		t.Fatalf("native entry: %v %d %s", err, response.StatusCode, body)
+	}
+	for _, route := range []string{"hmr/client/hot-context.js", "hmr/frameworks/typescript/client/strategy.js"} {
+		response, err := http.Get(dev.Ready.Endpoint.URL + "/ns/m/node_modules/@nativescript/vite/" + route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), "__xplat") {
+			t.Fatalf("native accept adapter not served: %s: %v %d", route, err, response.StatusCode)
+		}
+	}
+	readModule := func() string {
+		response, err := http.Get(dev.Ready.Endpoint.URL + "/ns/m/app/value")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil || response.StatusCode != 200 {
+			t.Fatalf("native value module: %v %d", err, response.StatusCode)
+		}
+		return string(body)
+	}
+	if !strings.Contains(readModule(), "native-value-before") {
+		t.Fatal("initial native value missing")
+	}
+	write(t, filepath.Join(dir, "app/value.ts"), `export const nativeValue = "native-value-after";`)
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(readModule(), "native-value-after") {
+		if time.Now().After(deadline) {
+			t.Fatal("native transform cache retained stale source after hot edit")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	// The live helper owns only its own output: a separate native workspace can
 	// acquire its lease, import bootstrap files and run a mutating tool.

@@ -28,6 +28,7 @@ jobs:
           node tools/helper/generate.mjs --check
           node tools/extensions/generate.mjs --check
           node --test bridge/xcode/graph.test.cjs bridge/extensions/ota.test.cjs
+          node --test bridge/vite/native-inputs.test.cjs bridge/vite/native-accept.test.cjs
       - name: Build
         run: go build ./...
       - name: Vet

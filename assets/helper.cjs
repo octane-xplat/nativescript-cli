@@ -148,8 +148,8 @@ var require_v35 = __commonJS({
     }
     var DNS = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
     exports2.DNS = DNS;
-    var URL = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
-    exports2.URL = URL;
+    var URL2 = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+    exports2.URL = URL2;
     function _default(name, version, hashfunc) {
       var generateUUID = function(value, namespace, buf, offset) {
         var off = buf && offset || 0;
@@ -172,7 +172,7 @@ var require_v35 = __commonJS({
       } catch (err) {
       }
       generateUUID.DNS = DNS;
-      generateUUID.URL = URL;
+      generateUUID.URL = URL2;
       return generateUUID;
     }
   }
@@ -17826,6 +17826,160 @@ target '${name}' do
   }
 });
 
+// bridge/vite/native-inputs.cjs
+var require_native_inputs = __commonJS({
+  "bridge/vite/native-inputs.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    module2.exports = function nativeInputs(inputs, sources) {
+      const baseline = new Map(sources.map((source) => [source.Path, source.Digest]));
+      const packageRoots = sources.filter((source) => path2.basename(source.Path) === "Package.swift" || source.Path.endsWith(".podspec")).map((source) => path2.dirname(source.Path));
+      const ignored = (file) => !baseline.has(file) && packageRoots.some((root) => {
+        const relative = path2.relative(root, file);
+        return relative !== ".." && !relative.startsWith(".." + path2.sep) && relative.split(path2.sep).some((part) => [".build", ".swiftpm"].includes(part));
+      });
+      const digest = (file) => crypto.createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
+      function snapshot(root, result) {
+        if (ignored(root)) return;
+        let stat;
+        try {
+          stat = fs2.lstatSync(root);
+        } catch (error) {
+          if (error.code === "ENOENT") return;
+          throw error;
+        }
+        if (stat.isSymbolicLink()) throw new Error("Native input symlink changed");
+        if (stat.isDirectory()) {
+          for (const name of fs2.readdirSync(root)) snapshot(path2.join(root, name), result);
+        } else if (stat.isFile()) result.set(root, digest(root));
+      }
+      return (file) => {
+        if (file && (!inputs.some((input) => file === input || file.startsWith(input + path2.sep)) || ignored(file))) return false;
+        const roots = file ? [file] : inputs;
+        const current = /* @__PURE__ */ new Map();
+        for (const root of roots) snapshot(root, current);
+        const expected = new Map([...baseline].filter(([source]) => roots.some((root) => source === root || source.startsWith(root + path2.sep))));
+        return current.size !== expected.size || [...current].some(([source, hash]) => expected.get(source) !== hash);
+      };
+    };
+  }
+});
+
+// bridge/vite/native-accept.cjs
+var require_native_accept = __commonJS({
+  "bridge/vite/native-accept.cjs"(exports2) {
+    "use strict";
+    exports2.registry = `
+const __xplatAcceptMetadata = globalThis.__XPLAT_HMR_ACCEPT_METADATA__ ||= new WeakMap();
+const __xplatInstallRegistry = installNsHotRegistry;
+installNsHotRegistry = function(...args) {
+  const registry = __xplatInstallRegistry(...args);
+  if (registry.__xplatAcceptShapes) return registry;
+  registry.__xplatAcceptShapes = true;
+  const create = registry.createHotContext;
+  registry.createHotContext = function(owner) {
+    const context = create.call(this,owner);
+    const accept = context.accept;
+    context.accept = function(dependencies,callback) {
+      if ((typeof dependencies !== 'string' && !Array.isArray(dependencies)) || typeof callback !== 'function') return accept.apply(this,arguments);
+      const list = typeof dependencies === 'string' ? [dependencies] : dependencies;
+      const keys = list.map(specifier => {
+        const url = new URL(specifier,new URL(registry.canonicalHotKey(owner),'http://xplat.invalid'));
+        return registry.canonicalHotKey(url.href);
+      });
+      const registered = (...args) => callback(...args);
+      __xplatAcceptMetadata.set(registered,{keys,callback,single:typeof dependencies==='string'});
+      return accept.call(this,dependencies,registered);
+    };
+    return context;
+  };
+  return registry;
+};
+`;
+    exports2.strategy = `
+import {getNsHotRegistry as __xplatRegistry} from '@nativescript/vite/hmr/client/framework.js';
+const __xplatTypeScriptStrategy = {...typescriptClientStrategy};
+let __xplatPendingAccepts = new Map();
+let __xplatFreshModules = new Map();
+typescriptClientStrategy.beforeBatchEvict = function(ids) {
+  __xplatTypeScriptStrategy.beforeBatchEvict?.(ids);
+  const registry = __xplatRegistry();
+  __xplatPendingAccepts = new Map(ids.map(id => [registry.canonicalHotKey(id),{
+    self:registry.getAcceptCallbacks(id),dependencies:registry.getDepAcceptors(id)
+  }]));
+  __xplatFreshModules = new Map();
+  registry.runDispose(ids);
+};
+typescriptClientStrategy.afterModuleReimport = function(id,namespace) {
+  __xplatTypeScriptStrategy.afterModuleReimport?.(id,namespace);
+  __xplatFreshModules.set(__xplatRegistry().canonicalHotKey(id),namespace);
+};
+typescriptClientStrategy.refreshAfterBatch = async function(ids,context) {
+  const registry = __xplatRegistry();
+  const callbacks = new Map();
+  let fullyAccepted = true;
+  for (const id of ids) {
+    const key = registry.canonicalHotKey(id);
+    const accepted = __xplatPendingAccepts.get(key);
+    const namespace = __xplatFreshModules.get(key);
+    if (!accepted || !namespace || (!accepted.self.length && !accepted.dependencies.length)) { fullyAccepted=false; continue; }
+    if (accepted.self.length) {
+      for(const callback of accepted.self) callback(namespace);
+    } else {
+      for(const acceptor of accepted.dependencies) callbacks.set(acceptor.callback,namespace);
+    }
+  }
+  for(const [callback,namespace] of callbacks) {
+    const shape = globalThis.__XPLAT_HMR_ACCEPT_METADATA__?.get(callback);
+    if (shape) {
+      const namespaces = shape.keys.map(key => __xplatFreshModules.get(key));
+      shape.callback(shape.single ? namespaces[0] : namespaces);
+    } else callback([namespace]);
+  }
+  __xplatPendingAccepts.clear();
+  __xplatFreshModules.clear();
+  if (!fullyAccepted) return __xplatTypeScriptStrategy.refreshAfterBatch?.(ids,context);
+  context.setUpdateOverlayStage('complete',{detail:'Accepted native module update'});
+};
+`;
+    exports2.plugin = () => ({
+      name: "xplat-native-accept-boundaries",
+      enforce: "pre",
+      configureServer(server) {
+        server.middlewares.use((request2, response, next) => {
+          const file = new URL(request2.url, "http://xplat.invalid").pathname;
+          let addition, marker;
+          if (file === "/ns/m/node_modules/@nativescript/vite/hmr/client/hot-context.js") {
+            addition = exports2.registry;
+            marker = "__xplatInstallRegistry";
+          }
+          if (file === "/ns/m/node_modules/@nativescript/vite/hmr/frameworks/typescript/client/strategy.js") {
+            addition = exports2.strategy;
+            marker = "__xplatTypeScriptStrategy";
+          }
+          if (!addition) return next();
+          const end = response.end;
+          response.end = function(chunk, encoding, callback) {
+            if (this.statusCode !== 200 || this.headersSent || !String(this.getHeader("Content-Type")).includes("javascript")) return end.call(this, chunk, encoding, callback);
+            const code = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || "");
+            if (code.includes(marker)) return end.call(this, chunk, encoding, callback);
+            this.removeHeader("Content-Length");
+            return end.call(this, Buffer.from(code + "\n" + addition), typeof encoding === "function" ? encoding : callback);
+          };
+          next();
+        });
+      },
+      transform(code, id) {
+        const file = id.replace(/\\/g, "/").split("?")[0];
+        if (file.endsWith("/@nativescript/vite/hmr/client/hot-context.js")) return { code: code + "\n" + exports2.registry, map: null };
+        if (file.endsWith("/@nativescript/vite/hmr/frameworks/typescript/client/strategy.js")) return { code: code + "\n" + exports2.strategy, map: null };
+      }
+    });
+  }
+});
+
 // bridge/vite/native.cjs
 var require_native = __commonJS({
   "bridge/vite/native.cjs"(exports2, module2) {
@@ -17836,8 +17990,9 @@ var require_native = __commonJS({
     var { pathToFileURL } = require("node:url");
     var fail = (code) => Object.assign(new Error(), { code });
     module2.exports = async function native(p, emit) {
-      if (!["ios", "android"].includes(p.platform) || p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 || !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path2.isAbsolute)) throw fail("invalid_input");
+      if (!["ios", "android"].includes(p.platform) || p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 || !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path2.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail("invalid_input");
       const req = createRequire2(path2.join(p.projectDir, "package.json"));
+      const nativeChanged = require_native_inputs()(p.nativeInputs, p.nativeSources);
       const pkg = JSON.parse(fs2.readFileSync(path2.join(p.projectDir, "package.json"), "utf8"));
       if (typeof pkg.main !== "string" || fs2.realpathSync(path2.resolve(p.projectDir, pkg.main)) !== p.entry) throw fail("invalid_input");
       process.env.NS_VITE_DIST_DIR = p.directory;
@@ -17854,6 +18009,12 @@ var require_native = __commonJS({
         engine = await import(pathToFileURL(req.resolve("@nativescript/vite/typescript")).href);
         vite = await import(pathToFileURL(req.resolve("vite")).href);
         if (!/^8\./.test(vite.version)) throw fail("unavailable");
+        const framework = await import(pathToFileURL(req.resolve("@nativescript/vite/framework")).href);
+        const update = framework.typescriptServerStrategy.handleHotUpdate;
+        framework.typescriptServerStrategy.handleHotUpdate = async (context, dependencies) => {
+          framework.purgeTransformCachesForHotUpdate({ file: context.file, server: context.server, sharedTransformRequest: dependencies.sharedTransformRequest });
+          return update(context, dependencies);
+        };
       } catch (error) {
         throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
       }
@@ -17873,7 +18034,7 @@ var require_native = __commonJS({
             this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify(runtime) });
           }
         };
-        result.plugins = [metadata, ...result.plugins.flat(Infinity).filter((plugin) => plugin?.name !== "nsvite-nsconfig-as-json")];
+        result.plugins = [metadata, require_native_accept().plugin(), ...result.plugins.flat(Infinity).filter((plugin) => plugin?.name !== "nsvite-nsconfig-as-json")];
         result.root = p.projectDir;
         result.configFile = false;
         result.cacheDir = p.cacheDirectory;
@@ -17916,7 +18077,11 @@ var require_native = __commonJS({
           if (!fs2.existsSync(dir)) continue;
           const watcher = fs2.watch(dir, { recursive }, (_event, name) => {
             const file = name && path2.resolve(dir, String(name));
-            if (!file || p.nativeInputs.some((input) => file === input || file.startsWith(input + path2.sep))) rejectLifetime(fail("restart_required"));
+            try {
+              if (nativeChanged(file)) rejectLifetime(fail("restart_required"));
+            } catch {
+              rejectLifetime(fail("restart_required"));
+            }
           });
           watcher.on("error", () => rejectLifetime(fail("restart_required")));
           nativeWatchers.push(watcher);

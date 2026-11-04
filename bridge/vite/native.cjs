@@ -11,8 +11,9 @@ module.exports = async function native(p, emit) {
   if (!['ios','android'].includes(p.platform) || p.configuration !== 'debug' ||
       ![p.projectDir,p.appPath,p.directory,p.cacheDirectory,p.entry].every(path.isAbsolute) ||
       !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 ||
-      !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path.isAbsolute)) throw fail('invalid_input');
+      !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail('invalid_input');
   const req = createRequire(path.join(p.projectDir,'package.json'));
+  const nativeChanged = require('./native-inputs.cjs')(p.nativeInputs,p.nativeSources);
   const pkg = JSON.parse(fs.readFileSync(path.join(p.projectDir,'package.json'),'utf8'));
   // The installed engine derives its entry from the root package. Refuse a
   // disagreement instead of emitting a bootstrap for a different application.
@@ -32,6 +33,14 @@ module.exports = async function native(p, emit) {
     engine = await import(pathToFileURL(req.resolve('@nativescript/vite/typescript')).href);
     vite = await import(pathToFileURL(req.resolve('vite')).href);
     if (!/^8\./.test(vite.version)) throw fail('unavailable');
+    const framework = await import(pathToFileURL(req.resolve('@nativescript/vite/framework')).href);
+    const update = framework.typescriptServerStrategy.handleHotUpdate;
+    framework.typescriptServerStrategy.handleHotUpdate = async (context,dependencies) => {
+      // The TS preset emits deltas without purging the shared /ns/m transform
+      // cache. Reuse the engine's exported invalidator before it reads the edit.
+      framework.purgeTransformCachesForHotUpdate({file:context.file,server:context.server,sharedTransformRequest:dependencies.sharedTransformRequest});
+      return update(context,dependencies);
+    };
   } catch (error) { throw fail(error.code === 'invalid_input' ? 'invalid_input' : 'unavailable'); }
   function config() {
     const result = engine.typescriptConfig({mode:'development'},{typeCheck:false});
@@ -44,7 +53,7 @@ module.exports = async function native(p, emit) {
       load(id) { if (id === '\0xplat-native-package') return `export default ${JSON.stringify(runtime)};`; },
       generateBundle() { this.emitFile({type:'asset',fileName:'package.json',source:JSON.stringify(runtime)}); },
     };
-    result.plugins = [metadata,...result.plugins.flat(Infinity).filter(plugin => plugin?.name !== 'nsvite-nsconfig-as-json')];
+    result.plugins = [metadata,require('./native-accept.cjs').plugin(),...result.plugins.flat(Infinity).filter(plugin => plugin?.name !== 'nsvite-nsconfig-as-json')];
     result.root = p.projectDir;
     result.configFile = false;
     result.cacheDir = p.cacheDirectory;
@@ -77,7 +86,8 @@ module.exports = async function native(p, emit) {
       if (!fs.existsSync(dir)) continue;
       const watcher = fs.watch(dir,{recursive},(_event,name) => {
         const file = name && path.resolve(dir,String(name));
-        if (!file || p.nativeInputs.some(input => file === input || file.startsWith(input + path.sep))) rejectLifetime(fail('restart_required'));
+        try { if (nativeChanged(file)) rejectLifetime(fail('restart_required')); }
+        catch { rejectLifetime(fail('restart_required')); }
       });
       watcher.on('error',() => rejectLifetime(fail('restart_required')));
       nativeWatchers.push(watcher);

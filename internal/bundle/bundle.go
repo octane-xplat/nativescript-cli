@@ -37,6 +37,7 @@ type Event struct {
 type Request struct {
 	CacheDirectory string                 `json:"cacheDirectory,omitempty"`
 	NativeInputs   []string               `json:"nativeInputs,omitempty"`
+	NativeSources  []project.Source       `json:"nativeSources,omitempty"`
 	Platform       string                 `json:"platform,omitempty"`
 	AppPath        string                 `json:"appPath,omitempty"`
 	Configuration  string                 `json:"configuration,omitempty"`

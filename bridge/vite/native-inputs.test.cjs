@@ -1,0 +1,31 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const nativeInputs = require('./native-inputs.cjs');
+
+test('native input identity ignores metadata/cache notifications and detects source changes',t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'native-inputs-'));
+  t.after(() => fs.rmSync(root,{recursive:true,force:true}));
+  const manifest = path.join(root,'Package.swift');
+  const source = path.join(root,'Native.swift');
+  fs.writeFileSync(manifest,'// package');
+  fs.writeFileSync(source,'// native source');
+  const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const changed = nativeInputs([root],[manifest,source].map(Path => ({Path,Digest:hash(Path)})));
+  fs.utimesSync(source,new Date(),new Date());
+  assert.equal(changed(source),false);
+  fs.mkdirSync(path.join(root,'.build'));
+  fs.writeFileSync(path.join(root,'.build','compiler-cache'),'cache');
+  assert.equal(changed(path.join(root,'.build','compiler-cache')),false);
+  assert.equal(changed(root),false);
+  fs.writeFileSync(source,'// native source changed');
+  assert.equal(changed(source),true);
+  fs.writeFileSync(source,'// native source');
+  fs.writeFileSync(path.join(root,'Added.swift'),'// new source');
+  assert.equal(changed(path.join(root,'Added.swift')),true);
+  fs.rmSync(source);
+  assert.equal(changed(source),true);
+});

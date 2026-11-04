@@ -110,3 +110,15 @@ fixture native compiler/device adapters and check serialized rebuild/relaunch,
 port rejection, retirement, repeated close and embedding globals. They do not
 establish actual native HMR application, simulator startup or full G5 acceptance;
 those require separate real platform runs. CI labels the same boundary explicitly.
+
+The version-qualified native adapter compares filesystem notifications with R1's
+content identities, ignoring metadata-only changes and Swift package cache paths
+that R1 excludes. It uses the engine's exported transform-cache invalidator before
+TypeScript hot updates so `/ns/m` serves the edited bytes. A small native-client
+response adapter preserves explicit self/dependency accept callbacks (including
+single-module and dependency-array shapes), snapshots them before eviction and
+keeps the preset's XML refresh for unaccepted modules. The engine retains its
+transport, module graph and eviction; installed package files are not edited.
+These adaptations are scoped to the pinned engine version and have host contract
+tests plus an opt-in real iOS qualifier described in
+[the native development fixture](../../tools/qualification/development/README.md).
