@@ -25,6 +25,9 @@ func TestDevelopmentTeardownPreservesFailures(t *testing.T) {
 	if err := developmentTeardownError(errors.Join(context.Canceled, bundle.ErrRestart)); err != nil {
 		t.Fatal(err)
 	}
+	if err := developmentTeardownError(errors.Join(context.Canceled, &process.Error{Kind: process.ErrExit, Cause: errors.New("owned termination")})); err != nil {
+		t.Fatal(err)
+	}
 	failure := errors.New("resource cleanup failed")
 	err := developmentTeardownError(errors.Join(context.Canceled, bundle.ErrRestart, failure, process.ErrCleanup))
 	if !errors.Is(err, failure) || !errors.Is(err, process.ErrCleanup) || errors.Is(err, context.Canceled) || errors.Is(err, bundle.ErrRestart) {
@@ -35,10 +38,11 @@ func TestDevelopmentTeardownPreservesFailures(t *testing.T) {
 // Only native preparation/compilation/device adapters are fixtures here. The
 // public workflow, resolver, helper, native Vite engine and ownership are real.
 type developmentNativeFixture struct {
-	compiled atomic.Int32
-	launched atomic.Int32
-	retired  atomic.Int32
-	active   atomic.Int32
+	compileError error
+	compiled     atomic.Int32
+	launched     atomic.Int32
+	retired      atomic.Int32
+	active       atomic.Int32
 }
 
 func (f *developmentNativeFixture) Prepare(_ context.Context, _ project.Resolved, l workspace.Lease) (project.Prepared, error) {
@@ -46,6 +50,9 @@ func (f *developmentNativeFixture) Prepare(_ context.Context, _ project.Resolved
 	return p, os.MkdirAll(p.NativeDir, 0700)
 }
 func (f *developmentNativeFixture) Compile(ctx context.Context, p project.Prepared, b project.Bundle, l workspace.Lease) ([]project.Artifact, error) {
+	if f.compileError != nil {
+		return nil, f.compileError
+	}
 	if filepath.Base(b.Entry) != "bundle.mjs" {
 		return nil, errors.New("wrong native bootstrap")
 	}
@@ -168,5 +175,17 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	now, _ := os.Getwd()
 	if now != cwd || !reflect.DeepEqual(os.Environ(), environment) || log.Writer() != writer || log.Flags() != flags || log.Prefix() != prefix {
 		t.Fatal("development mutated embedding globals")
+	}
+	// A compiler can return cancellation while the outer context remains live.
+	// Owned server shutdown must not strip that initiating failure into success.
+	native = &developmentNativeFixture{compileError: context.Canceled}
+	failed, err := c.Run(ctx, RunRequest{Development: &DevelopmentOptions{}, DeviceID: "fixture", Build: BuildRequest{ProjectDir: dir, OutputDir: filepath.Join(dir, ".generated"), Target: Target{Platform: IOS, Configuration: Debug, Destination: Destination{Kind: Simulator, ID: "fixture", Architecture: "arm64"}}}})
+	if failed != nil || !errors.Is(err, context.Canceled) || native.launched.Load() != 0 {
+		var op *OperationError
+		errors.As(err, &op)
+		if op != nil {
+			t.Fatalf("cancelled compiler failed before cancellation branch: session=%v error=%v cause=%T %v", failed, err, op.Cause, op.Cause)
+		}
+		t.Fatal("cancelled compiler returned success or launched app", failed, err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
+	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 )
@@ -71,17 +72,27 @@ type developmentIteration struct {
 // Discard only expected owned shutdown/restart signals. A joined cleanup error
 // must still terminate the session rather than silently starting another owner.
 func developmentTeardownError(err error) error {
+	return filterDevelopmentTeardown(err, errors.Is(err, context.Canceled))
+}
+
+func filterDevelopmentTeardown(err error, cancelled bool) error {
 	if err == nil || err == context.Canceled || err == bundle.ErrRestart {
+		return nil
+	}
+	// F1 reports the nonzero exit from terminating an owned process alongside
+	// cancellation. Preserve output/cleanup failures; the expected exit itself
+	// is not an additional teardown failure.
+	if failure, ok := err.(*process.Error); ok && cancelled && failure.Kind == process.ErrExit {
 		return nil
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		var retained []error
 		for _, cause := range joined.Unwrap() {
-			retained = append(retained, developmentTeardownError(cause))
+			retained = append(retained, filterDevelopmentTeardown(cause, cancelled))
 		}
 		return errors.Join(retained...)
 	}
-	if cause := errors.Unwrap(err); cause != nil && developmentTeardownError(cause) == nil {
+	if cause := errors.Unwrap(err); cause != nil && filterDevelopmentTeardown(cause, cancelled) == nil {
 		return nil
 	}
 	return err
@@ -122,6 +133,15 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 		cancel() // A failed server also cancels native tools or a running app.
 	}()
 	fail := func(err error) (*developmentIteration, error) {
+		// The server sends its failure before cancelling compilation. Prefer
+		// that initiating failure over the compiler's induced cancellation.
+		select {
+		case serverErr := <-serverDone:
+			if serverErr != nil {
+				err = serverErr
+			}
+		default:
+		}
 		cancel()
 		serverErr := server.Session.Close(context.Background())
 		if ctx.Err() != nil {
@@ -130,7 +150,14 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 		if errors.Is(serverErr, bundle.ErrRestart) && developmentTeardownError(serverErr) == nil {
 			return nil, bundle.ErrRestart
 		}
-		return nil, errors.Join(developmentTeardownError(err), developmentTeardownError(serverErr))
+		cause := errors.Join(err, developmentTeardownError(serverErr))
+		if cause == nil {
+			cause = err
+		}
+		if cause == nil {
+			cause = workflow.ErrHandoff
+		}
+		return nil, cause
 	}
 	stages.Bundler = server
 	if launcher, ok := stages.Launcher.(platformDevices); ok && request.Build.Target.Platform == Android {
@@ -178,6 +205,9 @@ func (c *Client) runDevelopment(ctx context.Context, request RunRequest, stages 
 		for {
 			var err error
 			current, err = c.startDevelopment(ctx, request, stages, notify, device)
+			if err == nil && current == nil {
+				err = workflow.ErrHandoff
+			}
 			if ctx.Err() != nil {
 				if current != nil {
 					err = errors.Join(err, current.close())
