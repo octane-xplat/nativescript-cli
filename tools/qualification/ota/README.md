@@ -76,3 +76,29 @@ and retires/deletes only its owned emulator/AVD before reservation release.
 No screenshots, new system images, host network changes or release credentials
 are used. Evidence JSON and logs belong outside Git. A passing component result
 must not promote H1 or the remaining G4–G6 acceptance gates.
+
+## Authorized HTTPS origin preflight
+
+Once an existing origin and bounded upload scope are approved, the read-only
+preflight checks its canonical 0.19.0 available-release envelope and archive:
+
+```sh
+python3 tools/qualification/ota/preflight.py https://APPROVED_HOST ios NATIVE_HASH
+```
+
+It uses system HTTPS trust and refuses redirects. It verifies the exact
+same-origin `/bundles/<sha256>` URL, download size/hash, safe ZIP paths, expanded
+size, release fingerprint stamp and declared entry point without extracting or
+uploading files. The `/manifest` response must include `updateAvailable: true`,
+matching `platform` and `channel`, plus `version`, `nativeFingerprint`, `sha256`,
+`size` and `url`. A bare release descriptor is insufficient. A no-update response
+fails this fixture preflight because it cannot qualify the archive to be installed.
+
+Passing is host evidence only. Guest TLS/network, public SDK `check()`/`install()`,
+activation, confirmation, recovery and offline startup still require their own
+device evidence. No origin is provisioned or authorized by this tool. Offline
+contract checks run with:
+
+```sh
+python3 -m unittest discover -s tools/qualification/ota -p preflight_test.py
+```
