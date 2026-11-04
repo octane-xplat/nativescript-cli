@@ -1,5 +1,5 @@
 {
-  "name": "g5-native-ios-qualification",
+  "name": "g5-native-development-qualification",
   "private": true,
   "version": "1.0.0",
   "main": "app/app.ts",
@@ -8,6 +8,7 @@
     "@valor/nativescript-websockets": "2.0.3"
   },
   "devDependencies": {
+    "@nativescript/android": "9.1.1",
     "@nativescript/vite": "8.0.21",
     "vite": "8.3.0",
     "typescript": "5.9.3",

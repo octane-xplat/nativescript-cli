@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a fresh iOS native HMR app from locked, already cached dependencies."""
+"""Stage a fresh native HMR app from locked, already cached dependencies."""
 import argparse
 import json
 from pathlib import Path

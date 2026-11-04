@@ -18,7 +18,13 @@ setInterval(() => {
   const pid = global.isIOS ? NSProcessInfo.processInfo.processIdentifier : android.os.Process.myPid();
   const state = globalThis as any;
   const resource = global.isIOS ? NSBundle.mainBundle.pathForResourceOfType('qualification','json') : null;
-  const nativeResourceRevision = resource ? JSON.parse(File.fromPath(resource).readTextSync()).revision : 0;
+  let nativeResourceRevision = resource ? JSON.parse(File.fromPath(resource).readTextSync()).revision : 0;
+  if (global.isAndroid) {
+    const context = Application.android.context;
+    const resources = context.getResources();
+    const revisionID = resources.getIdentifier('qualification_revision', 'string', context.getPackageName());
+    nativeResourceRevision = revisionID ? Number(resources.getString(revisionID)) : 0;
+  }
   health.writeTextSync(JSON.stringify({ nonce, boot, ticks: ++ticks, pid, token: observed, hotUpdates,
     nativeResourceRevision,
     hotAvailable: !!import.meta.hot, bootComplete: !!state.__NS_HMR_BOOT_COMPLETE__,

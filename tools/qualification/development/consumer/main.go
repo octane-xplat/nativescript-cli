@@ -130,6 +130,9 @@ func main() {
 }
 
 func run() (result error) {
+	if len(os.Args) > 1 && os.Args[1] == "android" {
+		return runAndroid(os.Args[2:])
+	}
 	if len(os.Args) != 4 {
 		return errors.New("usage: development-consumer APP EXACT_SHUTDOWN_SIMULATOR EVIDENCE_JSON")
 	}
