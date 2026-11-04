@@ -34,6 +34,16 @@ Evidence includes health, phase reservations, cleanup and embedding globals;
 failure remains failure in the result JSON. Logs and result files belong outside
 Git. No screenshot or visual assertion is involved.
 
+The module callback waits 1.5 seconds. The caller saves again while that callback
+is unresolved, requires both values in order with no overlap or duplicates, then
+rejects one callback and requires recovery on the next edit. Quiet heartbeat
+intervals check that counts settle at three successes and one rejection. The
+native resource rebuild must retain the final recovered source value. Failure
+must appear in public session logs. iOS includes a PID-scoped unified log reader;
+the caller checks its retirement before releasing the simulator boot. This
+attachment begins after launch acknowledgement, so earlier unified startup logs
+are not replayed. Standard stdout/stderr capture remains separate.
+
 For Android, supply an installed SDK, JDK21 and an unused even emulator port.
 The API35 google_apis arm64 image must already be installed. Stage a separate
 fresh app so the source edits from the iOS run do not become Android inputs:

@@ -312,18 +312,16 @@ func runAndroid(args []string) (result error) {
 		return err
 	}
 	evidence["progression"] = last
-	if err := os.WriteFile(filepath.Join(app, "app/value.ts"), []byte("export const token = 'G5_HOT';\n"), 0600); err != nil {
-		return err
-	}
-	hot, err := observe(time.Minute, func(h health) bool { return h.Token == "G5_HOT" && h.HotUpdates > 0 })
+	hot, err := verifyHotLifecycle(app, first, last, observe)
 	if err != nil {
 		return err
 	}
-	if hot.PID != first.PID || hot.Boot != first.Boot || hot.Ticks <= last.Ticks {
-		return errors.New("Android hot update lost process/heartbeat continuity")
+	for key, value := range hot {
+		evidence[key] = value
 	}
-	evidence["hotUpdate"] = hot
-	fmt.Printf("HEALTH Android hot pid=%d ticks=%d updates=%d\n", hot.PID, hot.Ticks, hot.HotUpdates)
+	if !hasAcceptFailureLog(session.Logs()) {
+		return errors.New("Android accept failure was not surfaced in application logs")
+	}
 	firstEndpoint := session.DevelopmentEndpoint()
 	resource := filepath.Join(app, "App_Resources/Android/src/main/res/values/qualification.xml")
 	if err := os.MkdirAll(filepath.Dir(resource), 0700); err != nil {
@@ -333,7 +331,7 @@ func runAndroid(args []string) (result error) {
 		return err
 	}
 	rebuilt, err := observe(5*time.Minute, func(h health) bool {
-		return h.Boot != first.Boot && h.NativeResourceRevision == 2 && h.Token == "G5_HOT" && h.Ticks >= 2
+		return h.Boot != first.Boot && h.NativeResourceRevision == 2 && h.Token == "G5_RECOVERED" && h.Ticks >= 2
 	})
 	if err != nil {
 		return err

@@ -1,6 +1,6 @@
 'use strict';
 
-// These additions run in the native client, through Vite's transform hook. The
+// These additions run in the native client's two adapted support modules. The
 // version-qualified engine continues to own transport, graph and module eviction.
 // Its TypeScript/XML apply strategy does not execute import.meta.hot callbacks;
 // preserve explicit accept boundaries before falling back to its page refresh.
@@ -54,26 +54,34 @@ typescriptClientStrategy.refreshAfterBatch = async function(ids,context) {
   const registry = __xplatRegistry();
   const callbacks = new Map();
   let fullyAccepted = true;
-  for (const id of ids) {
+  try {
+   for (const id of ids) {
     const key = registry.canonicalHotKey(id);
     const accepted = __xplatPendingAccepts.get(key);
     const namespace = __xplatFreshModules.get(key);
     if (!accepted || !namespace || (!accepted.self.length && !accepted.dependencies.length)) { fullyAccepted=false; continue; }
     if (accepted.self.length) {
-      for(const callback of accepted.self) callback(namespace);
+      for(const callback of accepted.self) await callback(namespace);
     } else {
       for(const acceptor of accepted.dependencies) callbacks.set(acceptor.callback,namespace);
     }
-  }
-  for(const [callback,namespace] of callbacks) {
+   }
+   for(const [callback,namespace] of callbacks) {
     const shape = globalThis.__XPLAT_HMR_ACCEPT_METADATA__?.get(callback);
     if (shape) {
       const namespaces = shape.keys.map(key => __xplatFreshModules.get(key));
-      shape.callback(shape.single ? namespaces[0] : namespaces);
-    } else callback([namespace]);
+      await shape.callback(shape.single ? namespaces[0] : namespaces);
+    } else await callback([namespace]);
+   }
+  } catch(error) {
+    // The engine contains update failures. Leave a stable application log rather
+    // than silently reporting success or forwarding arbitrary callback contents.
+    console.error('[xplat-hmr] Native accept callback failed; update was not completed');
+    throw error;
+  } finally {
+    __xplatPendingAccepts.clear();
+    __xplatFreshModules.clear();
   }
-  __xplatPendingAccepts.clear();
-  __xplatFreshModules.clear();
   if (!fullyAccepted) return __xplatTypeScriptStrategy.refreshAfterBatch?.(ids,context);
   context.setUpdateOverlayStage('complete',{detail:'Accepted native module update'});
 };

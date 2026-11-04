@@ -120,6 +120,8 @@ type health struct {
 	AcceptAdapterReady                                                             bool
 	DependencyAcceptors                                                            int
 	NativeResourceRevision                                                         int
+	HotPending, MaxHotPending, HotFailures                                         int
+	HotTokens                                                                      []string
 }
 
 func main() {
@@ -268,24 +270,22 @@ func run() (result error) {
 	}
 	evidence["progression"] = last
 	fmt.Printf("HEALTH progression pid=%d ticks=%d\n", last.PID, last.Ticks)
-	if err := os.WriteFile(filepath.Join(app, "app/value.ts"), []byte("export const token = 'G5_HOT';\n"), 0600); err != nil {
-		return err
-	}
-	hot, err := observe(60*time.Second, func(h health) bool { return h.Token == "G5_HOT" && h.HotUpdates >= 1 })
+	hot, err := verifyHotLifecycle(app, first, last, observe)
 	if err != nil {
 		return err
 	}
-	if hot.PID != first.PID || hot.Boot != first.Boot || hot.Ticks <= last.Ticks {
-		return errors.New("hot update replaced process/boot or lost heartbeat continuity")
+	for key, value := range hot {
+		evidence[key] = value
 	}
-	evidence["hotUpdate"] = hot
-	fmt.Printf("HEALTH hot update pid=%d ticks=%d updates=%d\n", hot.PID, hot.Ticks, hot.HotUpdates)
+	if !hasAcceptFailureLog(session.Logs()) {
+		return errors.New("native accept failure was not surfaced in application logs")
+	}
 	firstEndpoint := session.DevelopmentEndpoint()
 	if err := os.WriteFile(filepath.Join(app, "App_Resources/iOS/qualification.json"), []byte(`{"revision":2}`), 0600); err != nil {
 		return err
 	}
 	rebuilt, err := observe(4*time.Minute, func(h health) bool {
-		return h.PID != first.PID && h.NativeResourceRevision == 2 && h.Token == "G5_HOT" && h.Ticks >= 2
+		return h.PID != first.PID && h.NativeResourceRevision == 2 && h.Token == "G5_RECOVERED" && h.Ticks >= 2
 	})
 	if err != nil {
 		return err
@@ -311,6 +311,10 @@ func run() (result error) {
 	if rebuiltProcess.Signal(syscall.Signal(0)) == nil {
 		return errors.New("owned app PID survived close")
 	}
+	if err := assertNoSimulatorLogReaders(first.PID, rebuilt.PID); err != nil {
+		return err
+	}
+	evidence["ownedLogReadersRetired"] = true
 	evidence["ownedPIDRetired"] = true
 	devices, err = client.Devices(context.Background(), ns.DeviceQuery{Platform: ns.IOS})
 	if err != nil {

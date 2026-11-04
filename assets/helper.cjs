@@ -17867,6 +17867,36 @@ var require_native_inputs = __commonJS({
   }
 });
 
+// bridge/vite/native-update.cjs
+var require_native_update = __commonJS({
+  "bridge/vite/native-update.cjs"(exports2, module2) {
+    "use strict";
+    module2.exports = (framework) => {
+      const strategy = framework.typescriptServerStrategy;
+      const update = strategy.handleHotUpdate;
+      strategy.handleHotUpdate = async (context, dependencies) => {
+        framework.purgeTransformCachesForHotUpdate({ file: context.file, server: context.server, sharedTransformRequest: dependencies.sharedTransformRequest });
+        const processed = /* @__PURE__ */ new Set();
+        const graph = dependencies.moduleGraph;
+        const scopedGraph = new Proxy(graph, {
+          get(target, property) {
+            if (property === "upsert") return (rawID, code, imports, options) => {
+              const id = target.normalizeGraphId(rawID);
+              if (code === "" && imports.length === 0 && processed.has(id)) return target.get(id);
+              const result = target.upsert(rawID, code, imports, options);
+              if (code !== "") processed.add(id);
+              return result;
+            };
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+        });
+        return update(context, { ...dependencies, moduleGraph: scopedGraph });
+      };
+    };
+  }
+});
+
 // bridge/vite/native-accept.cjs
 var require_native_accept = __commonJS({
   "bridge/vite/native-accept.cjs"(exports2) {
@@ -17920,26 +17950,34 @@ typescriptClientStrategy.refreshAfterBatch = async function(ids,context) {
   const registry = __xplatRegistry();
   const callbacks = new Map();
   let fullyAccepted = true;
-  for (const id of ids) {
+  try {
+   for (const id of ids) {
     const key = registry.canonicalHotKey(id);
     const accepted = __xplatPendingAccepts.get(key);
     const namespace = __xplatFreshModules.get(key);
     if (!accepted || !namespace || (!accepted.self.length && !accepted.dependencies.length)) { fullyAccepted=false; continue; }
     if (accepted.self.length) {
-      for(const callback of accepted.self) callback(namespace);
+      for(const callback of accepted.self) await callback(namespace);
     } else {
       for(const acceptor of accepted.dependencies) callbacks.set(acceptor.callback,namespace);
     }
-  }
-  for(const [callback,namespace] of callbacks) {
+   }
+   for(const [callback,namespace] of callbacks) {
     const shape = globalThis.__XPLAT_HMR_ACCEPT_METADATA__?.get(callback);
     if (shape) {
       const namespaces = shape.keys.map(key => __xplatFreshModules.get(key));
-      shape.callback(shape.single ? namespaces[0] : namespaces);
-    } else callback([namespace]);
+      await shape.callback(shape.single ? namespaces[0] : namespaces);
+    } else await callback([namespace]);
+   }
+  } catch(error) {
+    // The engine contains update failures. Leave a stable application log rather
+    // than silently reporting success or forwarding arbitrary callback contents.
+    console.error('[xplat-hmr] Native accept callback failed; update was not completed');
+    throw error;
+  } finally {
+    __xplatPendingAccepts.clear();
+    __xplatFreshModules.clear();
   }
-  __xplatPendingAccepts.clear();
-  __xplatFreshModules.clear();
   if (!fullyAccepted) return __xplatTypeScriptStrategy.refreshAfterBatch?.(ids,context);
   context.setUpdateOverlayStage('complete',{detail:'Accepted native module update'});
 };
@@ -18010,11 +18048,7 @@ var require_native = __commonJS({
         vite = await import(pathToFileURL(req.resolve("vite")).href);
         if (!/^8\./.test(vite.version)) throw fail("unavailable");
         const framework = await import(pathToFileURL(req.resolve("@nativescript/vite/framework")).href);
-        const update = framework.typescriptServerStrategy.handleHotUpdate;
-        framework.typescriptServerStrategy.handleHotUpdate = async (context, dependencies) => {
-          framework.purgeTransformCachesForHotUpdate({ file: context.file, server: context.server, sharedTransformRequest: dependencies.sharedTransformRequest });
-          return update(context, dependencies);
-        };
+        require_native_update()(framework);
       } catch (error) {
         throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
       }

@@ -120,5 +120,22 @@ single-module and dependency-array shapes), snapshots them before eviction and
 keeps the preset's XML refresh for unaccepted modules. The engine retains its
 transport, module graph and eviction; installed package files are not edited.
 These adaptations are scoped to the pinned engine version and have host contract
-tests plus an opt-in real iOS qualifier described in
+tests plus opt-in real iOS/Android qualifiers described in
 [the native development fixture](../../tools/qualification/development/README.md).
+
+The TypeScript strategy also emits an empty placeholder after its shared handler
+has already published transformed source. The version-scoped adapter suppresses
+that fallback only when the same invocation processed real source for that graph
+ID. This retains the authoritative hash/dependencies and prevents a module fetch
+from manufacturing another transaction. A real-engine WebSocket test checks one
+loaded-module save through delivery and re-fetch. The engine retains graph and
+version ownership; this is not a time-based client deduplication policy.
+
+Accept callbacks are awaited before completing a batch, so later saves remain
+queued while async acceptance is unresolved. A rejected callback logs a stable
+failure message, clears the adapter's batch state and propagates to the engine's
+update handler; it does not mark the batch complete. Later saves can recover.
+The native fixture queues a second save during an async callback, rejects one
+callback, then applies another; it checks ordered tokens, exact counts and no
+overlap in the original PID/boot before rebuilding a native resource. This
+qualifies that scenario only, not every callback/disposal or G5 failure mode.

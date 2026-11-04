@@ -34,13 +34,7 @@ module.exports = async function native(p, emit) {
     vite = await import(pathToFileURL(req.resolve('vite')).href);
     if (!/^8\./.test(vite.version)) throw fail('unavailable');
     const framework = await import(pathToFileURL(req.resolve('@nativescript/vite/framework')).href);
-    const update = framework.typescriptServerStrategy.handleHotUpdate;
-    framework.typescriptServerStrategy.handleHotUpdate = async (context,dependencies) => {
-      // The TS preset emits deltas without purging the shared /ns/m transform
-      // cache. Reuse the engine's exported invalidator before it reads the edit.
-      framework.purgeTransformCachesForHotUpdate({file:context.file,server:context.server,sharedTransformRequest:dependencies.sharedTransformRequest});
-      return update(context,dependencies);
-    };
+    require('./native-update.cjs')(framework);
   } catch (error) { throw fail(error.code === 'invalid_input' ? 'invalid_input' : 'unavailable'); }
   function config() {
     const result = engine.typescriptConfig({mode:'development'},{typeCheck:false});

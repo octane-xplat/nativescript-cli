@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,7 +95,12 @@ func TestInstalledNativeDevelopmentServer(t *testing.T) {
 	if !strings.Contains(readModule(), "native-value-before") {
 		t.Fatal("initial native value missing")
 	}
-	write(t, filepath.Join(dir, "app/value.ts"), `export const nativeValue = "native-value-after";`)
+	probe := exec.CommandContext(ctx, "node", filepath.Join(root, "tools/qualification/development/ws-updates.mjs"), dev.Ready.Endpoint.URL, filepath.Join(dir, "app/value.ts"))
+	if output, err := probe.CombinedOutput(); err != nil {
+		t.Fatalf("native update wire contract: %v: %s", err, output)
+	} else {
+		t.Logf("native update wire contract: %s", output)
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(readModule(), "native-value-after") {
 		if time.Now().After(deadline) {

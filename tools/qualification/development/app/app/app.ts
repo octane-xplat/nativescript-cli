@@ -6,12 +6,28 @@ const boot = String(Date.now()) + ':' + String(Math.random());
 let observed = token;
 let ticks = 0;
 let hotUpdates = 0;
+let hotPending = 0;
+let maxHotPending = 0;
+let hotFailures = 0;
+const hotTokens: string[] = [];
 const health = File.fromPath(knownFolders.documents().path + '/go-dev-health.json');
 if (import.meta.hot) {
-  import.meta.hot.accept('./value', next => {
+  import.meta.hot.accept('./value', async next => {
     if (!next) throw new Error('Missing hot value module');
-    observed = next.token;
-    hotUpdates++;
+    hotPending++;
+    maxHotPending = Math.max(maxHotPending, hotPending);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      if (next.token === 'G5_REJECT') {
+        hotFailures++;
+        throw new Error('Qualification accept rejection');
+      }
+      observed = next.token;
+      hotTokens.push(observed);
+      hotUpdates++;
+    } finally {
+      hotPending--;
+    }
   });
 }
 setInterval(() => {
@@ -26,7 +42,7 @@ setInterval(() => {
     nativeResourceRevision = revisionID ? Number(resources.getString(revisionID)) : 0;
   }
   health.writeTextSync(JSON.stringify({ nonce, boot, ticks: ++ticks, pid, token: observed, hotUpdates,
-    nativeResourceRevision,
+    nativeResourceRevision, hotPending, maxHotPending, hotFailures, hotTokens,
     hotAvailable: !!import.meta.hot, bootComplete: !!state.__NS_HMR_BOOT_COMPLETE__,
     fullSocketReady: !!state.__NS_HMR_CLIENT_SOCKET_READY__,
     fallbackSocketReady: !!state.__NS_HMR_BROWSER_RUNTIME_SOCKET_READY__,
