@@ -185,7 +185,9 @@ module.exports = async ({ resolved, directory }) => {
     const settings=objects.XCBuildConfiguration[entry.value].buildSettings;
     settings.PRODUCT_BUNDLE_IDENTIFIER=q(resolved.applicationID);
     settings.CODE_SIGN_ENTITLEMENTS=q(`${name}/${name}.entitlements`);
-    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),q(q('$(SRCROOT)/internal/NativeContributions')),...Array.from(new Set(headers.map(p=>q(q(path.dirname(p))))))];
+    // A module map's umbrella directory can contain nested include namespaces
+    // (for example <SDWebImage/Header.h>), not just sibling header files.
+    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),q(q('$(SRCROOT)/internal/NativeContributions')),...Array.from(new Set([...headers,...modulemaps].map(p=>q(q(path.dirname(p))))))];
     settings.FRAMEWORK_SEARCH_PATHS=['"$(inherited)"',...Array.from(new Set(contributions.filter(c=>c.kind==='framework').map(c=>q(q(path.dirname(c.path))))))];
   }
   const write=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.p1-tmp';fs.writeFileSync(temp,text);fs.renameSync(temp,file);};

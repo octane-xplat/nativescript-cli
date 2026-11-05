@@ -62,11 +62,15 @@ test('iOS XCFramework validation ignores unrelated platform slices and retains m
  const framework=path.join(dir,'Probe.xcframework');const slice=path.join(framework,'ios-arm64/Probe.framework');fs.mkdirSync(slice,{recursive:true});
  const bytes=Buffer.alloc(32);bytes.write('!<arch>\n');fs.writeFileSync(path.join(slice,'Probe'),bytes);
  const plist=require('plist');fs.writeFileSync(path.join(framework,'Info.plist'),plist.build({AvailableLibraries:[{LibraryIdentifier:'ios-arm64',LibraryPath:'Probe.framework',SupportedPlatform:'ios'},{LibraryIdentifier:'macos',LibraryPath:'Missing.framework',SupportedPlatform:'macos'}]}));
- const modulemap=path.join(dir,'module.modulemap');fs.writeFileSync(modulemap,'module Probe { export * }');
+ const modulemap=path.join(dir,'qualified-includes/module.modulemap');fs.mkdirSync(path.dirname(modulemap));fs.writeFileSync(modulemap,'module Probe { export * }');
  const resolved={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir},{path:modulemap,kind:'configuration',platform:'ios',packageDirectory:dir}]};
  const output=path.join(dir,'out');await prepare({resolved,directory:output});
  const flags=fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8');assert.match(flags,/OTHER_CFLAGS.*-fmodule-map-file=/);assert.match(flags,/OTHER_SWIFT_FLAGS.*-Xcc/);
+ const configured=xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj'));configured.parseSync();
+ const targetSettings=Object.values(configured.hash.project.objects.XCBuildConfiguration).filter(v=>v&&typeof v==='object').map(v=>v.buildSettings).filter(v=>Array.isArray(v.HEADER_SEARCH_PATHS));assert.equal(targetSettings.length,2);
+ for(const settings of targetSettings)assert.ok(settings.HEADER_SEARCH_PATHS.some(value=>value.includes(path.dirname(modulemap))),'module map include root must resolve nested angle-bracket imports');
  resolved.contributions=[];await prepare({resolved,directory:output});assert.doesNotMatch(fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8'),/-fmodule-map-file/);
+ assert.doesNotMatch(fs.readFileSync(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj'),'utf8'),/qualified-includes/);
  resolved.contributions=[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}];fs.unlinkSync(path.join(slice,'Probe'));
  await assert.rejects(prepare({resolved,directory:path.join(dir,'invalid')}),e=>e.code==='unavailable');
 });

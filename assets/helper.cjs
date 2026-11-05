@@ -18000,7 +18000,7 @@ var require_xcode2 = __commonJS({
         const settings = objects.XCBuildConfiguration[entry.value].buildSettings;
         settings.PRODUCT_BUNDLE_IDENTIFIER = q(resolved.applicationID);
         settings.CODE_SIGN_ENTITLEMENTS = q(`${name}/${name}.entitlements`);
-        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), q(q("$(SRCROOT)/internal/NativeContributions")), ...Array.from(new Set(headers.map((p) => q(q(path2.dirname(p))))))];
+        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), q(q("$(SRCROOT)/internal/NativeContributions")), ...Array.from(new Set([...headers, ...modulemaps].map((p) => q(q(path2.dirname(p))))))];
         settings.FRAMEWORK_SEARCH_PATHS = ['"$(inherited)"', ...Array.from(new Set(contributions.filter((c) => c.kind === "framework").map((c) => q(q(path2.dirname(c.path))))))];
       }
       const write = (file, text) => {
