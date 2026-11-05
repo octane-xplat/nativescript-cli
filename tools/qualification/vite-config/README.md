@@ -72,6 +72,15 @@ The original mobile Vite config and shared Bamboo config remain byte-identical;
 `source-projection.json` records source and generated-entry hashes. The CLI entry
 source must match the pinned SHA. The workspace must be new to this projector.
 
+Use `project-pinned.py --preserve-app-sources SOURCE WORKSPACE` for an already
+staged original mobile/shared app rather than the small host probe. This mode
+requires the mobile entry and shared package manifest, writes no probe source,
+and records/rechecks every staged mobile/shared source-file hash. The same
+original configs and source-built preset entries are retained. Used projection
+destinations/backups reject before mutation. This preserves app source; it does
+not install/qualify the app's dependency graph, generate routes, prepare native
+projects or establish full app behavior.
+
 The host check preserves the workspace-relative Bamboo root, transforms an
 Octane component and checks an emitted probe CSS asset. Visual-capture and docs
 demo branches are disabled explicitly. Native HMR deliberately leaves CSS as an
