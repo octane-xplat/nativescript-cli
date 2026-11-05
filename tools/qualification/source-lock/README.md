@@ -18,6 +18,8 @@ node tools/qualification/source-lock/qualify-layout.cjs \
   NEW_CACHE_DIR INSTALLED_TYPESCRIPT_DIR
 node tools/qualification/source-lock/qualify-peers.cjs \
   ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR PUBLIC_PROJECT_JSON NEW_OUTPUT_JSON
+node tools/qualification/source-lock/stage-frozen.cjs \
+  ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR NEW_PROJECT_CACHE_DIR
 ```
 
 The layout qualification installs a small private workspace using
@@ -59,3 +61,29 @@ The audit does not solve arbitrary ancestor provisioning or validate peer semver
 compatibility. Unsupported peer contexts remain failed comparisons; independently
 check actual installation before calling them confirmed dependency drift. Do not
 change versions or waive a comparison solely to make the audit pass.
+
+`stage-frozen.cjs` stages the pinned b585679 source snapshot in a new child of
+this repository's `.cache`. It requires the exact original lock SHA and existing
+Bun cache inputs. It copies the source tree, including original relative link
+text, and selects the production/peer workspace closure plus the app's explicit
+compiler and native-runtime prerequisites. It retains the full original
+workspace metadata because pruning it can invalidate Bun's lock parser.
+
+The two source transformations are explicit: remove the upstream `nativescript`
+CLI dev dependency from the private app manifest and projected lock; correct the
+lock's stale root display name to the unchanged root manifest's name. The stager
+retains original package records, overrides, catalogs and patch declarations.
+The install uses isolated linking, the projected frozen lock, offline cache,
+disabled lifecycle scripts and disabled env-file loading. Darwin uses APFS
+clonefile; other hosts have only a copyfile implementation, without host-runtime
+qualification. Installation still requires disk space and complete cache inputs.
+
+One recorded app-path symlink supplies audio-context's unchanged app-relative
+local Swift package declaration from the existing sounds dependency lookup.
+It does not add a dependency or select a different version. The proof checks
+all copied source-file bytes and internal link text, unchanged original inputs,
+absence of the upstream CLI and the projected lock's stability. It retains
+install logs/results on failure, refuses existing destinations and never cleans
+up a prior fixture. It does not compile source CLI/Bamboo entries or perform
+the full edge/compiler/artifact-integrity/patch/bundle/native qualifications;
+run those separately against the staged inputs. No publishing or cutover occurs.
