@@ -93,28 +93,38 @@ func (r *reservation) acquire(ctx context.Context, device bool) error {
 			return fmt.Errorf("owned boot readiness failed: %w: %s", err, out)
 		}
 		if !r.installationOwned {
-			state, path, err := r.fixtureState()
-			if err != nil {
+			if err := r.claimFixture(); err != nil {
 				return err
 			}
-			switch state {
-			case iosFixturePresent:
-				return errors.New("refusing an existing fixture app installation")
-			case iosFixtureStale:
-				if out, err := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput(); err != nil {
-					return fmt.Errorf("stale fixture registration uninstall failed: %w: %s", err, out)
-				}
-				if state, _, err = r.fixtureState(); err != nil {
-					return err
-				}
-				if state != iosFixtureAbsent {
-					return errors.New("stale fixture registration survived uninstall")
-				}
-				r.phases = append(r.phases, map[string]string{"action": "stale-registration-retired", "app": developmentAppID, "path": path})
-			}
-			r.installationOwned = true
 		}
 	}
+	return nil
+}
+
+// claimFixture requires the fixture app absent on the booted device, retires a
+// byte-less stale registration left by an earlier owned uninstall, then takes
+// ownership of the installation this run is about to create.
+func (r *reservation) claimFixture() error {
+	state, path, err := r.fixtureState()
+	if err != nil {
+		return err
+	}
+	switch state {
+	case iosFixturePresent:
+		return errors.New("refusing an existing fixture app installation")
+	case iosFixtureStale:
+		if out, err := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput(); err != nil {
+			return fmt.Errorf("stale fixture registration uninstall failed: %w: %s", err, out)
+		}
+		if state, _, err = r.fixtureState(); err != nil {
+			return err
+		}
+		if state != iosFixtureAbsent {
+			return errors.New("stale fixture registration survived uninstall")
+		}
+		r.phases = append(r.phases, map[string]string{"action": "stale-registration-retired", "app": developmentAppID, "path": path})
+	}
+	r.installationOwned = true
 	return nil
 }
 
@@ -128,34 +138,40 @@ func (r *reservation) cleanup() error {
 			return errors.Join(err, r.release())
 		}
 	}
-	if r.booted && r.installationOwned {
-		var failure error
-		state, _, stateErr := r.fixtureState()
-		if stateErr != nil {
-			failure = stateErr
-		} else {
-			if state != iosFixtureAbsent {
-				out, uninstallErr := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput()
-				if uninstallErr != nil {
-					failure = fmt.Errorf("owned app uninstall failed: %w: %s", uninstallErr, out)
-				} else {
-					r.phases = append(r.phases, map[string]string{"action": "uninstall", "app": developmentAppID})
-					switch state, _, stateErr = r.fixtureState(); {
-					case stateErr != nil:
-						failure = stateErr
-					case state != iosFixtureAbsent:
-						failure = errors.New("owned app survived uninstall")
-					}
+	return errors.Join(err, r.retireInstallation(), r.release())
+}
+
+// retireInstallation removes the owned fixture app from the booted device and
+// verifies absence; ownership is only released once absence is proven.
+func (r *reservation) retireInstallation() error {
+	if !r.booted || !r.installationOwned {
+		return nil
+	}
+	var failure error
+	state, _, stateErr := r.fixtureState()
+	if stateErr != nil {
+		failure = stateErr
+	} else {
+		if state != iosFixtureAbsent {
+			out, uninstallErr := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput()
+			if uninstallErr != nil {
+				failure = fmt.Errorf("owned app uninstall failed: %w: %s", uninstallErr, out)
+			} else {
+				r.phases = append(r.phases, map[string]string{"action": "uninstall", "app": developmentAppID})
+				switch state, _, stateErr = r.fixtureState(); {
+				case stateErr != nil:
+					failure = stateErr
+				case state != iosFixtureAbsent:
+					failure = errors.New("owned app survived uninstall")
 				}
 			}
-			if failure == nil {
-				r.installationOwned = false
-				r.phases = append(r.phases, map[string]string{"action": "uninstall-absence-verified", "app": developmentAppID})
-			}
 		}
-		err = errors.Join(err, failure)
+		if failure == nil {
+			r.installationOwned = false
+			r.phases = append(r.phases, map[string]string{"action": "uninstall-absence-verified", "app": developmentAppID})
+		}
 	}
-	return errors.Join(err, r.release())
+	return failure
 }
 
 type health struct {
@@ -179,6 +195,9 @@ func main() {
 func run() (result error) {
 	if len(os.Args) > 1 && os.Args[1] == "android" {
 		return runAndroid(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "simultaneous" {
+		return runSimultaneous(os.Args[2:])
 	}
 	args := os.Args[1:]
 	rejectNative := len(args) == 4 && args[0] == "reject-ios"

@@ -110,6 +110,12 @@ func (r *androidReservation) acquire(ctx context.Context, device bool, logPath s
 	if !device {
 		return nil
 	}
+	return r.startEmulator(ctx, logPath)
+}
+
+// startEmulator boots the caller-owned AVD on the reserved port and proves the
+// serial's identity. It runs no broker acquisition of its own.
+func (r *androidReservation) startEmulator(ctx context.Context, logPath string) error {
 	if err := noAndroidEmulator(ctx, r.sdk, executeQualification); err != nil {
 		return err
 	}
@@ -120,10 +126,11 @@ func (r *androidReservation) acquire(ctx context.Context, device bool, logPath s
 		}
 		_ = listener.Close()
 	}
-	r.emulatorLog, err = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	emulatorLog, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
+	r.emulatorLog = emulatorLog
 	command := exec.Command(filepath.Join(r.sdk, "emulator/emulator"), "-avd", r.avd, "-port", strconv.Itoa(r.port), "-no-window", "-no-audio", "-no-snapshot", "-no-boot-anim")
 	for _, value := range os.Environ() {
 		if !strings.HasPrefix(value, "ANDROID_AVD_HOME=") {

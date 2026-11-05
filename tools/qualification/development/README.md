@@ -76,6 +76,23 @@ Heartbeat files are read using the debug app's `run-as`; no guest root is used. 
 The fixture's Android cleartext permission is for Vite's ordinary debug
 transport. It supplies no OTA HTTPS trust evidence.
 
+`development-consumer simultaneous APP IOS_UDID EVEN_PORT EVIDENCE_JSON` runs one
+staged project against both targets at once under a single broker reservation
+(exclusive `ios:` UDID plus `android:elegant-fir-probe`, two resident devices and
+one native build slot). Both debug sessions share the project directory and one
+public client, exercising the workspace lease across destinations. A shared
+JavaScript edit must hot-update both applications, an iOS-only native resource
+rebuild must leave the Android session untouched, and closing one session must
+not disturb the other. The same existing-device rules apply — the simulator
+starts shutdown, no emulator may be running, and no device is created or
+replaced:
+
+```sh
+JAVA_HOME=/absolute/jdk21 ANDROID_HOME=/absolute/android-sdk \
+  .cache/development-consumer simultaneous "$PWD/.cache/native-dev-simultaneous" \
+  91D40099-A056-497D-A572-ADDDFD6A8F23 5584 "$HOME/dev/reports/nativescript-cli/simultaneous-development.json"
+```
+
 Successful native runs qualify their stated debug simulator/emulator sequences
 only. Other native contributions, framework-specific behavior, simultaneous
 targets, release, physical devices and the complete G5 matrix need separate
