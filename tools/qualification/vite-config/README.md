@@ -102,6 +102,13 @@ All code hunks must still match. `runtime-patches.json` records original/applied
 patch hashes, normalization and resulting package-file hashes.
 
 Patch application and public Resolve do not establish runtime compatibility.
-The patched renderer's MasonKit imports currently expose missing preset-alias
-handling in the engine vendor bundle; host/runtime qualification of that path
-remains open. The tool keeps the original renderer imports and preset aliases.
+The same host qualifier can run against this patched workspace. It exercises
+the renderer's original MasonKit imports through the preset aliases and the
+helper's version-scoped vendor/dependency resolver bridge. It retains the
+original renderer imports and preset aliases. Native startup, CSS application,
+component lifecycle and HMR still require their own actual platform runs.
+
+Set `NS_XPLAT_VITE_VENDOR_ALIAS_FAILURE=1` with the patched `pinned` profile to
+also replace the alias in the disposable test app with an unsupported virtual
+destination. The check requires startup failure and helper retirement before
+the caller deadline. It never changes the installed fixture or original configs.

@@ -29,6 +29,9 @@ module.exports = async function native(p, emit) {
   process.env.NATIVESCRIPT_BUNDLER_ENV = JSON.stringify({[p.platform]:true,hmr:development,production:p.configuration==='release'});
   if(p.configuration==='release')delete process.env.DEBUG;
   process.argv.push('--',`--env.${p.platform}`,...(development?['--env.hmr']:[]));
+  let aliases;
+  try{aliases=require('./native-aliases.cjs')(req);}catch{throw fail('unavailable');}
+  try { return await aliases.run(async()=>{
   let engine, vite;
   try {
     const engineFile = req.resolve('@nativescript/vite');
@@ -41,7 +44,7 @@ module.exports = async function native(p, emit) {
     const framework = await import(pathToFileURL(req.resolve('@nativescript/vite/framework')).href);
     require('./native-update.cjs')(framework);
   } catch (error) { throw fail(error.code === 'invalid_input' ? 'invalid_input' : 'unavailable'); }
-  const configs=require('./native-config.cjs')(p,vite,engine,development);
+  const configs=require('./native-config.cjs')(p,vite,engine,development,aliases);
   function manifest(){
     const files=[];
     function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
@@ -54,7 +57,7 @@ module.exports = async function native(p, emit) {
     return {directory:p.directory,entry,files:files.sort()};
   }
   if(!development){
-    await vite.build(await configs.config('build'));
+    await aliases.run(async()=>vite.build(await configs.config('build')));
     if(configs.changed())throw fail('restart_required');
     return manifest();
   }
@@ -99,11 +102,12 @@ module.exports = async function native(p, emit) {
     }
     try { await server.listen(); }
     catch(error) { if (/^Port \d+ is already in use$/.test(error.message || '')) throw fail('EADDRINUSE'); throw error; }
-    await vite.build(await configs.config('build'));
+    await aliases.run(async()=>vite.build(await configs.config('build')));
     if (terminalError) throw terminalError;
     if(configs.changed())throw fail('restart_required');
     emit({type:'ready',manifest:manifest(),
       endpoint:{url:`http://127.0.0.1:${p.port}`,hmrURL:`ws://${p.hmrHost || '127.0.0.1'}:${p.port}/ns-hmr`}});
     await lifetime;
   } finally { for(const watcher of nativeWatchers) watcher.close(); await server?.close(); }
+  }); } finally { aliases.close(); }
 };

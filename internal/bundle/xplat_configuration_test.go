@@ -179,4 +179,36 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 	if _, err := http.Get(dev.Ready.Endpoint.URL); err == nil {
 		t.Fatal("server survived close")
 	}
+	if os.Getenv("NS_XPLAT_VITE_VENDOR_ALIAS_FAILURE") == "1" {
+		if !pinned {
+			t.Fatal("vendor alias failure probe requires patched pinned profile")
+		}
+		// Preserve the original config in this disposable app and introduce an
+		// alias that cannot resolve. The helper must retire without waiting for
+		// its caller's deadline, even when the vendor SDK has started work.
+		config := filepath.Join(dir, "vite.config.mts")
+		if err := os.Rename(config, filepath.Join(dir, "original.vite.mts")); err != nil {
+			t.Fatal(err)
+		}
+		write(t, config, `import original from './original.vite.mts';
+export default async env => {
+ const config=await original(env);
+ config.resolve={...config.resolve,alias:[{find:/^@octane-xplat\/nativescript-masonkit(?=\/|$)/,replacement:'\u0000unsupported-native-alias'},...config.resolve.alias]};
+ return config;
+};`)
+		failureContext, stop := context.WithTimeout(context.Background(), 45*time.Second)
+		defer stop()
+		resolved, err := (resolver.Resolver{Host: a.Host}).Resolve(failureContext, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed, err := a.StartDevelopment(failureContext, resolved, target, Request{})
+		if failed != nil {
+			failed.Session.Close(context.Background())
+		}
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || failureContext.Err() != nil {
+			t.Fatal("invalid vendor alias did not fail and retire before caller deadline", err)
+		}
+		t.Log("invalid vendor alias failed and retired before caller deadline")
+	}
 }

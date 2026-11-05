@@ -9,7 +9,7 @@ const optionalDigest = file => {try{return digest(file);}catch(error){if(error.c
 // Configs/plugins are trusted project code, not a sandbox. The adapter still
 // owns Vite's normal output, cache and listening settings. A plugin overriding
 // those settings fails before output or server startup.
-module.exports = function nativeConfig(p, vite, engine, development) {
+module.exports = function nativeConfig(p, vite, engine, development, aliases) {
   const mode = p.configuration === 'debug' ? 'development' : 'production';
   const dependencies = new Map();
   if(p.bundlerConfigPath){
@@ -75,9 +75,13 @@ module.exports = function nativeConfig(p, vite, engine, development) {
       value=await value;
       return Array.isArray(value)?(await Promise.all(value.map(flatten))).flat():[value];
     }
-    const plugins=(await flatten(result.plugins??[])).filter(plugin=>plugin && plugin.name!=='nsvite-nsconfig-as-json');
+    // Engine plugin factories may start their vendor build before Vite awaits
+    // the plugin array. Supply an alias-only resolved config first; the final
+    // config hook rechecks imports already resolved by an early vendor pass.
+    if(aliases)aliases.prepare(await vite.resolveConfig({root:p.projectDir,configFile:false,mode,logLevel:'silent',envFile:false,resolve:result.resolve},command));
+    const plugins=(await flatten(result.plugins??[])).filter(plugin=>plugin && plugin.name!=='nsvite-nsconfig-as-json').map(plugin=>aliases?aliases.bindVendor(plugin):plugin);
     return {...result,...owned,build:{...result.build,...owned.build},server:{...result.server,...owned.server},
-      plugins:[metadata,...(development?[require('./native-accept.cjs').plugin()]:[]),...plugins,ownership]};
+      plugins:[metadata,...(aliases?[aliases.plugin()]:[]),...(development?[require('./native-accept.cjs').plugin()]:[]),...plugins,ownership]};
   }
   return {config,changed,dependencies};
 };

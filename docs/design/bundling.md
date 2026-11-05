@@ -115,6 +115,37 @@ stable while loading/building; arbitrary plugin file reads are not a filesystem
 snapshot or a complete dependency-discovery contract. No dependencies or caller
 configs are installed or rewritten.
 
+The native engine also runs three esbuild vendor/dependency passes outside Vite.
+The helper adapts those passes to the selected config's public Vite resolver, so
+framework aliases such as MasonKit retain their project meaning. The adapter
+loads the unchanged project-installed esbuild CJS SDK before the engine's ESM
+imports snapshot its exports. This path is version-scoped to engine 8.0.21 and
+esbuild 0.27; an already-loaded or unsupported SDK fails unavailable. Other
+esbuild calls are unchanged. SDK core/engine imports keep their native realm;
+aliases resolving into the selected core package, virtual or unresolved
+destinations fail rather than bundle that core through an alternate name.
+
+Vendor work can start in async plugin factories before Vite resolves the full
+config. An alias-only resolver supplies that early work; the final config hook
+rechecks its used imports against the effective resolver. A changed destination
+rejects. Separate async contexts isolate serve/build instances, and the engine's
+vendor hooks retain their context through RollDown callbacks. The helper disables
+the engine's dependency disk cache because its key omits these aliases. This
+trades cache reuse for correct config ownership; it does not change the engine's
+core cache or installed sources. Helper retirement stops its owned SDK service.
+
+The real installed-SDK test is opt-in:
+
+```sh
+NS_NATIVE_VITE_DIR=/absolute/path/to/installed/app node --test bridge/vite/native-aliases.test.cjs
+```
+
+It checks concurrent configs, alias/custom resolution, early factory work,
+late config validation, vendor callback context and native-realm rejection.
+The patched pinned-preset host qualifier separately exercises the original
+renderer MasonKit imports, original Vite/Bamboo configs and all six canonical
+runtime patches. These are host/compiler checks, not native CSS or app execution.
+
 The opt-in `TestInstalledNativeProjectConfiguration` uses a real `.mts` config,
 relative config import and installed TypeScript native preset. It proves build/
 serve configuration, plugin execution, emitted/served defines, debug/release mode,
