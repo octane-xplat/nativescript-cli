@@ -153,8 +153,12 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 // coordinator's lease. Subsequent JavaScript edits travel through native HMR;
 // native input edits terminate the server with ErrRestart for re-resolution.
 func (d *Development) Bundle(ctx context.Context, r project.Resolved, p project.Prepared, lease workspace.Lease) (project.Bundle, error) {
+	baseRevision := r.Revision
+	if r.SourceRevision != "" {
+		baseRevision = r.SourceRevision
+	}
 	if lease == nil || !p.Identity.Compatible(lease.Layout().Identity) || p.Identity.Target != d.target ||
-		r.Revision != d.revision || r.Directory != d.project || p.Identity.Revision != d.revision ||
+		baseRevision != d.revision || r.Directory != d.project || p.Identity.Revision != r.Revision ||
 		!filepath.IsAbs(p.BundleDir) || !validManifest(d.Ready.Manifest, d.Ready.Manifest.Directory) {
 		return project.Bundle{}, workflow.ErrHandoff
 	}

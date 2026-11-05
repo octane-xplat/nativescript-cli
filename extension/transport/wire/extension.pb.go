@@ -405,17 +405,86 @@ func (x *File) GetContent() string {
 	return ""
 }
 
+type NativeFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	Content       []byte                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NativeFile) Reset() {
+	*x = NativeFile{}
+	mi := &file_extension_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NativeFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NativeFile) ProtoMessage() {}
+
+func (x *NativeFile) ProtoReflect() protoreflect.Message {
+	mi := &file_extension_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NativeFile.ProtoReflect.Descriptor instead.
+func (*NativeFile) Descriptor() ([]byte, []int) {
+	return file_extension_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *NativeFile) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *NativeFile) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *NativeFile) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *NativeFile) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
 type Result struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Files         []*File                `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
 	Diagnostics   []string               `protobuf:"bytes,2,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"`
+	NativeFiles   []*NativeFile          `protobuf:"bytes,3,rep,name=native_files,json=nativeFiles,proto3" json:"native_files,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_extension_proto_msgTypes[6]
+	mi := &file_extension_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +496,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_extension_proto_msgTypes[6]
+	mi := &file_extension_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +509,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_extension_proto_rawDescGZIP(), []int{6}
+	return file_extension_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Result) GetFiles() []*File {
@@ -453,6 +522,13 @@ func (x *Result) GetFiles() []*File {
 func (x *Result) GetDiagnostics() []string {
 	if x != nil {
 		return x.Diagnostics
+	}
+	return nil
+}
+
+func (x *Result) GetNativeFiles() []*NativeFile {
+	if x != nil {
+		return x.NativeFiles
 	}
 	return nil
 }
@@ -488,10 +564,17 @@ const file_extension_proto_rawDesc = "" +
 	"\tartifacts\x18\a \x03(\v2#.nativescript.extension.v1.ArtifactR\tartifacts\"4\n" +
 	"\x04File\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\tR\acontent\"a\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\"j\n" +
+	"\n" +
+	"NativeFile\x12\x1a\n" +
+	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x04 \x01(\fR\acontent\"\xab\x01\n" +
 	"\x06Result\x125\n" +
 	"\x05files\x18\x01 \x03(\v2\x1f.nativescript.extension.v1.FileR\x05files\x12 \n" +
-	"\vdiagnostics\x18\x02 \x03(\tR\vdiagnostics2\xad\x01\n" +
+	"\vdiagnostics\x18\x02 \x03(\tR\vdiagnostics\x12H\n" +
+	"\fnative_files\x18\x03 \x03(\v2%.nativescript.extension.v1.NativeFileR\vnativeFiles2\xad\x01\n" +
 	"\tExtension\x12Q\n" +
 	"\bDescribe\x12 .nativescript.extension.v1.Empty\x1a#.nativescript.extension.v1.Manifest\x12M\n" +
 	"\x06Invoke\x12 .nativescript.extension.v1.Input\x1a!.nativescript.extension.v1.ResultBCZAgithub.com/octane-xplat/nativescript-cli/extension/transport/wireb\x06proto3"
@@ -508,29 +591,31 @@ func file_extension_proto_rawDescGZIP() []byte {
 	return file_extension_proto_rawDescData
 }
 
-var file_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_extension_proto_goTypes = []any{
-	(*Empty)(nil),    // 0: nativescript.extension.v1.Empty
-	(*Manifest)(nil), // 1: nativescript.extension.v1.Manifest
-	(*Pin)(nil),      // 2: nativescript.extension.v1.Pin
-	(*Artifact)(nil), // 3: nativescript.extension.v1.Artifact
-	(*Input)(nil),    // 4: nativescript.extension.v1.Input
-	(*File)(nil),     // 5: nativescript.extension.v1.File
-	(*Result)(nil),   // 6: nativescript.extension.v1.Result
+	(*Empty)(nil),      // 0: nativescript.extension.v1.Empty
+	(*Manifest)(nil),   // 1: nativescript.extension.v1.Manifest
+	(*Pin)(nil),        // 2: nativescript.extension.v1.Pin
+	(*Artifact)(nil),   // 3: nativescript.extension.v1.Artifact
+	(*Input)(nil),      // 4: nativescript.extension.v1.Input
+	(*File)(nil),       // 5: nativescript.extension.v1.File
+	(*NativeFile)(nil), // 6: nativescript.extension.v1.NativeFile
+	(*Result)(nil),     // 7: nativescript.extension.v1.Result
 }
 var file_extension_proto_depIdxs = []int32{
 	2, // 0: nativescript.extension.v1.Input.pins:type_name -> nativescript.extension.v1.Pin
 	3, // 1: nativescript.extension.v1.Input.artifacts:type_name -> nativescript.extension.v1.Artifact
 	5, // 2: nativescript.extension.v1.Result.files:type_name -> nativescript.extension.v1.File
-	0, // 3: nativescript.extension.v1.Extension.Describe:input_type -> nativescript.extension.v1.Empty
-	4, // 4: nativescript.extension.v1.Extension.Invoke:input_type -> nativescript.extension.v1.Input
-	1, // 5: nativescript.extension.v1.Extension.Describe:output_type -> nativescript.extension.v1.Manifest
-	6, // 6: nativescript.extension.v1.Extension.Invoke:output_type -> nativescript.extension.v1.Result
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	6, // 3: nativescript.extension.v1.Result.native_files:type_name -> nativescript.extension.v1.NativeFile
+	0, // 4: nativescript.extension.v1.Extension.Describe:input_type -> nativescript.extension.v1.Empty
+	4, // 5: nativescript.extension.v1.Extension.Invoke:input_type -> nativescript.extension.v1.Input
+	1, // 6: nativescript.extension.v1.Extension.Describe:output_type -> nativescript.extension.v1.Manifest
+	7, // 7: nativescript.extension.v1.Extension.Invoke:output_type -> nativescript.extension.v1.Result
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_extension_proto_init() }
@@ -544,7 +629,7 @@ func file_extension_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_extension_proto_rawDesc), len(file_extension_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

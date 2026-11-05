@@ -48,9 +48,19 @@ type File struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
+
+// NativeFile is an individual compiler input, collected before preparation.
+// Path is relative to this extension's platform tree, never a caller path.
+type NativeFile struct {
+	Platform string `json:"platform"`
+	Kind     string `json:"kind"`
+	Path     string `json:"path"`
+	Content  []byte `json:"content"`
+}
 type Result struct {
-	Files       []File   `json:"files"`
-	Diagnostics []string `json:"diagnostics"`
+	Files       []File       `json:"files"`
+	NativeFiles []NativeFile `json:"nativeFiles"`
+	Diagnostics []string     `json:"diagnostics"`
 }
 
 // Implementations must observe context cancellation and must not mutate project files.

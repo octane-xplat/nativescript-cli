@@ -2,6 +2,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	ns "github.com/octane-xplat/nativescript-cli"
@@ -28,8 +31,55 @@ type record struct {
 }
 type inspector struct{ id string }
 
+var generatedClasses = []string{"FromDirect", "FromExecutable", "FromJavascript"}
+
+func verifyClasses(apk string, present bool) error {
+	archive, err := zip.OpenReader(apk)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	found := map[string]bool{}
+	for _, file := range archive.File {
+		if !strings.HasPrefix(file.Name, "classes") || !strings.HasSuffix(file.Name, ".dex") {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			return err
+		}
+		data, err := io.ReadAll(io.LimitReader(reader, 64<<20))
+		reader.Close()
+		if err != nil {
+			return err
+		}
+		for _, name := range generatedClasses {
+			found[name] = found[name] || bytes.Contains(data, []byte("Lorg/example/generated/"+name+";"))
+		}
+	}
+	for _, name := range generatedClasses {
+		if found[name] != present {
+			return fmt.Errorf("generated DEX class %s presence=%t expected=%t", name, found[name], present)
+		}
+	}
+	return nil
+}
+func retainAPK(source, destination string) error {
+	from, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer from.Close()
+	to, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(to, from)
+	return errors.Join(err, to.Close())
+}
+
 func (i inspector) Manifest(context.Context) (extension.Manifest, error) {
-	return extension.Manifest{ID: i.id, Version: "1.0.0", API: extension.APIVersion, Phases: []extension.Phase{extension.PostBuild}, Required: []string{"build_artifacts", "generated_files"}}, nil
+	return extension.Manifest{ID: i.id, Version: "1.0.0", API: extension.APIVersion, Phases: []extension.Phase{extension.Collect, extension.PostBuild}, Required: []string{"build_artifacts", "generated_files", "native_files"}}, nil
 }
 func inspect(ctx context.Context, artifacts []extension.Artifact) ([]record, error) {
 	var result []record
@@ -52,6 +102,13 @@ func inspect(ctx context.Context, artifacts []extension.Artifact) ([]record, err
 	return result, ctx.Err()
 }
 func (i inspector) Invoke(ctx context.Context, in extension.Input) (extension.Result, error) {
+	if in.Phase == extension.Collect {
+		name := "FromDirect"
+		if i.id == "executable" {
+			name = "FromExecutable"
+		}
+		return extension.Result{NativeFiles: []extension.NativeFile{{Platform: in.Platform, Kind: "source", Path: "org/example/generated/" + name + ".java", Content: []byte("package org.example.generated; public class " + name + " { public static int value() { return 42; } }")}}}, nil
+	}
 	if in.Phase != extension.PostBuild || len(in.Artifacts) == 0 {
 		return extension.Result{}, errors.New("missing completed artifact context")
 	}
@@ -148,6 +205,32 @@ func run() (result error) {
 	evidence["build"] = built
 	evidence["records"] = want
 	evidence["forms"] = []string{"direct", "executable", "javascript"}
-	fmt.Println("PASS actual APK inspected identically by direct Go, executable Go and Node extensions")
+	if err := verifyClasses(built.Artifacts[0].Path, true); err != nil {
+		return err
+	}
+	if err := retainAPK(built.Artifacts[0].Path, saved+".with-native.apk"); err != nil {
+		return err
+	}
+	plain, err := ns.New(ns.Options{})
+	if err != nil {
+		return err
+	}
+	removed, err := plain.Build(ctx, ns.BuildRequest{ProjectDir: app, OutputDir: filepath.Join(app, "state"), Target: ns.Target{Platform: ns.Android, Configuration: ns.Debug, Destination: ns.Destination{Kind: ns.Simulator, ID: "generic", Architecture: "arm64-v8a"}}})
+	if err != nil {
+		return err
+	}
+	if len(removed.Artifacts) != 1 || removed.Prepared.Identity.Revision == built.Prepared.Identity.Revision {
+		return errors.New("extension removal did not change generation identity")
+	}
+	if err := verifyClasses(removed.Artifacts[0].Path, false); err != nil {
+		return err
+	}
+	if err := retainAPK(removed.Artifacts[0].Path, saved+".removed.apk"); err != nil {
+		return err
+	}
+	evidence["generatedClasses"] = generatedClasses
+	evidence["removedBuild"] = removed
+	evidence["nativeClassesRemoved"] = true
+	fmt.Println("PASS three-form native Java contribution compilation/DEX membership, post-build inspection and removal")
 	return nil
 }

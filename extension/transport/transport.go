@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 var handshake = plugin.HandshakeConfig{ProtocolVersion: 1, MagicCookieKey: "NATIVESCRIPT_EXTENSION", MagicCookieValue: "1"}
@@ -43,9 +45,18 @@ type server struct {
 
 // Conversion uses generated JSON field names only; the wire protocol is typed protobuf.
 func convert(a, b interface{}) error {
-	v, e := json.Marshal(a)
+	var v []byte
+	var e error
+	if message, ok := a.(proto.Message); ok {
+		v, e = protojson.Marshal(message)
+	} else {
+		v, e = json.Marshal(a)
+	}
 	if e != nil {
 		return e
+	}
+	if message, ok := b.(proto.Message); ok {
+		return protojson.Unmarshal(v, message)
 	}
 	return json.Unmarshal(v, b)
 }

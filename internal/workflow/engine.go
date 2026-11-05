@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/octane-xplat/nativescript-cli/extension"
 	"github.com/octane-xplat/nativescript-cli/internal/extensions"
 	"path/filepath"
@@ -124,6 +125,18 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err != nil {
 			return err
 		}
+		nativeInputs, err := extensions.NormalizeNative(collected.Native, q.Target.Platform)
+		if err != nil {
+			return err
+		}
+		if len(nativeInputs) > 0 {
+			if s.OTA != nil {
+				return fmt.Errorf("%w: canonical OTA cannot yet fingerprint extension native files", ErrUnavailable)
+			}
+			r.SourceRevision = r.Revision
+			r.Revision = extensions.NativeRevision(r.Revision, nativeInputs)
+			input.Revision = r.Revision
+		}
 		l, err := workspace.NewLayout(q.OutputDir, project.Identity{Schema: 1, Revision: r.Revision, ProjectDir: r.Directory, Target: q.Target})
 		if err != nil {
 			return err
@@ -139,6 +152,10 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		defer func() { err = errors.Join(err, lease.Release()) }()
 		// Resolution follows the caller path; native identities use the canonical path.
 		r.Directory = l.Identity.ProjectDir
+		r, err = extensions.MaterializeNative(ctx, r, lease, nativeInputs)
+		if err != nil {
+			return err
+		}
 		p, err = s.Preparer.Prepare(ctx, r, lease)
 		if err != nil {
 			return err
@@ -156,7 +173,7 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err != nil {
 			return err
 		}
-		if err = extensions.Apply(ctx, p.NativeDir, append(collected, preparedFiles...)); err != nil {
+		if err = extensions.Apply(ctx, p.NativeDir, append(collected.Files, preparedFiles.Files...)); err != nil {
 			return err
 		}
 		if err = ctx.Err(); err != nil || !build {
@@ -197,7 +214,7 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err != nil {
 			return err
 		}
-		if err = extensions.Apply(ctx, p.NativeDir, append(append(collected, preparedFiles...), postFiles...)); err != nil {
+		if err = extensions.Apply(ctx, p.NativeDir, append(append(collected.Files, preparedFiles.Files...), postFiles.Files...)); err != nil {
 			return err
 		}
 		return ctx.Err()

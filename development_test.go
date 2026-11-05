@@ -3,6 +3,7 @@ package nativescript
 import (
 	"context"
 	"errors"
+	"github.com/octane-xplat/nativescript-cli/extension"
 	"log"
 	"net"
 	"net/http"
@@ -44,6 +45,15 @@ type developmentNativeFixture struct {
 	launched     atomic.Int32
 	retired      atomic.Int32
 	active       atomic.Int32
+}
+
+type developmentNativeExtension struct{}
+
+func (developmentNativeExtension) Manifest(context.Context) (extension.Manifest, error) {
+	return extension.Manifest{ID: "native-development", Version: "1.0.0", API: extension.APIVersion, Phases: []extension.Phase{extension.Collect}, Required: []string{"native_files"}}, nil
+}
+func (developmentNativeExtension) Invoke(context.Context, extension.Input) (extension.Result, error) {
+	return extension.Result{NativeFiles: []extension.NativeFile{{Platform: "ios", Kind: "source", Path: "Development.swift", Content: []byte("class Development {}")}}}, nil
 }
 
 func (f *developmentNativeFixture) Prepare(_ context.Context, _ project.Resolved, l workspace.Lease) (project.Prepared, error) {
@@ -114,9 +124,9 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	writer, flags, prefix := log.Writer(), log.Flags(), log.Prefix()
 	host := jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS("assets")}, CacheDir: t.TempDir()}
 	native := &developmentNativeFixture{}
-	c, _ := New(Options{})
+	c, _ := New(Options{Extensions: []extension.Extension{developmentNativeExtension{}}})
 	c.engine = workflow.Engine{Factory: func(map[string]string) workflow.Stages {
-		return workflow.Stages{Resolver: resolver.Resolver{Host: host}, Bundler: bundle.Adapter{Host: host}, Preparer: native, Compiler: native, Devices: native, Launcher: native}
+		return workflow.Stages{Extensions: c.options.Extensions, Resolver: resolver.Resolver{Host: host}, Bundler: bundle.Adapter{Host: host}, Preparer: native, Compiler: native, Devices: native, Launcher: native}
 	}}
 	settings := &DevelopmentOptions{}
 	session, err := c.Run(ctx, RunRequest{Development: settings, DeviceID: "fixture", Build: BuildRequest{ProjectDir: dir, OutputDir: filepath.Join(dir, ".generated"), Target: Target{Platform: IOS, Configuration: Debug, Destination: Destination{Kind: Simulator, ID: "fixture", Architecture: "arm64"}}}})

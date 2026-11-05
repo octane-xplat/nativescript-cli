@@ -54,7 +54,7 @@ func TestOrderValidationOwnershipAndFailures(t *testing.T) {
 		t.Fatal("path escaped")
 	}
 	r, _ = New(ctx, []extension.Extension{fixture{m: b, fail: errors.New("async failure")}}, "ios")
-	if f, e := r.Invoke(ctx, extension.Input{Phase: extension.Collect}); e == nil || len(f) != 0 {
+	if f, e := r.Invoke(ctx, extension.Input{Phase: extension.Collect}); e == nil || len(f.Files) != 0 || len(f.Native) != 0 {
 		t.Fatal(f, e)
 	}
 	canceled, cancel := context.WithCancel(ctx)

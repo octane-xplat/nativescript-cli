@@ -10,7 +10,7 @@ operations. They are trusted code, not sandboxed.
 The host validates exact API `1`, package identity, platform applicability,
 required capabilities, missing dependencies and cycles before preparation.
 `after` edges order dependencies first; unrelated IDs sort lexically. Only
-`generated_files` and `build_artifacts` are supported. Injection of upstream services and undeclared
+`generated_files`, `build_artifacts` and `native_files` are supported. Injection of upstream services and undeclared
 lifecycle phases reject. Package version, extension API, go-plugin application
 protocol `1`, framework core protocol `1` and private helper `0.1.0` are independent.
 
@@ -21,8 +21,34 @@ The coordinator retains the workspace lease through handlers and application.
 A failed handler publishes no files from that phase. Prepared output replaces
 only the reserved directory. Native preparation and compilation are not rolled
 back if a later phase fails. Extension removal clears reserved files on the next
-preparation, including preparation without registrations. Native input contributions outside this narrow
-capability require a future explicit typed contract and currently reject.
+preparation, including preparation without registrations.
+
+Collect handlers requiring `native_files` may return `Result.NativeFiles`:
+platform, kind, relative path and binary content (`[]byte` in Go, `Uint8Array` or
+Buffer in Node). Files belong to an extension-owned platform tree, not arbitrary
+caller paths. Source/resource/configuration and individual Android libraries or
+iOS static archives pass through the existing preparers' validations. Directory
+bundles, Pods/SPM package generation and Android C/C++ generation are unsupported
+by this file contract; installed native package contributions retain their own
+existing paths. The external transport's message-size limits still apply.
+
+The host validates capabilities, phase, platform, portable paths and collisions
+before generated-state writes. It derives the preparation/build revision from
+resolved source identity plus sorted owner/version/path/kind/content records.
+Collect receives the resolved source revision; later handlers receive the derived
+generation revision. Resolve itself remains an authored/installed-source view.
+Materialized inputs live in immutable content-identified trees under the leased
+generated root, outside replaceable native output. Reuse verifies bytes and rejects
+tampering without overwriting it. Removing registrations regenerates native
+membership without those inputs; old input caches are retained. The native Vite
+bootstrap checks its original source revision while the prepared generation uses
+the derived revision. Extension implementation hot-reloading itself is not added.
+
+These generation revisions are not canonical OTA compatibility fingerprints.
+OTAStartup plus generated native files rejects before native output creation
+until canonical fingerprint integration supports them. This is an open H1/G4
+requirement, not a compatibility waiver. Native additions/removal and runtime
+behavior must be qualified separately for each platform/contribution type.
 
 Post-build handlers receive `Input.Artifacts`, typed descriptors containing each
 completed compiler output's absolute path, kind and application ID. Earlier

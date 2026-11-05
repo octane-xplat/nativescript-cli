@@ -16,6 +16,15 @@ type entry struct {
 }
 type Registry struct{ entries []entry }
 
+type NativeInput struct {
+	Owner, Version string
+	File           extension.NativeFile
+}
+type Output struct {
+	Files  []extension.File
+	Native []NativeInput
+}
+
 // New validates the entire graph before any invocation or generated-state mutation.
 func New(ctx context.Context, implementations []extension.Extension, platform string) (*Registry, error) {
 	entries := map[string]entry{}
@@ -48,8 +57,17 @@ func New(ctx context.Context, implementations []extension.Extension, platform st
 			}
 		}
 		for _, c := range m.Required {
-			if c != "generated_files" && c != "build_artifacts" {
+			if c != "generated_files" && c != "build_artifacts" && c != "native_files" {
 				return nil, fmt.Errorf("required unsupported contribution %s", c)
+			}
+			if c == "native_files" {
+				found := false
+				for _, phase := range m.Phases {
+					found = found || phase == extension.Collect
+				}
+				if !found {
+					return nil, fmt.Errorf("native_files requires collect phase")
+				}
 			}
 			if c == "build_artifacts" {
 				found := false
@@ -104,11 +122,12 @@ func New(ctx context.Context, implementations []extension.Extension, platform st
 
 // Invoke returns all validated files in deterministic ownership namespaces. It
 // never applies partial results when a later extension fails.
-func (r *Registry) Invoke(ctx context.Context, in extension.Input) ([]extension.File, error) {
+func (r *Registry) Invoke(ctx context.Context, in extension.Input) (Output, error) {
 	if len(in.Artifacts) > 0 && in.Phase != extension.PostBuild {
-		return nil, fmt.Errorf("artifacts are available only in post_build")
+		return Output{}, fmt.Errorf("artifacts are available only in post_build")
 	}
 	var files []extension.File
+	var native []NativeInput
 	seen := map[string]bool{}
 	for _, v := range r.entries {
 		enabled := false
@@ -119,26 +138,47 @@ func (r *Registry) Invoke(ctx context.Context, in extension.Input) ([]extension.
 			continue
 		}
 		if e := ctx.Err(); e != nil {
-			return nil, e
+			return Output{}, e
 		}
 		ownedInput := in
 		ownedInput.Pins = append([]extension.Pin(nil), in.Pins...)
 		ownedInput.Artifacts = append([]extension.Artifact(nil), in.Artifacts...)
 		out, e := v.impl.Invoke(ctx, ownedInput)
 		if e != nil {
-			return nil, e
+			return Output{}, e
+		}
+		if len(out.NativeFiles) > 0 {
+			declared := false
+			for _, cap := range v.manifest.Required {
+				declared = declared || cap == "native_files"
+			}
+			if !declared || in.Phase != extension.Collect {
+				return Output{}, fmt.Errorf("native files require declared collect capability")
+			}
+			for _, f := range out.NativeFiles {
+				if err := validateNative(f, in.Platform); err != nil {
+					return Output{}, err
+				}
+				key := "native:" + v.manifest.ID + "/" + f.Platform + "/" + f.Path
+				if seen[key] {
+					return Output{}, fmt.Errorf("duplicate native input")
+				}
+				seen[key] = true
+				f.Content = append([]byte(nil), f.Content...)
+				native = append(native, NativeInput{v.manifest.ID, v.manifest.Version, f})
+			}
 		}
 		for _, f := range out.Files {
 			if f.Path == "" || path.IsAbs(f.Path) || path.Clean(f.Path) != f.Path || strings.HasPrefix(f.Path, "../") || strings.Contains(f.Path, "\\") || f.Path == ".." {
-				return nil, fmt.Errorf("invalid extension file path")
+				return Output{}, fmt.Errorf("invalid extension file path")
 			}
 			f.Path = v.manifest.ID + "/" + f.Path
 			if seen[f.Path] {
-				return nil, fmt.Errorf("duplicate generated file %s", f.Path)
+				return Output{}, fmt.Errorf("duplicate generated file %s", f.Path)
 			}
 			seen[f.Path] = true
 			files = append(files, f)
 		}
 	}
-	return files, ctx.Err()
+	return Output{Files: files, Native: native}, ctx.Err()
 }

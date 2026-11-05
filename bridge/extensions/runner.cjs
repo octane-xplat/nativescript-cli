@@ -29,7 +29,7 @@ async function main(){
  describe:async(call,cb)=>{try{cb(null,manifest(typeof impl.manifest==='function'?await impl.manifest():impl.manifest));}catch(e){cb(e);}},
  invoke:async(call,cb)=>{const controller=new AbortController();call.on('cancelled',()=>controller.abort());try{
  const v=call.request;const input={phase:v.getPhase(),project:v.getProject(),platform:v.getPlatform(),configuration:v.getConfiguration(),revision:v.getRevision(),pins:v.getPinsList().map(p=>({name:p.getName(),version:p.getVersion()})),artifacts:v.getArtifactsList().map(a=>({path:a.getPath(),kind:a.getKind(),applicationId:a.getApplicationid()}))};
- const out=await impl.invoke(input,{signal:controller.signal});const result=new wire.Result();result.setFilesList((out.files||[]).map(f=>{const v=new wire.File();v.setPath(f.path);v.setContent(f.content);return v;}));result.setDiagnosticsList(out.diagnostics||[]);cb(null,result);
+ const out=await impl.invoke(input,{signal:controller.signal});const result=new wire.Result();result.setFilesList((out.files||[]).map(f=>{const v=new wire.File();v.setPath(f.path);v.setContent(f.content);return v;}));result.setNativeFilesList((out.nativeFiles||[]).map(f=>{const v=new wire.NativeFile();v.setPlatform(f.platform);v.setKind(f.kind);v.setPath(f.path);v.setContent(f.content);return v;}));result.setDiagnosticsList(out.diagnostics||[]);cb(null,result);
  }catch(e){cb({code:controller.signal.aborted?grpc.status.CANCELLED:grpc.status.INTERNAL,message:e.message});}}
  });
  server.addService(GRPCControllerService,{shutdown:(call,cb)=>{cb(null,new Empty());server.tryShutdown(()=>process.exit(0));}});

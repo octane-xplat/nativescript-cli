@@ -15,14 +15,15 @@ type Identity struct {
 	Target     Target
 }
 type Resolved struct {
-	Config        Config
-	Packages      []Package
-	Dependencies  []Dependency
-	Contributions []Contribution
-	Sources       []Source
-	Directory     string
-	Revision      string
-	ApplicationID string
+	Config         Config
+	Packages       []Package
+	Dependencies   []Dependency
+	Contributions  []Contribution
+	Sources        []Source
+	Directory      string
+	Revision       string
+	ApplicationID  string
+	SourceRevision string
 }
 type Prepared struct {
 	Identity  Identity

@@ -29809,6 +29809,7 @@ var require_extension_pb = __commonJS({
     goog2.exportSymbol("proto.nativescript.extension.v1.File", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Input", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Manifest", null, global2);
+    goog2.exportSymbol("proto.nativescript.extension.v1.NativeFile", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Pin", null, global2);
     goog2.exportSymbol("proto.nativescript.extension.v1.Result", null, global2);
     proto.nativescript.extension.v1.Empty = function(opt_data) {
@@ -29852,6 +29853,13 @@ var require_extension_pb = __commonJS({
     goog2.inherits(proto.nativescript.extension.v1.File, jspb2.Message);
     if (goog2.DEBUG && !COMPILED) {
       proto.nativescript.extension.v1.File.displayName = "proto.nativescript.extension.v1.File";
+    }
+    proto.nativescript.extension.v1.NativeFile = function(opt_data) {
+      jspb2.Message.initialize(this, opt_data, 0, -1, null, null);
+    };
+    goog2.inherits(proto.nativescript.extension.v1.NativeFile, jspb2.Message);
+    if (goog2.DEBUG && !COMPILED) {
+      proto.nativescript.extension.v1.NativeFile.displayName = "proto.nativescript.extension.v1.NativeFile";
     }
     proto.nativescript.extension.v1.Result = function(opt_data) {
       jspb2.Message.initialize(this, opt_data, 0, -1, proto.nativescript.extension.v1.Result.repeatedFields_, null);
@@ -30647,7 +30655,159 @@ var require_extension_pb = __commonJS({
     proto.nativescript.extension.v1.File.prototype.setContent = function(value) {
       return jspb2.Message.setProto3StringField(this, 2, value);
     };
-    proto.nativescript.extension.v1.Result.repeatedFields_ = [1, 2];
+    if (jspb2.Message.GENERATE_TO_OBJECT) {
+      proto.nativescript.extension.v1.NativeFile.prototype.toObject = function(opt_includeInstance) {
+        return proto.nativescript.extension.v1.NativeFile.toObject(opt_includeInstance, this);
+      };
+      proto.nativescript.extension.v1.NativeFile.toObject = function(includeInstance, msg) {
+        var f, obj = {
+          platform: jspb2.Message.getFieldWithDefault(msg, 1, ""),
+          kind: jspb2.Message.getFieldWithDefault(msg, 2, ""),
+          path: jspb2.Message.getFieldWithDefault(msg, 3, ""),
+          content: msg.getContent_asB64()
+        };
+        if (includeInstance) {
+          obj.$jspbMessageInstance = msg;
+        }
+        return obj;
+      };
+    }
+    proto.nativescript.extension.v1.NativeFile.deserializeBinary = function(bytes) {
+      var reader = new jspb2.BinaryReader(bytes);
+      var msg = new proto.nativescript.extension.v1.NativeFile();
+      return proto.nativescript.extension.v1.NativeFile.deserializeBinaryFromReader(msg, reader);
+    };
+    proto.nativescript.extension.v1.NativeFile.deserializeBinaryFromReader = function(msg, reader) {
+      while (reader.nextField()) {
+        if (reader.isEndGroup()) {
+          break;
+        }
+        var field = reader.getFieldNumber();
+        switch (field) {
+          case 1:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setPlatform(value);
+            break;
+          case 2:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setKind(value);
+            break;
+          case 3:
+            var value = (
+              /** @type {string} */
+              reader.readString()
+            );
+            msg.setPath(value);
+            break;
+          case 4:
+            var value = (
+              /** @type {!Uint8Array} */
+              reader.readBytes()
+            );
+            msg.setContent(value);
+            break;
+          default:
+            reader.skipField();
+            break;
+        }
+      }
+      return msg;
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.serializeBinary = function() {
+      var writer = new jspb2.BinaryWriter();
+      proto.nativescript.extension.v1.NativeFile.serializeBinaryToWriter(this, writer);
+      return writer.getResultBuffer();
+    };
+    proto.nativescript.extension.v1.NativeFile.serializeBinaryToWriter = function(message, writer) {
+      var f = void 0;
+      f = message.getPlatform();
+      if (f.length > 0) {
+        writer.writeString(
+          1,
+          f
+        );
+      }
+      f = message.getKind();
+      if (f.length > 0) {
+        writer.writeString(
+          2,
+          f
+        );
+      }
+      f = message.getPath();
+      if (f.length > 0) {
+        writer.writeString(
+          3,
+          f
+        );
+      }
+      f = message.getContent_asU8();
+      if (f.length > 0) {
+        writer.writeBytes(
+          4,
+          f
+        );
+      }
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getPlatform = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 1, "")
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.setPlatform = function(value) {
+      return jspb2.Message.setProto3StringField(this, 1, value);
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getKind = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 2, "")
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.setKind = function(value) {
+      return jspb2.Message.setProto3StringField(this, 2, value);
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getPath = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.getFieldWithDefault(this, 3, "")
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.setPath = function(value) {
+      return jspb2.Message.setProto3StringField(this, 3, value);
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getContent = function() {
+      return (
+        /** @type {!(string|Uint8Array)} */
+        jspb2.Message.getFieldWithDefault(this, 4, "")
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getContent_asB64 = function() {
+      return (
+        /** @type {string} */
+        jspb2.Message.bytesAsB64(
+          this.getContent()
+        )
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.getContent_asU8 = function() {
+      return (
+        /** @type {!Uint8Array} */
+        jspb2.Message.bytesAsU8(
+          this.getContent()
+        )
+      );
+    };
+    proto.nativescript.extension.v1.NativeFile.prototype.setContent = function(value) {
+      return jspb2.Message.setProto3BytesField(this, 4, value);
+    };
+    proto.nativescript.extension.v1.Result.repeatedFields_ = [1, 2, 3];
     if (jspb2.Message.GENERATE_TO_OBJECT) {
       proto.nativescript.extension.v1.Result.prototype.toObject = function(opt_includeInstance) {
         return proto.nativescript.extension.v1.Result.toObject(opt_includeInstance, this);
@@ -30659,7 +30819,12 @@ var require_extension_pb = __commonJS({
             proto.nativescript.extension.v1.File.toObject,
             includeInstance
           ),
-          diagnosticsList: (f = jspb2.Message.getRepeatedField(msg, 2)) == null ? void 0 : f
+          diagnosticsList: (f = jspb2.Message.getRepeatedField(msg, 2)) == null ? void 0 : f,
+          nativeFilesList: jspb2.Message.toObjectList(
+            msg.getNativeFilesList(),
+            proto.nativescript.extension.v1.NativeFile.toObject,
+            includeInstance
+          )
         };
         if (includeInstance) {
           obj.$jspbMessageInstance = msg;
@@ -30691,6 +30856,11 @@ var require_extension_pb = __commonJS({
             );
             msg.addDiagnostics(value);
             break;
+          case 3:
+            var value = new proto.nativescript.extension.v1.NativeFile();
+            reader.readMessage(value, proto.nativescript.extension.v1.NativeFile.deserializeBinaryFromReader);
+            msg.addNativeFiles(value);
+            break;
           default:
             reader.skipField();
             break;
@@ -30718,6 +30888,14 @@ var require_extension_pb = __commonJS({
         writer.writeRepeatedString(
           2,
           f
+        );
+      }
+      f = message.getNativeFilesList();
+      if (f.length > 0) {
+        writer.writeRepeatedMessage(
+          3,
+          f,
+          proto.nativescript.extension.v1.NativeFile.serializeBinaryToWriter
         );
       }
     };
@@ -30750,6 +30928,21 @@ var require_extension_pb = __commonJS({
     };
     proto.nativescript.extension.v1.Result.prototype.clearDiagnosticsList = function() {
       return this.setDiagnosticsList([]);
+    };
+    proto.nativescript.extension.v1.Result.prototype.getNativeFilesList = function() {
+      return (
+        /** @type{!Array<!proto.nativescript.extension.v1.NativeFile>} */
+        jspb2.Message.getRepeatedWrapperField(this, proto.nativescript.extension.v1.NativeFile, 3)
+      );
+    };
+    proto.nativescript.extension.v1.Result.prototype.setNativeFilesList = function(value) {
+      return jspb2.Message.setRepeatedWrapperField(this, 3, value);
+    };
+    proto.nativescript.extension.v1.Result.prototype.addNativeFiles = function(opt_value, opt_index) {
+      return jspb2.Message.addToRepeatedWrapperField(this, 3, opt_value, proto.nativescript.extension.v1.NativeFile, opt_index);
+    };
+    proto.nativescript.extension.v1.Result.prototype.clearNativeFilesList = function() {
+      return this.setNativeFilesList([]);
     };
     goog2.object.extend(exports2, proto.nativescript.extension.v1);
   }
@@ -31564,6 +31757,14 @@ async function main() {
         const result = new wire.Result();
         result.setFilesList((out.files || []).map((f) => {
           const v2 = new wire.File();
+          v2.setPath(f.path);
+          v2.setContent(f.content);
+          return v2;
+        }));
+        result.setNativeFilesList((out.nativeFiles || []).map((f) => {
+          const v2 = new wire.NativeFile();
+          v2.setPlatform(f.platform);
+          v2.setKind(f.kind);
           v2.setPath(f.path);
           v2.setContent(f.content);
           return v2;

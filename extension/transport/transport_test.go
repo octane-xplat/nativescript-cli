@@ -59,6 +59,10 @@ func TestRealGoAndNodeEquivalent(t *testing.T) {
 			if _, e = impl.Invoke(ctx, extension.Input{Revision: "fail"}); e == nil {
 				t.Fatal("async failure lost")
 			}
+			out, e = impl.Invoke(ctx, extension.Input{Phase: extension.Collect, Platform: "android", Revision: "native"})
+			if e != nil || !reflect.DeepEqual(out.NativeFiles, []extension.NativeFile{{Platform: "android", Kind: "resource", Path: "assets/data.bin", Content: []byte{0, 1, 255}}}) {
+				t.Fatal("native binary payload", out, e)
+			}
 			artifactPath := filepath.Join(t.TempDir(), "app with spaces.apk")
 			if e = os.WriteFile(artifactPath, []byte("fixture compiler bytes"), 0600); e != nil {
 				t.Fatal(e)
@@ -84,9 +88,12 @@ func TestRealGoAndNodeEquivalent(t *testing.T) {
 type direct struct{}
 
 func (direct) Manifest(context.Context) (extension.Manifest, error) {
-	return extension.Manifest{ID: "fixture", API: "1", Version: "1.0.0", Phases: []extension.Phase{extension.Collect, extension.PostBuild}, Required: []string{"generated_files", "build_artifacts"}}, nil
+	return extension.Manifest{ID: "fixture", API: "1", Version: "1.0.0", Phases: []extension.Phase{extension.Collect, extension.PostBuild}, Required: []string{"generated_files", "build_artifacts", "native_files"}}, nil
 }
 func (direct) Invoke(ctx context.Context, in extension.Input) (extension.Result, error) {
+	if in.Revision == "native" {
+		return extension.Result{NativeFiles: []extension.NativeFile{{Platform: in.Platform, Kind: "resource", Path: "assets/data.bin", Content: []byte{0, 1, 255}}}}, nil
+	}
 	if in.Phase == extension.PostBuild {
 		a := in.Artifacts[0]
 		data, e := os.ReadFile(a.Path)
