@@ -35,8 +35,12 @@ func main() {
 	}
 }
 func run() (result error) {
-	if len(os.Args) != 4 {
-		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release")
+	if len(os.Args) != 4 && len(os.Args) != 5 {
+		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release [pinned]")
+	}
+	pinned := len(os.Args) == 5 && os.Args[4] == "pinned"
+	if len(os.Args) == 5 && !pinned {
+		return errors.New("unknown profile")
 	}
 	app, prefix, configuration := os.Args[1], os.Args[2], ns.Configuration(os.Args[3])
 	if !filepath.IsAbs(app) || !filepath.IsAbs(prefix) || (configuration != ns.Debug && configuration != ns.Release) {
@@ -55,7 +59,7 @@ func run() (result error) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
-	client, err := ns.New(ns.Options{Environment: map[string]string{"DEBUG": "caller-debug"}})
+	client, err := ns.New(ns.Options{Environment: map[string]string{"DEBUG": "caller-debug", "VISUAL_CAPTURE_URL": "", "XPLAT_DOCS_DEMOS": ""}})
 	if err != nil {
 		return err
 	}
@@ -97,7 +101,7 @@ func run() (result error) {
 		return errors.New("compiled runtime manifest differs")
 	}
 	proof, err := os.ReadFile(filepath.Join(content, "project-config.json"))
-	if err != nil {
+	if err != nil && !pinned {
 		return err
 	}
 	var data struct {
@@ -105,14 +109,18 @@ func run() (result error) {
 		Debug                *string
 		BundlerEnv           struct{ IOS, HMR, Production bool }
 	}
-	if json.Unmarshal(proof, &data) != nil || data.Command != "build" || data.Value != "PROJECT_VITE_NATIVE_20261105" || !data.BundlerEnv.IOS || data.BundlerEnv.HMR {
-		return errors.New("compiled config proof differs")
-	}
-	if configuration == ns.Release && (data.Mode != "production" || !data.BundlerEnv.Production || data.Debug != nil) {
-		return errors.New("release config inherited debug or wrong mode")
-	}
-	if configuration == ns.Debug && (data.Mode != "development" || data.BundlerEnv.Production) {
-		return errors.New("debug config mode differs")
+	if pinned {
+		data.Value = "PINNED_PRESET_20261105"
+	} else {
+		if json.Unmarshal(proof, &data) != nil || data.Command != "build" || data.Value != "PROJECT_VITE_NATIVE_20261105" || !data.BundlerEnv.IOS || data.BundlerEnv.HMR {
+			return errors.New("compiled config proof differs")
+		}
+		if configuration == ns.Release && (data.Mode != "production" || !data.BundlerEnv.Production || data.Debug != nil) {
+			return errors.New("release config inherited debug or wrong mode")
+		}
+		if configuration == ns.Debug && (data.Mode != "development" || data.BundlerEnv.Production) {
+			return errors.New("debug config mode differs")
+		}
 	}
 	files := map[string]string{}
 	var combined strings.Builder
@@ -141,16 +149,29 @@ func run() (result error) {
 	if !strings.Contains(combined.String(), data.Value) {
 		return errors.New("project define missing from compiled app JavaScript")
 	}
+	if pinned {
+		if !strings.Contains(combined.String(), "--color-primary") || !strings.Contains(combined.String(), "--space-4") {
+			return errors.New("Bamboo CSS tokens missing from compiled JavaScript")
+		}
+		proof, _ = json.Marshal(map[string]any{"inspection": "compiled non-HMR JavaScript contains pinned marker and Bamboo color/spacing tokens", "moduleHashes": files, "profile": "pinned", "nativeCSSApplication": "not exercised"})
+	}
 	binary, err := os.ReadFile(executable)
 	if err != nil {
 		return err
 	}
-	for suffix, bytes := range map[string][]byte{".macho": binary, ".project-config.json": proof, ".package.json": manifest} {
+	proofSuffix := ".project-config.json"
+	if pinned {
+		proofSuffix = ".inspection.json"
+	}
+	for suffix, bytes := range map[string][]byte{".macho": binary, proofSuffix: proof, ".package.json": manifest} {
 		if err := save(prefix+suffix, bytes); err != nil {
 			return err
 		}
 	}
 	evidence := map[string]any{"project": resolved, "build": built, "executableSHA256": hash(binary), "bundledModules": files, "proofSHA256": hash(proof), "runtimeManifestSHA256": hash(manifest), "retainedPrefix": prefix, "scope": "actual unsigned arm64 simulator native build; no guest startup, physical signing, OTA installer or original Octane/Bamboo preset claim"}
+	if pinned {
+		evidence["scope"] = "actual pinned source projection unsigned iOS build, compiled Bamboo tokens; no native CSS application, guest or whole app claim"
+	}
 	encoded, err := json.MarshalIndent(evidence, "", "  ")
 	if err != nil {
 		return err
@@ -158,6 +179,10 @@ func run() (result error) {
 	if err := save(prefix+".json", append(encoded, '\n')); err != nil {
 		return err
 	}
-	fmt.Printf("PASS actual public selected-config iOS %s build, compiled bundle/manifest/plugin proof, native arm64 artifact and embedding globals\n", configuration)
+	if pinned {
+		fmt.Printf("PASS actual public pinned-source iOS %s build, compiled marker/Bamboo tokens, native arm64 artifact and embedding globals; CSS application not exercised\n", configuration)
+	} else {
+		fmt.Printf("PASS actual public selected-config iOS %s build, compiled bundle/manifest/plugin proof, native arm64 artifact and embedding globals\n", configuration)
+	}
 	return nil
 }

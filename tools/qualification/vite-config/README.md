@@ -78,3 +78,12 @@ demo branches are disabled explicitly. Native HMR deliberately leaves CSS as an
 asset; the test does not infer actual native CSS application, component lifecycle
 or full app behavior. The broader consumer patches and native/runtime acceptance
 remain separate requirements.
+
+`stage-pinned-native.py SOURCE CLI_TARBALL NEW_WORKSPACE` composes these stages,
+adds cached iOS9.1.0 and copies the maintained scene/deployment resources. Run the
+public consumer with its optional `pinned` argument under the native-build broker.
+The profile checks the compiled app marker and Bamboo color/spacing tokens in
+JavaScript, retains the executable/manifest and an `.inspection.json` report,
+and preserves embedding globals. It does not invent a project-emitted proof asset
+or certify native CSS application, component lifecycle or guest health. Debug and
+release each need their own actual invocation and evidence prefix.
