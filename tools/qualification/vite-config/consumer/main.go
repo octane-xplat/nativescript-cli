@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"debug/macho"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -36,10 +38,11 @@ func main() {
 }
 func run() (result error) {
 	if len(os.Args) != 4 && len(os.Args) != 5 {
-		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release [pinned]")
+		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release [pinned|ota]")
 	}
 	pinned := len(os.Args) == 5 && os.Args[4] == "pinned"
-	if len(os.Args) == 5 && !pinned {
+	ota := len(os.Args) == 5 && os.Args[4] == "ota"
+	if len(os.Args) == 5 && !pinned && !ota {
 		return errors.New("unknown profile")
 	}
 	app, prefix, configuration := os.Args[1], os.Args[2], ns.Configuration(os.Args[3])
@@ -59,7 +62,7 @@ func run() (result error) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
-	client, err := ns.New(ns.Options{Environment: map[string]string{"DEBUG": "caller-debug", "VISUAL_CAPTURE_URL": "", "XPLAT_DOCS_DEMOS": ""}})
+	client, err := ns.New(ns.Options{OTAStartup: ota, Environment: map[string]string{"DEBUG": "caller-debug", "VISUAL_CAPTURE_URL": "", "XPLAT_DOCS_DEMOS": ""}})
 	if err != nil {
 		return err
 	}
@@ -159,6 +162,79 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
+	if ota {
+		record, err := os.ReadFile(filepath.Join(built.Prepared.NativeDir, ".xplat/fingerprints/ios.json"))
+		if err != nil {
+			return err
+		}
+		stamp, err := os.ReadFile(filepath.Join(content, "xplat-native.json"))
+		if err != nil {
+			return err
+		}
+		var identity struct {
+			Hash    string
+			Release bool
+		}
+		if json.Unmarshal(stamp, &identity) != nil || len(identity.Hash) != 64 || identity.Release != (configuration == ns.Release) || !bytes.Contains(binary, []byte(identity.Hash)) {
+			return errors.New("compiled canonical stamp missing or inconsistent")
+		}
+		var canonical struct{ Hash string }
+		if json.Unmarshal(record, &canonical) != nil || canonical.Hash != identity.Hash {
+			return errors.New("compiled/persisted canonical hashes differ")
+		}
+		for suffix, body := range map[string][]byte{".fingerprint.json": record, ".stamp.json": stamp} {
+			if err := save(prefix+suffix, body); err != nil {
+				return err
+			}
+		}
+		for suffix, file := range map[string]string{".main.m": "internal/main.m", ".pbxproj": "NativeScriptApp.xcodeproj/project.pbxproj"} {
+			body, err := os.ReadFile(filepath.Join(built.Prepared.NativeDir, file))
+			if err != nil {
+				return err
+			}
+			if err := save(prefix+suffix, body); err != nil {
+				return err
+			}
+		}
+		var evaluations []map[string]any
+		for _, c := range resolved.Contributions {
+			if c.Kind != "spm" || c.SPM == nil || c.SPM.Path == "" {
+				continue
+			}
+			body, err := os.ReadFile(c.Path)
+			if err != nil {
+				return err
+			}
+			digest := hash(body)
+			matched := false
+			for _, s := range resolved.Sources {
+				if s.Path == c.Path && s.Digest == digest {
+					matched = true
+				}
+			}
+			if !matched {
+				return errors.New("manifest changed after resolution")
+			}
+			command := exec.CommandContext(ctx, "xcrun", "swift", "package", "--package-path", filepath.Dir(c.Path), "dump-package")
+			command.Dir = app
+			metadata, err := command.Output()
+			if err != nil {
+				return errors.New("independent selected manifest evaluation failed")
+			}
+			after, err := os.ReadFile(c.Path)
+			if err != nil || hash(after) != digest {
+				return errors.New("manifest changed during independent evaluation")
+			}
+			evaluations = append(evaluations, map[string]any{"manifest": c.Path, "sourceSHA256": digest, "package": c.SPM, "evaluation": json.RawMessage(metadata)})
+		}
+		body, err := json.MarshalIndent(evaluations, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := save(prefix+".evaluations.json", body); err != nil {
+			return err
+		}
+	}
 	proofSuffix := ".project-config.json"
 	if pinned {
 		proofSuffix = ".inspection.json"
@@ -169,6 +245,9 @@ func run() (result error) {
 		}
 	}
 	evidence := map[string]any{"project": resolved, "build": built, "executableSHA256": hash(binary), "bundledModules": files, "proofSHA256": hash(proof), "runtimeManifestSHA256": hash(manifest), "retainedPrefix": prefix, "scope": "actual unsigned arm64 simulator native build; no guest startup, physical signing, OTA installer or original Octane/Bamboo preset claim"}
+	if ota {
+		evidence["scope"] = "actual public OTA-enabled unsigned simulator build, compiled canonical stamp and retained record; no installer, guest, physical signing or original V8 ABI claim"
+	}
 	if pinned {
 		evidence["scope"] = "actual pinned source projection unsigned iOS build, compiled Bamboo tokens; no native CSS application, guest or whole app claim"
 	}

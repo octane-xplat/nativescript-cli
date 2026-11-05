@@ -42,10 +42,8 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 		return fmt.Errorf("invalid OTA handoff")
 	}
 	if p.Identity.Target.Platform == "ios" {
-		for _, contribution := range r.Contributions {
-			if contribution.Kind == "spm" && contribution.SPM != nil && contribution.SPM.Path != "" {
-				return fmt.Errorf("declared local Swift package canonical input coverage is not yet qualified: %w", ErrOTAUnavailable)
-			}
+		if err := project.ValidateLocalSwiftPackages(r, p.LocalSwiftPackages); err != nil {
+			return errors.Join(ErrOTAUnavailable, err)
 		}
 	}
 	owner, ok := l.(interface {

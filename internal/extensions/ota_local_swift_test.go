@@ -16,8 +16,8 @@ import (
 	"github.com/octane-xplat/nativescript-cli/internal/project"
 )
 
-// This deliberately calls the private handler: the public local-SPM OTA guard
-// stays in place until native compilation/stamping is independently qualified.
+// This deliberately isolates the private handler. Public native compilation and
+// compiled stamps require a separate qualification against real artifacts.
 func TestCanonicalLocalSwiftOwnedSnapshot(t *testing.T) {
 	consumer := os.Getenv("OTA_CONSUMER_DIR")
 	if consumer == "" || runtime.GOOS != "darwin" {

@@ -1,8 +1,8 @@
 # Selected local Swift package descriptor
 
 `local-spm.cjs` supplies canonical fingerprint extra-source contents to the private
-OTA helper. The public declared-local-SPM OTA guard remains required until native
-publication and compiled-stamp integration are qualified.
+OTA helper. The public adapter requires matching selected preparation receipts;
+unsupported package shapes are rejected by the helper before publication.
 
 `collect({projectDir, packages, sourceFiles, manifests})` is synchronous and
 read-only. It does not invoke Swift, resolve dependencies or create snapshots.
@@ -25,7 +25,8 @@ JSON. The helper checks the manifest hash before and after Swift evaluation; Go
 checks the receipt against the selected contributions and resolved identities
 before dependency tools start. It is not persisted as an OTA stamp or exposed in
 the public prepared-project API. The private OTA helper consumes this receipt with
-source snapshots and freshness checks; this handoff alone does not lift the guard.
+source snapshots and freshness checks. Native compilation and compiled stamps
+require separate qualification; a descriptor match alone is component evidence.
 
 The result is `{id, contents, sha256, inputs}`. `contents` is stable JSON with
 format `xplat-ns/local-spm/v1`, selected package names, sorted products, evaluated

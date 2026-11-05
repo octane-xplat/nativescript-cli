@@ -78,8 +78,8 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 		if json.Unmarshal(f.Payload, &result) != nil || result.Directory != dir || result.ProjectFile != filepath.Join(dir, "NativeScriptApp.xcodeproj", "project.pbxproj") || result.Target != "NativeScriptApp" {
 			return workflow.ErrHandoff
 		}
-		if err := validateLocalSwiftPackages(r, result.LocalSwiftPackages); err != nil {
-			return err
+		if err := project.ValidateLocalSwiftPackages(r, result.LocalSwiftPackages); err != nil {
+			return errors.Join(workflow.ErrHandoff, err)
 		}
 		// Tools retain the same lease; never return while they or descendants write.
 		executor := a.Executor

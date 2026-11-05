@@ -36,6 +36,12 @@ func TestDeclaredLocalSPMDoesNotStampUnqualifiedCanonicalInputs(t *testing.T) {
 	if _, err := os.Stat(p.NativeDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("rejected OTA operation created native outputs", err)
 	}
+	// A nonempty receipt must still match the selected contribution and source
+	// identities; presence alone cannot enable the canonical helper.
+	p.LocalSwiftPackages = []project.LocalSwiftPackageEvaluation{{Name: "Substituted", Path: "Local", Manifest: "/other/Package.swift", Products: []string{"Local"}, SourceSHA256: strings.Repeat("a", 64), Evaluation: json.RawMessage(`{"products":[],"targets":[]}`)}}
+	if err := (OTAStartup{}).Apply(context.Background(), r, p, lease); !errors.Is(err, ErrOTAUnavailable) || !errors.Is(err, project.ErrLocalSwiftHandoff) {
+		t.Fatal("substituted local preparation receipt accepted", err)
+	}
 }
 
 func TestCanonicalOTAOwnedHelperPublication(t *testing.T) {
