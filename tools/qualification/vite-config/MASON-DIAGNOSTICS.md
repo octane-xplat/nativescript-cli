@@ -40,6 +40,20 @@ checks and runtime byte receipts do not certify an upstream Git tree or promote
 legacy raw-engine evidence to patched-engine evidence. No dependency source or
 production behavior is patched by these tools.
 
+For the retained failing numeric probe, verify the actual cache/frame/inset
+path directly without a mocked UIKit replay:
+
+```sh
+node tools/qualification/vite-config/inspect-mason-native-frame.cjs \
+  /absolute/build.json /absolute/runtime.json /absolute/new-report.json
+```
+
+This checks exact native executable/module hashes, startup health and the
+captured nested frame-write calls. Its assertions describe the known density3,
+126-pixel-top-inset failure. A repaired layout will not match those failure
+assertions. Observing the corruption path does not qualify a repair, full
+lifecycle, transform behavior or ABI.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh
