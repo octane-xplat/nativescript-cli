@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add a maintained runtime probe to a new task-owned patched source projection."""
+"""Add a maintained runtime probe to a new task-owned historical projection."""
 import argparse
 import hashlib
 import json
@@ -17,15 +17,15 @@ app = workspace / 'apps/mobile'
 if not (workspace / 'source-projection.json').is_file():
     raise RuntimeError('requires pinned source-projection marker')
 if json.loads((workspace / 'source-projection.json').read_text())['sourceReference'] != 'b58567933b22fc6ff076f366fba61926a090f8e4':
-    raise RuntimeError('requires qualified source reference')
+    raise RuntimeError('requires expected legacy source-reference marker; not upstream tree verification')
 patches = json.loads((workspace / 'runtime-patches.json').read_text())
 if len(patches) != 6:
-    raise RuntimeError('requires all six runtime patches')
+    raise RuntimeError('requires all six legacy installed-byte receipts; not proof of patch application')
 for package in patches:
     installed = app / 'node_modules' / package['name']
     for name, digest in package['filesSHA256'].items():
         if hashlib.sha256((installed / name).read_bytes()).hexdigest() != digest:
-            raise RuntimeError('patched source identity changed')
+            raise RuntimeError('installed dependency bytes differ from receipt')
 if (app / 'runtime-probe.json').exists() or (app / 'state').exists():
     raise RuntimeError('requires unused task-owned fixture')
 fixture = Path(__file__).resolve().parent / 'runtime'

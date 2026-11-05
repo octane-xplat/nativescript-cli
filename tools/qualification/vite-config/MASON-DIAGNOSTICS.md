@@ -39,3 +39,40 @@ guest reservations and cleanup still need their own checks. The staging copy
 checks and runtime byte receipts do not certify an upstream Git tree or promote
 legacy raw-engine evidence to patched-engine evidence. No dependency source or
 production behavior is patched by these tools.
+
+To stage a fresh numeric trace while preserving an old fixture:
+
+```sh
+python3 tools/qualification/vite-config/stage-mason-trace.py \
+  /absolute/preserved-workspace /absolute/new-cache-workspace
+```
+
+On Darwin this clones regular source inputs with `clonefile`, records their
+hashes, and references the old installed dependencies. It never falls back to
+deep copying. Those dependency references are inputs: do not install packages
+or patch them through the new workspace. The overlay records its changed probe
+files separately from preserved inputs. Historical projection markers and patch
+receipts retain their original limits; they do not certify an upstream tree or
+prove every package was patched.
+
+Build the new app under a native-build reservation with the public build
+consumer. A retained app can then be tested without creating another simulator:
+
+```sh
+python3 tools/qualification/vite-config/qualify-retained-runtime.py \
+  /absolute/app /absolute/build.json /absolute/runtime-consumer \
+  EXACT_EXISTING_GUEST /absolute/unused-evidence-prefix
+```
+
+The runner verifies executable/bundle hashes and reserves that exact guest. It
+requires the guest to be shutdown and the probe application to be absent, then
+boots it and invokes the public runtime consumer. It uninstalls only its owned
+application, retires its boot and reservation, and never deletes the guest.
+It requires at least1.5GiB free on the system temporary-files volume before boot.
+An optional `--prior-owned-run /absolute/ownership.json` permits reuse only when
+an earlier receipt identifies the same task-owned installation and its installed
+executable and bundle bytes still match. A stale registration with a missing
+bundle fails this check; it does not authorize deleting caller device state.
+Runtime success and cleanup are reported separately. Keep the supervisor log
+outside the evidence prefix's `prefix.*` namespace so the unused-prefix check
+can succeed. The runtime consumer retains bounded application logs on failure.

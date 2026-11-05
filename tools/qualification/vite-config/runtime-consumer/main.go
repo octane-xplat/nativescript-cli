@@ -81,13 +81,14 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	evidence := map[string]any{"scope": "actual patched preset iOS debug guest, native style and renderer mount/update/unmount/remount; no HMR/full app/OTA/release claim", "device": id, "artifact": artifact}
+	evidence := map[string]any{"scope": "actual selected-input iOS debug guest, native style and renderer mount/update/unmount/remount; no dependency patch provenance, HMR/full app/OTA/release claim", "device": id, "artifact": artifact}
 	evidence["profile"] = probe.Profile
 	defer func() {
 		closed := session.Close(context.Background())
 		if errors.Is(closed, ns.ErrCleanup) || closed != nil && !errors.Is(closed, context.Canceled) {
 			result = errors.Join(result, closed)
 		}
+		evidence["logs"] = session.Logs()
 		evidence["passed"] = result == nil
 		if result != nil {
 			evidence["failure"] = result.Error()
@@ -175,7 +176,7 @@ func run() (result error) {
 				return errors.New("owned native process survived close")
 			}
 			evidence["ownedPIDRetired"] = true
-			fmt.Println("PASS patched preset native health, Bamboo styles, renderer mount/update/unmount/remount and process retirement")
+			fmt.Println("PASS selected-input native health, Bamboo styles, renderer mount/update/unmount/remount and process retirement")
 			return nil
 		}
 	}
