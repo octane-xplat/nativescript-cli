@@ -201,6 +201,51 @@ func TestAndroidPluginUsageDoesNotActivateFiltering(t *testing.T) {
 	}
 }
 
+func TestAndroidLibraryDependencyGraph(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","devDependencies":{"@nativescript/android":"9.0.0"},"dependencies":{"native-plugin":"1","native-helper":"1","unrelated":"1"}}`)
+	pluginManifest := "node_modules/native-plugin/package.json"
+	resolutionFile(t, root, pluginManifest, `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}},"dependencies":{"wrapper":"1"}}`)
+	resolutionFile(t, root, "node_modules/wrapper/package.json", `{"name":"wrapper","version":"1","dependencies":{"native-helper":"1"}}`)
+	for _, name := range []string{"native-helper", "unrelated"} {
+		resolutionFile(t, root, "node_modules/"+name+"/package.json", `{"name":"`+name+`","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
+		resolutionFile(t, root, "node_modules/"+name+"/platforms/android/"+name+".java", "// component source fixture")
+		resolutionFile(t, root, "node_modules/"+name+"/platforms/android/libs/"+name+".aar", "component binary fixture")
+	}
+	moduleFor := func(prepared ns.PreparedProject, file string) string {
+		t.Helper()
+		matches, _ := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android", file))
+		if len(matches) != 1 {
+			t.Fatal("source owner missing", file, matches)
+		}
+		return filepath.Dir(filepath.Dir(filepath.Dir(matches[0])))
+	}
+	prepared, err := client.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin := moduleFor(prepared, "Binding.java")
+	helper := filepath.Base(moduleFor(prepared, "native-helper.java"))
+	unrelated := filepath.Base(moduleFor(prepared, "unrelated.java"))
+	script := readAndroid(t, plugin, "build.gradle")
+	for _, expected := range []string{"compileOnly project(':native" + helper + "')", "contributions/" + helper + "/platforms/android/libs/native-helper.aar", "apply from: file('platforms/android/include.gradle')"} {
+		if !strings.Contains(script, expected) {
+			t.Fatal("library compile input missing", expected, script)
+		}
+	}
+	if strings.Contains(script, unrelated) || strings.Contains(script, root) {
+		t.Fatal("unrelated dependency or caller path leaked into library build", script)
+	}
+	resolutionFile(t, root, pluginManifest, `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
+	removed, err := client.Prepare(context.Background(), request)
+	if err != nil || removed.Identity.Revision == prepared.Identity.Revision {
+		t.Fatal("dependency change did not regenerate", err)
+	}
+	if strings.Contains(readAndroid(t, moduleFor(removed, "Binding.java"), "build.gradle"), helper) {
+		t.Fatal("removed library dependency retained")
+	}
+}
+
 func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
 	root, c, q := androidApp(t, false)
 	p, e := c.Prepare(context.Background(), q)

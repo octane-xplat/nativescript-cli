@@ -37,6 +37,15 @@ support both flat and `src/main` layouts, plus the runtime's app/settings/build
 scripts and `gradle.properties`. Nested AAR directories get explicit repositories.
 App manifest files replace the runtime template; no XML merge is performed here.
 
+Generated library compilation follows the resolved dependency closure, including
+native contributors reached through JavaScript-only packages. Dependency Java
+and Kotlin modules and snapshotted AAR/JAR inputs are compile-only; the app's
+runtime scripts retain packaging ownership. A library without a declared Core
+dependency uses the app-selected `@nativescript/core` native API. An explicitly
+resolved Core location takes precedence. Each library also applies its own
+snapshotted `include.gradle` for compiler dependencies and configuration. Local
+binary repositories point into generated snapshots, without caller paths.
+
 An app-owned `App_Resources/Android/google-services.json` is an opaque
 configuration input. Preparation retains its exact bytes in the resources
 snapshot and at `app/google-services.json`, the Google Services Gradle plugin's

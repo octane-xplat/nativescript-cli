@@ -390,6 +390,17 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 			return err
 		}
 	}
+	for _, owner := range sortedKeys(owners) {
+		module := filepath.Dir(filepath.Dir(owners[owner]))
+		name := filepath.Join(module, "build.gradle")
+		b, e := os.ReadFile(filepath.Join(dir, name))
+		if e != nil {
+			return e
+		}
+		if e = write(dir, name, append(b, []byte(libraryDependencies(r, owner, owners))...)); e != nil {
+			return e
+		}
+	}
 	if err = jsonFile(dir, "dependencies.json", deps); err != nil {
 		return err
 	}
