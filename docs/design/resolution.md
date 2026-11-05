@@ -143,8 +143,12 @@ stay opaque to resolution. A package cannot provide the app's Google Services
 configuration, and this rule does not accept arbitrary Android JSON inputs.
 
 Native module maps are configuration contributions, including plugin-owned maps.
-Ordinary LICENSE/NOTICE files and a packaged producer's `Package.resolved` are
-read-only source identities. They are not compiled/copied as runtime resources,
+Ordinary LICENSE/NOTICE files also accept conventional producer/license suffixes,
+such as
+`LICENSE-Aztec-MPL-2.0.txt`, `LICENSE-APACHE` and `NOTICE_Dependency.md`. Suffixed
+text variants use `.txt`, `.md` or `.markdown`; license-like Swift/Java source
+filenames retain source membership. Legal files and a packaged producer's
+`Package.resolved` remain read-only source identities. They are not compiled/copied as runtime resources,
 and producer Swift pins never replace this application's resolved pins or request
 another dependency graph. Changes still invalidate resolution. Distribution of
 required legal notices remains a separate release responsibility.
@@ -164,7 +168,8 @@ read-only inventory only at its reviewed SHA-256. It is not executed, copied as
 an app asset or interpreted as a development command. Other versions or changed
 marker bytes retain strict rejection.
 
-Conventional plugin platform-root `README` documentation (bare, `.md`,
+Conventional plugin platform-root `README` documentation and `UPSTREAM`
+provenance records (bare, `.md`,
 `.markdown`, `.txt` or `.rst`) is hashed source inventory. It does not become
 native source or an app resource. This rule does not suppress documents inside
 authored assets/bundles or accept unknown sibling file types. App resources

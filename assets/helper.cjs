@@ -19111,7 +19111,7 @@ var require_resolve = __commonJS({
             const file = path2.join(folder, entry.name);
             if (platform === "android" && folder === platformRoot && entry.name === ".gradle" && entry.isDirectory()) continue;
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
-            if (!resources && folder === platformRoot && entry.isFile() && /^README(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) {
+            if (!resources && folder === platformRoot && entry.isFile() && /^(?:README|UPSTREAM)(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) {
               read(file);
               continue;
             }
@@ -19124,7 +19124,8 @@ var require_resolve = __commonJS({
               read(file);
               continue;
             }
-            if (entry.isFile() && (entry.name === "Package.resolved" || /(?:^|\.)(?:LICENSE|NOTICE)(?:\.(?:txt|md))?$/i.test(entry.name))) {
+            const legal = /(?:^|\.)(?:LICENSE|NOTICE)(?:[-_][A-Za-z0-9_-]+)?(?:\.(?:txt|md|markdown))?$/i.test(entry.name) || /(?:^|\.)(?:LICENSE|NOTICE)[-_][A-Za-z0-9_.-]+\.(?:txt|md|markdown)$/i.test(entry.name);
+            if (entry.isFile() && (entry.name === "Package.resolved" || legal)) {
               read(file);
               continue;
             }

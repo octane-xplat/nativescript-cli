@@ -172,7 +172,7 @@ async function resolve({ projectDir }) {
         // exclusion at the plugin's platform root, never in resources/assets.
         if (platform === 'android' && folder === platformRoot && entry.name === '.gradle' && entry.isDirectory()) continue;
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
-        if (!resources && folder === platformRoot && entry.isFile() && /^README(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) { read(file); continue; }
+        if (!resources && folder === platformRoot && entry.isFile() && /^(?:README|UPSTREAM)(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) { read(file); continue; }
         if (!resources && entry.isFile() && path.relative(platformRoot,file).startsWith('typings'+path.sep) && entry.name.endsWith('.d.ts')) { read(file); continue; }
         if (file === usageInventory) continue;
         if(entry.isFile()&&metadata.has(fs.realpathSync(file))){read(file);continue;}
@@ -180,7 +180,9 @@ async function resolve({ projectDir }) {
         // legal notices beside the actual inputs. Preserve their source identity
         // without compiling legal text, installing another dependency graph or
         // replacing this application's Package.resolved with producer pins.
-        if(entry.isFile() && (entry.name==='Package.resolved' || /(?:^|\.)(?:LICENSE|NOTICE)(?:\.(?:txt|md))?$/i.test(entry.name))){read(file);continue;}
+        const legal = /(?:^|\.)(?:LICENSE|NOTICE)(?:[-_][A-Za-z0-9_-]+)?(?:\.(?:txt|md|markdown))?$/i.test(entry.name) ||
+          /(?:^|\.)(?:LICENSE|NOTICE)[-_][A-Za-z0-9_.-]+\.(?:txt|md|markdown)$/i.test(entry.name);
+        if(entry.isFile() && (entry.name==='Package.resolved' || legal)){read(file);continue;}
         if (entry.isDirectory() && !/\.(framework|xcframework|xcassets|bundle)$/.test(entry.name)) { walk(file, platform); continue; }
         let kind;
         const ext = path.extname(entry.name).toLowerCase();

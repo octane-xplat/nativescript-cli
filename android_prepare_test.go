@@ -246,6 +246,64 @@ func TestAndroidLibraryDependencyGraph(t *testing.T) {
 	}
 }
 
+func TestSuffixedNativeLegalAndProvenanceInventories(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	files := []string{"platforms/ios/LICENSE-Aztec-MPL-2.0.txt", "platforms/ios/Producer.NOTICE_ThirdParty.md", "platforms/android/LICENSE-APACHE", "platforms/android/NOTICE-Dependency-1.2.markdown", "platforms/ios/UPSTREAM.md", "platforms/android/UPSTREAM.txt"}
+	for _, name := range files {
+		resolutionFile(t, root, "node_modules/native-plugin/"+name, "producer legal inventory")
+	}
+	for _, name := range []string{"platforms/ios/LICENSE-Bridge.swift", "platforms/android/NOTICE-Bridge.java"} {
+		resolutionFile(t, root, "node_modules/native-plugin/"+name, "// native source fixture")
+	}
+	ctx := context.Background()
+	resolved, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range files {
+		file, _ := filepath.EvalSymlinks(filepath.Join(root, "node_modules/native-plugin", name))
+		found := false
+		for _, source := range resolved.Sources {
+			found = found || source.Path == file && source.Digest != ""
+		}
+		if !found {
+			t.Fatal("legal inventory source identity missing", name)
+		}
+		for _, contribution := range resolved.Contributions {
+			if contribution.Path == file {
+				t.Fatal("legal text became a native contribution", name)
+			}
+		}
+	}
+	for _, suffix := range []string{"LICENSE-Bridge.swift", "NOTICE-Bridge.java"} {
+		found := false
+		for _, contribution := range resolved.Contributions {
+			found = found || filepath.Base(contribution.Path) == suffix && contribution.Kind == "source"
+		}
+		if !found {
+			t.Fatal("native source with license-like prefix was suppressed", suffix)
+		}
+	}
+	prepared, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android/LICENSE-APACHE"))
+	if len(matches) != 0 {
+		t.Fatal("legal inventory copied as a native asset")
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/"+files[0], "changed legal inventory")
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == resolved.Revision {
+		t.Fatal("legal input mutation lost its source identity", err)
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/ios/UPSTREAM.md", "changed producer provenance")
+	provenanceChanged, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || provenanceChanged.Revision == changed.Revision {
+		t.Fatal("provenance mutation lost its source identity", err)
+	}
+}
+
 func TestNativePlatformDocumentationAndTypingsInventory(t *testing.T) {
 	root, client, request := androidApp(t, false)
 	inventories := []string{"platforms/android/README.md", "platforms/ios/README.txt", "platforms/ios/typings/objc!Example.d.ts", "platforms/android/typings/Example.d.ts"}
