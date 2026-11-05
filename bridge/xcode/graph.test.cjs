@@ -6,7 +6,7 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 graph ')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
  const contributions=[];
- for(const [name,kind,text] of [['Binding.swift','source','class Binding {}'],['Native.h','source','void example(void);'],['libNative.a','framework','fixture'],['Picture.png','resource','fixture'],['build.xcconfig','configuration','EXAMPLE = 1'],['Info.plist','configuration','<?xml version="1.0"?><plist version="1.0"><dict><key>NSCameraUsageDescription</key><string>Camera</string></dict></plist>']]) {
+ for(const [name,kind,text] of [['Binding.swift','source','class Binding {}'],['Native.h','source','void example(void);'],['libNative.a','framework','fixture'],['Picture.png','resource','fixture'],['Compiled.metallib','resource','MTLB component fixture'],['build.xcconfig','configuration','EXAMPLE = 1'],['Info.plist','configuration','<?xml version="1.0"?><plist version="1.0"><dict><key>NSCameraUsageDescription</key><string>Camera</string></dict></plist>']]) {
   const file=path.join(dir,name);fs.writeFileSync(file,text);contributions.push({path:file,kind,platform:'ios',packageDirectory:dir});
  }
  for (const [name,dynamic] of [['Dynamic',true],['Static',false]]) {
@@ -24,6 +24,10 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  assert.ok(Object.values(o.PBXFileReference).some(v=>v&&v.path==='app'&&v.sourceTree==='SOURCE_ROOT'));
  const sources=Object.values(o.PBXSourcesBuildPhase).filter(v=>v&&typeof v==='object');
  assert.equal(sources.length,1); assert.ok(sources.some(v=>v.files.some(f=>owned.includes(f.value))));
+ const shaderRef=Object.entries(o.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(path.join(dir,'Compiled.metallib')))[0];
+ const shaderBuild=Object.entries(o.PBXBuildFile).find(([,v])=>v&&v.fileRef===shaderRef)[0];
+ assert.ok(Object.values(o.PBXResourcesBuildPhase).some(v=>v&&typeof v==='object'&&v.files.some(f=>f.value===shaderBuild)));
+ assert.equal(sources.some(v=>v.files.some(f=>f.value===shaderBuild)),false);
  assert.ok(Object.values(o.PBXCopyFilesBuildPhase).some(v=>v&&typeof v==='object'&&v.files.length===1&&owned.includes(v.files[0].value)));
  assert.match(fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8'),/NSCameraUsageDescription/);
  assert.match(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native.h/);
@@ -32,7 +36,7 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  project=xcode.project(file);project.parseSync();project.hash.project.objects.PBXProject[project.hash.project.rootObject].developmentRegion='fr';fs.writeFileSync(file,project.writeSync());
  fs.writeFileSync(path.join(output,'Podfile.lock'),'pod-pin');fs.mkdirSync(path.join(output,'NativeScriptApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm'),{recursive:true});
  const pin=path.join(output,'NativeScriptApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved');fs.writeFileSync(pin,'spm-pin');
- r.contributions=[];await prepare(q);const removed=fs.readFileSync(file,'utf8');assert.doesNotMatch(removed,/Binding.swift|libNative.a|Picture.png/);assert.match(removed,/developmentRegion = fr/);
+ r.contributions=[];await prepare(q);const removed=fs.readFileSync(file,'utf8');assert.doesNotMatch(removed,/Binding.swift|libNative.a|Picture.png|Compiled.metallib/);assert.match(removed,/developmentRegion = fr/);
  assert.equal(fs.readFileSync(pin,'utf8'),'spm-pin');assert.equal(fs.readFileSync(path.join(output,'Podfile.lock'),'utf8'),'pod-pin');assert.doesNotMatch(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native.h/);
  await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),removed);
 });

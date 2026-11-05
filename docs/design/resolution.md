@@ -123,6 +123,8 @@ change iOS runtime settings. Other visionOS settings reject; no visionOS
 preparation/build/device backend is enabled. For example, FontManager1.0.20's
 iOS dependency stays1.0.20 even though its visionOS declaration requests1.0.12.
 These and package versions are retained without claiming toolchain compatibility.
+Precompiled iOS `.metallib` binaries resolve as hashed resources, including
+separate simulator/device variants. Metal source compilation remains unavailable.
 A native package may have its own executable config with platform settings;
 app-only fields in package config fail. Package Android settings remain on the
 installed package result. Native files under `platforms/ios` and

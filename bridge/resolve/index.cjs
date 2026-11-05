@@ -191,7 +191,7 @@ async function resolve({ projectDir }) {
           else if (['.swift', '.m', '.mm', '.h', '.c', '.cpp'].includes(ext)) kind = 'source';
           else if (['.framework', '.xcframework', '.a'].includes(ext)) kind = 'framework';
           else if (['.plist', '.xcconfig', '.entitlements'].includes(ext)) kind = 'configuration';
-          else if (['.xcassets', '.bundle', '.png', '.jpg', '.jpeg', '.storyboard', '.xib', '.strings', '.json'].includes(ext)) kind = 'resource';
+          else if (['.xcassets', '.bundle', '.png', '.jpg', '.jpeg', '.storyboard', '.xib', '.strings', '.json', '.metallib'].includes(ext)) kind = 'resource';
         } else {
           if (['.aar', '.jar', '.so'].includes(ext)) kind = 'library';
           else if (['.java', '.kt', '.c', '.cpp', '.h'].includes(ext)) kind = 'source';

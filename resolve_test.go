@@ -421,6 +421,43 @@ func TestResolveInactiveVisionOSDeclaration(t *testing.T) {
 	}
 }
 
+func TestResolvePrecompiledMetalResources(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"shader-plugin":"1"}}`)
+	resolutionFile(t, root, "node_modules/shader-plugin/package.json", `{"name":"shader-plugin","version":"1","nativescript":{"platforms":{"ios":"9"}}}`)
+	base := "node_modules/shader-plugin/platforms/ios/Resources/"
+	for _, name := range []string{"Effects.metallib", "Effects.sim.metallib"} {
+		resolutionFile(t, root, base+name, "MTLB\x00component fixture "+name)
+	}
+	client, _ := ns.New(ns.Options{})
+	ctx := context.Background()
+	first, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(first.Contributions) != 2 {
+		t.Fatal("precompiled resources missing", first, err)
+	}
+	for _, contribution := range first.Contributions {
+		if contribution.Kind != "resource" || contribution.Platform != "ios" || !strings.HasSuffix(contribution.Path, ".metallib") {
+			t.Fatal("shader binary classified as a source/library", contribution)
+		}
+	}
+	resolutionFile(t, root, base+"Effects.sim.metallib", "MTLB\x00changed component fixture")
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == first.Revision {
+		t.Fatal("shader binary mutation lost native identity", err)
+	}
+	if err := os.Remove(filepath.Join(root, base, "Effects.metallib")); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(removed.Contributions) != 1 || removed.Revision == changed.Revision {
+		t.Fatal("shader binary removal lost native identity", removed, err)
+	}
+	resolutionFile(t, root, base+"Effects.metal", "// unqualified shader source compiler")
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("resource support enabled an unqualified Metal source compiler", err)
+	}
+}
+
 func TestResolveInactiveTVOSDeclaration(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native-plugin":"1"}}`)

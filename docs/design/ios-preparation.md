@@ -25,6 +25,10 @@ resolved package files. Headers are excluded from Sources. Dynamic frameworks
 have a code-sign-on-copy embed phase; static libraries/frameworks link only.
 XCFrameworks must have XML Info.plist and consistent static/dynamic slices.
 Unknown binary layouts fail explicitly. A single application target is supported.
+Precompiled `.metallib` files are opaque resources in Copy Bundle Resources;
+their simulator/device filenames and bytes are retained. They are not linked as
+frameworks or compiled as Metal source. The package's runtime code selects its
+appropriate resource; shader loading/rendering needs separate runtime evidence.
 Configuration accepts XML `Info.plist`, entitlements and xcconfig includes.
 Other plists fail unavailable. Package files apply deterministically before app
 files, so application plist values override package values. Plist merge is shallow.
