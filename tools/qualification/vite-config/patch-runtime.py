@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
+
+from patch_format import normalize_vite_eof
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('source', type=Path)
@@ -39,14 +42,20 @@ def patch(name, version, filename, base=app):
     applied = patchfile
     normalization = None
     if name == '@nativescript/vite':
-        # This pinned diff puts an EOF annotation before a deleted source-map
-        # footer. Remove only annotations; require all code hunks to apply.
+        # Split the single ambiguous EOF context line without changing code or
+        # unrelated line endings; Git's ordinary context checks remain active.
         applied = output / 'vite-eof-normalized.patch'
-        applied.write_bytes(patchfile.read_bytes().replace(b'\\ No newline at end of file\n', b''))
-        normalization = 'remove EOF annotations; git --recount --inaccurate-eof'
-        command = ['git', 'apply', '--recount', '--inaccurate-eof', '--unsafe-paths', '--directory=' + str(target)]
-        subprocess.run([*command, '--check', str(applied)], cwd=workspace, check=True)
-        subprocess.run([*command, str(applied)], cwd=workspace, check=True)
+        applied.write_bytes(normalize_vite_eof(patchfile.read_bytes(), (target / 'hmr/shared/vendor/manifest-collect.js').read_bytes()))
+        normalization = 'split one EOF context line into equal delete/add; preserve all code and other annotations'
+        command = ['git', 'apply', '--unsafe-paths', '--directory=' + str(target)]
+        # Git can silently skip absolute --directory paths when its cwd is
+        # inside another working tree. This owned driver has no repository.
+        with tempfile.TemporaryDirectory(prefix='ns-patch-driver-') as driver:
+            probe = subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], cwd=driver, capture_output=True)
+            if probe.returncode == 0:
+                raise RuntimeError('Patch driver must be outside a Git working tree')
+            subprocess.run([*command, '--check', str(applied)], cwd=driver, check=True)
+            subprocess.run([*command, str(applied)], cwd=driver, check=True)
     else:
         subprocess.run(['patch', '--dry-run', '-p1', '-i', str(patchfile)], cwd=target, check=True)
         subprocess.run(['patch', '-p1', '-i', str(patchfile)], cwd=target, check=True)

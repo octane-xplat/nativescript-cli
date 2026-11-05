@@ -94,20 +94,22 @@ diff --git a/hmr/shared/vendor/manifest-collect.js b/hmr/shared/vendor/manifest-
 -//# sourceMappingURL=manifest-collect.js.map
 \\ No newline at end of file
 '''
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp).resolve() / 'payload'
-            target = root / 'hmr/shared/vendor/manifest-collect.js'
-            target.parent.mkdir(parents=True)
-            target.write_bytes(b'a\n}\n//# sourceMappingURL=manifest-collect.js.map')
-            (root / 'other.js').write_bytes(b'first\nmiddle\nlast')
-            file = root.parent / 'original.patch'
-            file.write_bytes(patch)
-            with (root.parent / 'log').open('w') as log:
-                result = m.apply_patch(root, file, '@nativescript/vite@8.0.20', log)
-            self.assertEqual(target.read_bytes(), b'a\n}')
-            self.assertEqual((root / 'other.js').read_bytes(), b'first\nadded\nmiddle\nlast')
-            self.assertIsNotNone(result['formatNormalization'])
-            self.assertEqual(file.read_bytes(), patch)
+        missing_old_marker = patch.replace(b'-//# sourceMappingURL=manifest-collect.js.map\n\\ No newline at end of file\n', b'-//# sourceMappingURL=manifest-collect.js.map\n')
+        for identity, selected in [('@nativescript/vite@8.0.20', patch), ('@nativescript/vite@8.0.21', missing_old_marker)]:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve() / 'payload'
+                target = root / 'hmr/shared/vendor/manifest-collect.js'
+                target.parent.mkdir(parents=True)
+                target.write_bytes(b'a\n}\n//# sourceMappingURL=manifest-collect.js.map')
+                (root / 'other.js').write_bytes(b'first\nmiddle\nlast')
+                file = root.parent / 'original.patch'
+                file.write_bytes(selected)
+                with (root.parent / 'log').open('w') as log:
+                    result = m.apply_patch(root, file, identity, log)
+                self.assertEqual(target.read_bytes(), b'a\n}')
+                self.assertEqual((root / 'other.js').read_bytes(), b'first\nadded\nmiddle\nlast')
+                self.assertIsNotNone(result['formatNormalization'])
+                self.assertEqual(file.read_bytes(), selected)
         with self.assertRaises(ValueError):
             m.normalize_vite_eof(b'unsupported')
 

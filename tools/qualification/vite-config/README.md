@@ -104,11 +104,24 @@ pinned core, Octane, renderer, engine, flavor and CSS patches. Bun hardlinks are
 copied before modification. A patch failure stops the fixture; start a new
 workspace instead of replaying into partial state.
 
-The Vite8.0.21 diff has a malformed EOF annotation before a deleted source-map
-footer. For that diff only, the tool removes EOF annotations and uses Git's
-`--recount --inaccurate-eof` handling, with a mandatory check before applying.
-All code hunks must still match. `runtime-patches.json` records original/applied
-patch hashes, normalization and resulting package-file hashes.
+The Vite8.0.21 diff has an ambiguous new-side EOF context annotation and omits
+the old footer's EOF annotation. The shared `patch_format.py` repair derives
+the old side from the actual source and expresses one equal delete/add line so
+each side has its proper EOF annotation. It preserves code and unrelated line
+breaks. Git runs from an owned temporary directory outside a working tree:
+running with absolute `--directory` paths from inside this checkout can silently
+skip patches while returning success. Ordinary context checks remain required.
+`runtime-patches.json` records original/applied patch hashes, normalization and
+resulting package-file hashes. Historical receipts need their actual byte scope;
+an earlier successful command exit did not prove that Vite's patch was applied.
+
+`qualify-patches.py SOURCE INSTALLED_TYPESCRIPT_DIR STAGED_FROZEN_WORKSPACE
+ARTIFACT_CACHE NEW_PROJECT_CACHE_WORKSPACE NEW_REPORT` constructs a fresh
+six-package preparation fixture from original-lock SHA512-verified cached
+tarballs, invokes the actual legacy command and compares all output bytes with
+independent Git postimages. It needs the maintained frozen stage receipt and
+verified artifact cache. It performs no install, compiler API, bundle or native
+execution. Earlier prepared fixtures remain unchanged.
 
 Patch application and public Resolve do not establish runtime compatibility.
 The same host qualifier can run against this patched workspace. It exercises

@@ -134,7 +134,11 @@ are identical, and are recorded; conflicting duplicates fail. Original patches
 are replayed there with Git's context checks. The Vite8.0.20 diff needs one
 precise EOF annotation repair: express a context closing brace as equal
 delete/add lines so old/new EOF annotations apply to their respective sides.
-No code or unrelated line break changes. The raw/applied patch hashes and
+No code or unrelated line break changes. The shared repair also supports the
+legacy8.0.21 diff, whose old-side EOF annotation is missing; the old source footer
+determines that annotation instead of trusting its absence in the diff. The
+legacy command is independently qualified through `vite-config/qualify-patches.py`.
+The raw/applied patch hashes and
 diagnostics are retained. Broad `--inaccurate-eof` handling is not used here.
 
 Every installed payload file/link is compared with that expected tree. Empty

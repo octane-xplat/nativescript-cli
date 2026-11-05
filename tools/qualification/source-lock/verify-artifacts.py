@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -142,15 +143,10 @@ def differences(expected, actual):
             'emptyBunInstallerTags': tags}
 
 
-def normalize_vite_eof(original):
-    # One context line is EOF only in the NEW file. A context EOF annotation
-    # incorrectly applies to both sides. Express the same line as delete/add so
-    # each EOF annotation belongs to the correct side; preserve all other hunks.
-    old = b' }\n\\ No newline at end of file\n-//# sourceMappingURL=manifest-collect.js.map\n\\ No newline at end of file\n'
-    new = b'-}\n-//# sourceMappingURL=manifest-collect.js.map\n\\ No newline at end of file\n+}\n\\ No newline at end of file\n'
-    if original.count(old) != 1:
-        raise ValueError('Unsupported Vite EOF annotation shape')
-    return original.replace(old, new)
+_format_spec = importlib.util.spec_from_file_location('native_patch_format', Path(__file__).resolve().parents[1] / 'vite-config/patch_format.py')
+_format = importlib.util.module_from_spec(_format_spec)
+_format_spec.loader.exec_module(_format)
+normalize_vite_eof = _format.normalize_vite_eof
 
 
 def validate_patch(bytes_):
@@ -189,9 +185,9 @@ def apply_patch(root, patchfile, identity, log):
     result = subprocess.run([*command, '--check', str(patchfile)], cwd=root, stdout=log, stderr=subprocess.STDOUT)
     normalization = None
     applied = patchfile
-    if result.returncode and identity == '@nativescript/vite@8.0.20':
+    if result.returncode and identity in ['@nativescript/vite@8.0.20', '@nativescript/vite@8.0.21']:
         applied = root.parent / 'vite-eof-normalized.patch'
-        applied.write_bytes(normalize_vite_eof(original))
+        applied.write_bytes(normalize_vite_eof(original, (root / 'hmr/shared/vendor/manifest-collect.js').read_bytes()))
         normalization = 'split one EOF context line into equal delete/add; preserve all code and other annotations'
         subprocess.run([*command, '--check', str(applied)], cwd=root, stdout=log, stderr=subprocess.STDOUT, check=True)
     elif result.returncode:

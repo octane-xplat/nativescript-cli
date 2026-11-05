@@ -6,5 +6,6 @@
 /coverage.out
 *.test
 node_modules/
+__pycache__/
 .cache/
 /research/
