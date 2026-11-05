@@ -160,3 +160,21 @@ selects exactly its failed identities after requiring identical compiler/lock
 inputs; the result explicitly labels its subset and binds the prior report hash.
 It never converts a subset pass into a full-scope claim. An empty selection or
 existing output fails. Keep full and retry receipts when composing evidence.
+
+Materialize the parent-pinned Lottie and SVG sources only after a successful
+verified-parent stage:
+
+```sh
+python3 tools/qualification/source-lock/materialize-submodules.py \
+  VERIFIED_STAGED_WORKSPACE EXACT_LOTTIE_SOURCE EXACT_SVG_SOURCE NEW_REPORT_JSON
+```
+
+The tool checks each complete vendor Git tree against the parent-pinned commit's
+recorded tree identity, including file modes and links. Sources are explicit
+inputs; it never fetches a branch or trusts a cache directory's label. Both
+owned destination directories must be empty before either copy begins. Nested
+Lottie demo/tool gitlinks must remain absent or empty; their commit identities
+are included in the tree calculation and reported without fetching them. The
+inactive parent macOS libwebp gitlink is not materialized. This checks vendor
+source provenance only; it does not establish compiler, bundle or native
+compatibility. Source archives and reports remain outside Git.
