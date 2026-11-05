@@ -151,11 +151,17 @@ declares Octane ownership for shared source outside the mobile app root. It
 adds only a nonce, probe component and CSS variables to this task-owned fixture.
 The original full app and its dependency graph are not staged by this probe.
 
-The orchestrator compiles public-library consumers, reserves native compilation,
-then creates a fresh shutdown iPhone17 Pro/iOS27 guest. It hands ownership to a
-resident/exclusive broker reservation before boot/install/launch. This fixture
-currently requires Darwin arm64 and that installed simulator runtime. It uses
-unsigned simulator builds and never imports a CA, changes signing, or publishes.
+The orchestrator compiles public-library consumers and reserves native compilation,
+then delegates to the retained runtime runner for existing iPhone18Pro simulator
+`91D40099-A056-497D-A572-ADDDFD6A8F23` only. It never creates, clones, erases,
+deletes or substitutes a device. The existing guest must be available, compatible,
+shutdown and free of an unowned probe installation. Its resident/exclusive broker
+reservation is separate from the completed build lease. Evidence uses
+`PREFIX.build-ownership.json` for the build lease and `PREFIX.guest.*` for actual
+runtime/owned installation/boot cleanup. An unavailable or busy guest blocks the
+runtime case, without creating a replacement or downloading a runtime. This
+fixture requires Darwin arm64 and uses unsigned simulator builds; no CA import,
+signing change or publication is performed.
 
 The guest emits nonce/PID/boot-tagged text health. The runtime consumer checks a
 live native view's Bamboo color/spacing through mount, prop update, unmount and

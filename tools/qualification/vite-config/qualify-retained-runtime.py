@@ -18,6 +18,8 @@ parser.add_argument('new_evidence_prefix', type=Path)
 parser.add_argument('--prior-owned-run', type=Path,
                     help='Recover only an exact-byte installation identified by an earlier ownership receipt')
 args = parser.parse_args()
+if args.guest != '91D40099-A056-497D-A572-ADDDFD6A8F23':
+    raise RuntimeError('Only the prescribed existing iPhone18Pro UDID is authorized; no substitution or creation')
 app, build_file, consumer, prefix = (p.resolve() for p in
     (args.app, args.build_json, args.runtime_consumer, args.new_evidence_prefix))
 if list(prefix.parent.glob(prefix.name + '.*')):
