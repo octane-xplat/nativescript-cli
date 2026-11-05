@@ -33,7 +33,9 @@ module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
   function configuredChanged(file){
     if(!groups.length||file&&!groups.some(group=>file===group.root||file.startsWith(group.root+path.sep)))return false;
     let selected;
-    try{selected=new Set(require('../resolve/native-sources.cjs')(projectDir,groups.map(({name,path})=>({name,path}))).flatMap(group=>group.files.map(f=>f.realPath)));}
+    // Names are scoped to each declaring config. Equal names in independent
+    // plugins must not be interpreted as an invalid duplicate declaration.
+    try{selected=new Set(groups.flatMap(({name,path})=>require('../resolve/native-sources.cjs')(projectDir,[{name,path}]).flatMap(group=>group.files.map(f=>f.realPath))));}
     catch{return true;}
     return selected.size!==configuredFiles.size||[...selected].some(file=>!configuredFiles.has(file)||baseline.get(file)!==digest(file));
   }

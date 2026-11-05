@@ -36,7 +36,7 @@ be installed. No compiler is installed, no global compiler is selected, and no
 upstream CLI is invoked.
 
 The supported config fields are `id`, `appPath`, `appResourcesPath`, `buildPath`,
-app `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
+app/plugin `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
 `bundler`/`bundlerConfigPath`, declaration-only `visionos`/`tvos`, and
 `android.v8Flags`/`android.markingMode`. The application identifier must be a
 dotted identifier. Paths become canonical absolute existing directories, defaulting
@@ -77,15 +77,19 @@ the existing built-in bundlers retain their behavior. Vite config imports are
 loaded by the build/development adapter, not discovered as native contributions
 by Resolve. See [bundling](bundling.md) for the installed-engine contract.
 
-App `ios.NativeSource` is an array of unique `{name,path}` declarations. Relative
-paths resolve from the app, including workspace paths outside it. File globs or
+App and installed native-plugin `ios.NativeSource` configs each contain an array
+of unique `{name,path}` declarations. Relative paths resolve from the declaring
+app or real package directory, including workspace paths outside it. File globs or
 directories must select ordinary supported iOS source/header/modulemap files;
 empty matches, unsupported files and symlinks inside selected trees fail. Each
 selected file is read/fingerprinted. Repeated physical membership is compiled
 once, preferring installed-package ownership over an explicit app selection.
 Removal drops a selector's membership unless an installed contribution still owns
-that file. Plugin-level NativeSource remains unavailable. These declarations do not authorize
-source writes or dependency installation.
+that file. Names are scoped to each config, so independent plugins can use the
+same name. These declarations do not authorize source writes or installation.
+For OTA, plugin selectors must be relative and have ordinary source ancestry;
+their selected bytes use a verified portable canonical descriptor. See
+[the descriptor contract](../../bridge/extensions/plugin-native-source.md).
 
 App and installed native-package `ios.SPMPackages` declarations become typed
 `spm-remote` contributions. Public `NativeContribution.SPM` contains the name,

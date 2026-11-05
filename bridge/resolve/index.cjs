@@ -127,11 +127,10 @@ async function resolve({ projectDir }) {
       }
     }
     if(cfg.ios?.NativeSource!==undefined){
-      if(dir!==root)fail('unavailable','Plugin NativeSource declarations require a qualified canonical source contract');
       let groups;
       try{groups=expandNativeSources(dir,cfg.ios.NativeSource);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','NativeSource requires unique named paths matching supported ordinary iOS source/header/modulemap files');}
       for(const group of groups){
-        nativeSourceGroups.push({name:group.name,path:group.pattern,root:group.base,files:[...new Set(group.files.map(f=>f.realPath))].sort()});
+        nativeSourceGroups.push({name:group.name,path:group.pattern,root:group.base,files:[...new Set(group.files.map(f=>f.realPath))].sort(),...(dir!==root?{packageDirectory:owner,selector:cfg.ios.NativeSource.find(source=>source.name===group.name).path}:{})});
         for(const file of group.files){read(file.realPath);contributions.push({packageDirectory:owner,platform:'ios',kind:file.kind,path:file.realPath});}
       }
     }
@@ -313,12 +312,17 @@ async function resolve({ projectDir }) {
   try{selectedContributions=swiftPackages.mergeLocal(contributions,root);}catch{fail('invalid_input','Conflicting local Swift package products or local/remote declarations');}
   // Explicit NativeSource groups can select a file already owned by an installed
   // native package. Compile physical membership once, preferring that package's
-  // ownership over an app declaration; otherwise choose deterministically.
+  // physical ownership over another selector or an app declaration.
   const membership=new Map();
+  const ownership=c=>{
+    if(c.packageDirectory===root)return 0;
+    const relative=path.relative(c.packageDirectory,c.path);
+    return relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative)?c.packageDirectory.length+1:1;
+  };
   for(const c of selectedContributions){
     if(c.kind==='spm-remote')continue;
     const key=JSON.stringify([c.platform,c.kind,c.path]),previous=membership.get(key);
-    if(!previous||(previous.packageDirectory===root&&c.packageDirectory!==root)||(previous.packageDirectory!==root&&c.packageDirectory!==root&&c.packageDirectory<previous.packageDirectory))membership.set(key,c);
+    if(!previous||ownership(c)>ownership(previous)||(ownership(c)===ownership(previous)&&c.packageDirectory<previous.packageDirectory))membership.set(key,c);
   }
   let remote;
   try{remote=swiftPackages.merge(selectedContributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}

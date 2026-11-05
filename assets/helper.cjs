@@ -17535,6 +17535,68 @@ var require_native_sources = __commonJS({
   }
 });
 
+// bridge/extensions/plugin-native-source.cjs
+var require_plugin_native_source = __commonJS({
+  "bridge/extensions/plugin-native-source.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    var expand = require_native_sources();
+    var id = "xplat-ns/plugin-native-source/v1";
+    var sha = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+    var stable = (value) => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+    var fail = (code) => {
+      throw Object.assign(new Error("Selected plugin native sources are not qualified"), { code });
+    };
+    var relative = (owner, file) => path2.relative(owner, file).split(path2.sep).join("/");
+    function collect({ groups, sourceFiles }) {
+      if (!Array.isArray(groups) || !sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles)) fail("invalid_input");
+      const selected = [], inputs = /* @__PURE__ */ new Map();
+      const read = (file) => {
+        const bytes = fs2.readFileSync(file), digest = sha(bytes);
+        if (sourceFiles[file] !== digest) fail("invalid_input");
+        inputs.set(file, digest);
+        return bytes;
+      };
+      for (const group of groups) {
+        if (!group || typeof group !== "object" || typeof group.name !== "string" || !group.name || !["packageDirectory", "path", "root"].every((key2) => typeof group[key2] === "string" && path2.isAbsolute(group[key2])) || !Array.isArray(group.files) || group.files.some((file) => typeof file !== "string" || !path2.isAbsolute(file))) fail("invalid_input");
+        const owner = group.packageDirectory;
+        if (fs2.realpathSync(owner) !== owner) fail("unavailable");
+        if (typeof group.selector !== "string" || !group.selector || path2.isAbsolute(group.selector) || /[\\\r\n\0]/.test(group.selector)) fail("unavailable");
+        if (path2.resolve(owner, group.selector) !== group.path) fail("invalid_input");
+        const pattern = relative(owner, group.path);
+        if (!pattern || /[\\\r\n\0]/.test(pattern)) fail("unavailable");
+        const pkg = JSON.parse(read(path2.join(owner, "package.json")));
+        if (typeof pkg.name !== "string" || !pkg.name || typeof pkg.version !== "string" || !pkg.version || !pkg.nativescript) fail("invalid_input");
+        const configs = ["ts", "js", "cjs", "mjs", "json"].map((ext) => path2.join(owner, "nativescript.config." + ext)).filter(fs2.existsSync);
+        if (!configs.length) fail("invalid_input");
+        for (const file of configs) read(file);
+        const current = expand(owner, [{ name: group.name, path: group.path }])[0];
+        if (current.logicalBase !== current.base) fail("unavailable");
+        const files = current.files.map((file) => file.realPath).sort();
+        if (group.root !== current.base || group.files.length !== files.length || [...group.files].sort().some((file, i2) => file !== files[i2])) fail("invalid_input");
+        selected.push({
+          owner: { name: pkg.name, version: pkg.version },
+          name: group.name,
+          pattern,
+          files: files.map((file) => ({ path: relative(owner, file), sha256: sha(read(file)) }))
+        });
+      }
+      selected.sort((a, b) => Buffer.compare(Buffer.from(stable(a)), Buffer.from(stable(b))));
+      const contents = stable({ format: id, groups: selected });
+      return { id, contents, sha256: sha(contents), inputs: [...inputs].map(([path3, sha256]) => ({ path: path3, sha256 })) };
+    }
+    function verified(request2) {
+      const result = collect(request2);
+      return { ...result, recheck() {
+        if (collect(request2).contents !== result.contents) fail("invalid_input");
+      } };
+    }
+    module2.exports = { collect, verified };
+  }
+});
+
 // bridge/resolve/swift-packages.cjs
 var require_swift_packages = __commonJS({
   "bridge/resolve/swift-packages.cjs"(exports2) {
@@ -17796,7 +17858,7 @@ var require_ota = __commonJS({
       return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
     }
     module2.exports = async function(p) {
-      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir, sourceFiles = {}, localSwiftPackages = [] } = p;
+      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir, sourceFiles = {}, localSwiftPackages = [], nativeSourceGroups = [] } = p;
       if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
       if (projectStateDir !== void 0 && (typeof projectStateDir !== "string" || !path2.isAbsolute(projectStateDir) || inside(projectStateDir, projectDir) || !inside(projectStateDir, nativeDir) || !inside(projectStateDir, stageDir))) fail();
       const req = createRequire2(path2.join(projectDir, "package.json"));
@@ -17825,6 +17887,9 @@ var require_ota = __commonJS({
       if (!inside(projectDir, buildRoot) || buildRoot === projectDir) fail("unavailable");
       const sourceGroups = platform === "ios" ? require_native_sources()(projectDir, nativeConfig.ios?.NativeSource) : [];
       if (!sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles)) fail();
+      if (!Array.isArray(nativeSourceGroups)) fail();
+      const pluginGroups = platform === "ios" ? nativeSourceGroups.filter((group) => group?.packageDirectory) : [];
+      const pluginSources = pluginGroups.length ? require_plugin_native_source().verified({ groups: pluginGroups, sourceFiles }) : void 0;
       if (!Array.isArray(localSwiftPackages) || platform !== "ios" && localSwiftPackages.length) fail();
       const localPackages = localSwiftPackages.map((f) => {
         if (!f || Object.keys(f).sort().join(",") !== "evaluation,manifest,name,path,products,sourceSHA256") fail();
@@ -17913,6 +17978,7 @@ var require_ota = __commonJS({
         extrasToAdd.push({ type: "contents", id: extensionID, contents: extensionContents, reasons: ["extension-generated native inputs"] });
       }
       if (swiftSnapshot) extrasToAdd.push({ type: "contents", id: swiftSnapshot.id, contents: swiftSnapshot.contents, reasons: ["selected declared local Swift package inputs"] });
+      if (pluginSources) extrasToAdd.push({ type: "contents", id: pluginSources.id, contents: pluginSources.contents, reasons: ["selected declared plugin native sources"] });
       if (extrasToAdd.length) {
         const file = path2.join(view, "fingerprint.config.json");
         const fingerprintConfig = fs2.existsSync(file) ? JSON.parse(fs2.readFileSync(file)) : {};
@@ -17942,6 +18008,11 @@ var require_ota = __commonJS({
       const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
       if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
       checkSources();
+      if (pluginSources) {
+        pluginSources.recheck();
+        const source = record.sources.filter((s) => s.type === "contents" && s.id === pluginSources.id);
+        if (source.length !== 1 || source[0].hash !== pluginSources.sha256) fail();
+      }
       if (swiftSnapshot) {
         swiftSnapshot.recheck();
         const source = record.sources.filter((s) => s.type === "contents" && s.id === swiftSnapshot.id);
@@ -18298,7 +18369,7 @@ var require_native_inputs = __commonJS({
         if (!groups.length || file && !groups.some((group) => file === group.root || file.startsWith(group.root + path2.sep))) return false;
         let selected;
         try {
-          selected = new Set(require_native_sources()(projectDir, groups.map(({ name, path: path3 }) => ({ name, path: path3 }))).flatMap((group) => group.files.map((f) => f.realPath)));
+          selected = new Set(groups.flatMap(({ name, path: path3 }) => require_native_sources()(projectDir, [{ name, path: path3 }]).flatMap((group) => group.files.map((f) => f.realPath))));
         } catch {
           return true;
         }
@@ -19264,7 +19335,6 @@ var require_resolve = __commonJS({
           }
         }
         if (cfg2.ios?.NativeSource !== void 0) {
-          if (dir !== root) fail("unavailable", "Plugin NativeSource declarations require a qualified canonical source contract");
           let groups;
           try {
             groups = expandNativeSources(dir, cfg2.ios.NativeSource);
@@ -19272,7 +19342,7 @@ var require_resolve = __commonJS({
             fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "NativeSource requires unique named paths matching supported ordinary iOS source/header/modulemap files");
           }
           for (const group of groups) {
-            nativeSourceGroups.push({ name: group.name, path: group.pattern, root: group.base, files: [...new Set(group.files.map((f) => f.realPath))].sort() });
+            nativeSourceGroups.push({ name: group.name, path: group.pattern, root: group.base, files: [...new Set(group.files.map((f) => f.realPath))].sort(), ...dir !== root ? { packageDirectory: owner, selector: cfg2.ios.NativeSource.find((source) => source.name === group.name).path } : {} });
             for (const file of group.files) {
               read(file.realPath);
               contributions.push({ packageDirectory: owner, platform: "ios", kind: file.kind, path: file.realPath });
@@ -19487,10 +19557,15 @@ var require_resolve = __commonJS({
         fail("invalid_input", "Conflicting local Swift package products or local/remote declarations");
       }
       const membership = /* @__PURE__ */ new Map();
+      const ownership = (c) => {
+        if (c.packageDirectory === root) return 0;
+        const relative = path2.relative(c.packageDirectory, c.path);
+        return relative !== ".." && !relative.startsWith(".." + path2.sep) && !path2.isAbsolute(relative) ? c.packageDirectory.length + 1 : 1;
+      };
       for (const c of selectedContributions) {
         if (c.kind === "spm-remote") continue;
         const key2 = JSON.stringify([c.platform, c.kind, c.path]), previous = membership.get(key2);
-        if (!previous || previous.packageDirectory === root && c.packageDirectory !== root || previous.packageDirectory !== root && c.packageDirectory !== root && c.packageDirectory < previous.packageDirectory) membership.set(key2, c);
+        if (!previous || ownership(c) > ownership(previous) || ownership(c) === ownership(previous) && c.packageDirectory < previous.packageDirectory) membership.set(key2, c);
       }
       let remote;
       try {

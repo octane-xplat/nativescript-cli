@@ -35,6 +35,7 @@ type otaRequest struct {
 	ProjectStateDir    string                                `json:"projectStateDir"`
 	SourceFiles        map[string]string                     `json:"sourceFiles,omitempty"`
 	LocalSwiftPackages []project.LocalSwiftPackageEvaluation `json:"localSwiftPackages,omitempty"`
+	NativeSourceGroups []project.NativeSourceGroup           `json:"nativeSourceGroups,omitempty"`
 }
 
 func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Prepared, l workspace.Lease) error {
@@ -83,6 +84,7 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 			DestinationKind: p.Identity.Target.DestinationKind, ExtensionNative: r.ExtensionNative,
 			ProjectStateDir:    filepath.Dir(filepath.Dir(l.Layout().GeneratedRoot)),
 			LocalSwiftPackages: p.LocalSwiftPackages,
+			NativeSourceGroups: r.NativeSourceGroups,
 			SourceFiles: func() map[string]string {
 				files := make(map[string]string, len(r.Sources))
 				for _, source := range r.Sources {

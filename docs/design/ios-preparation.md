@@ -46,6 +46,16 @@ Source packages still must remain immutable
 during the operation; this does not add arbitrary plugin config or remote SPM
 support beyond the declarations described below.
 
+Installed plugin `ios.NativeSource` selectors feed the same native membership
+with plugin ownership. Their relative paths resolve from the real declaring
+package, including linked/transitive packages. OTA uses selected file hashes in
+the reserved `xplat-ns/plugin-native-source/v1` canonical contents source rather
+than copying through node_modules. Package/config identity, exact selection and
+file bytes are checked against resolution before and after canonical collection.
+Absolute plugin selectors and symlinked source ancestry remain unavailable for
+OTA. Source compilation and runtime qualification are separate from preparation
+and canonical-record checks.
+
 A local `Package.swift` describes library products through `swift package
 dump-package`. Its implementation subtree is package-owned, not also compiled by
 the application. Podspec directories have the same ownership rule. Tool caches

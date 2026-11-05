@@ -60,6 +60,19 @@ test('plugin Gradle root caches do not restart while authored assets still do',t
  fs.symlinkSync(root,cache,'dir');assert.throws(()=>changed(cache),/symlink/);
 });
 
+test('equal selector names from separate plugins remain quiet and detect independent membership changes',t=>{
+ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'plugin-selector-inputs-')));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const groups=['one','two'].map(name=>{
+  const directory=path.join(root,name);fs.mkdirSync(directory);const file=path.join(directory,'Bridge.swift');fs.writeFileSync(file,'class Bridge {}');
+  return {name:'Shared',path:path.join(directory,'*.swift'),root:directory,files:[file]};
+ });
+ const sources=groups.flatMap(group=>group.files.map(Path=>({Path,Digest:crypto.createHash('sha256').update(fs.readFileSync(Path)).digest('hex')})));
+ const changed=nativeInputs(sources.map(source=>source.Path),sources,groups,root);
+ assert.equal(changed(),false);for(const group of groups)assert.equal(changed(group.root),false);
+ const added=path.join(groups[1].root,'Added.swift');fs.writeFileSync(added,'class Added {}');assert.equal(changed(added),true);fs.rmSync(added);assert.equal(changed(),false);
+ fs.writeFileSync(groups[0].files[0],'class Changed {}');assert.equal(changed(groups[0].root),true);
+});
+
 test('automatic platform snapshots match resolver ios/android ownership without dropping active edits',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'platform-inputs-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const platforms=path.join(root,'platforms'),source=path.join(platforms,'ios','Binding.swift');

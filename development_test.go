@@ -69,6 +69,14 @@ func (f *developmentNativeFixture) Prepare(_ context.Context, r project.Resolved
 }
 
 func TestPublicConfiguredSourceDevelopment(t *testing.T) {
+	testPublicConfiguredSourceDevelopment(t, false)
+}
+
+func TestPublicPluginConfiguredSourceDevelopment(t *testing.T) {
+	testPublicConfiguredSourceDevelopment(t, true)
+}
+
+func testPublicConfiguredSourceDevelopment(t *testing.T, plugin bool) {
 	installed := os.Getenv("NS_NATIVE_VITE_DIR")
 	if installed == "" {
 		t.Skip("requires installed native Vite engine; compiler/device remain fixtures")
@@ -95,10 +103,32 @@ func TestPublicConfiguredSourceDevelopment(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, _ := json.Marshal(map[string]any{"id": "org.example.nativedev", "appPath": "app", "appResourcesPath": "App_Resources", "ios": map[string]any{"NativeSource": []map[string]string{{"name": "Configured", "path": filepath.ToSlash(relative) + "/*.swift"}}}})
-	write(filepath.Join(dir, "nativescript.config.ts"), "export default "+string(config))
-	if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+	if plugin {
+		config, _ = json.Marshal(map[string]any{"id": "org.example.nativedev", "appPath": "app", "appResourcesPath": "App_Resources"})
+		write(filepath.Join(dir, "package.json"), `{"name":"configured-dev","version":"1.0.0","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3","configured-plugin":"1.0.0"}}`)
+		write(filepath.Join(shared, "package.json"), `{"name":"configured-plugin","version":"1.0.0","main":"index.js","nativescript":{"platforms":{"ios":"9"}}}`)
+		write(filepath.Join(shared, "index.js"), "module.exports={};")
+		write(filepath.Join(shared, "nativescript.config.cjs"), `module.exports={ios:{NativeSource:[{name:'Configured',path:'*.swift'}]}}`)
+		modules := filepath.Join(dir, "node_modules")
+		if err := os.Mkdir(modules, 0700); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(filepath.Join(installed, "node_modules"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if err := os.Symlink(filepath.Join(installed, "node_modules", entry.Name()), filepath.Join(modules, entry.Name())); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink(shared, filepath.Join(modules, "configured-plugin")); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
 		t.Fatal(err)
 	}
+	write(filepath.Join(dir, "nativescript.config.ts"), "export default "+string(config))
 	host := jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS("assets")}, CacheDir: t.TempDir()}
 	native := &developmentNativeFixture{}
 	c, _ := New(Options{})

@@ -7,7 +7,7 @@ const {createHash} = require('node:crypto');
 function fail(code = 'invalid_input') { throw Object.assign(new Error('Canonical OTA preparation failed'), {code}); }
 function inside(root, file) { const rel=path.relative(root,file); return rel !== '..' && !rel.startsWith('..'+path.sep) && !path.isAbsolute(rel); }
 module.exports = async function(p) {
- const {projectDir,nativeDir,bundleDir,stageDir,platform,configuration,nativeConfig,architecture,destinationKind,extensionNative=[],projectStateDir,sourceFiles={},localSwiftPackages=[]}=p;
+ const {projectDir,nativeDir,bundleDir,stageDir,platform,configuration,nativeConfig,architecture,destinationKind,extensionNative=[],projectStateDir,sourceFiles={},localSwiftPackages=[],nativeSourceGroups=[]}=p;
  if (![projectDir,nativeDir,bundleDir,stageDir].every(v=>typeof v==='string'&&path.isAbsolute(v)) || !inside(nativeDir,bundleDir) || !['ios','android'].includes(platform) || !['release','debug'].includes(configuration) || !nativeConfig || typeof nativeConfig!=='object') fail();
  if(projectStateDir!==undefined&&(typeof projectStateDir!=='string'||!path.isAbsolute(projectStateDir)||inside(projectStateDir,projectDir)||!inside(projectStateDir,nativeDir)||!inside(projectStateDir,stageDir)))fail();
  const req=createRequire(path.join(projectDir,'package.json'));
@@ -25,6 +25,9 @@ module.exports = async function(p) {
  if(!inside(projectDir,buildRoot)||buildRoot===projectDir) fail('unavailable');
  const sourceGroups=platform==='ios'?require('../resolve/native-sources.cjs')(projectDir,nativeConfig.ios?.NativeSource):[];
  if(!sourceFiles||typeof sourceFiles!=='object'||Array.isArray(sourceFiles))fail();
+ if(!Array.isArray(nativeSourceGroups))fail();
+ const pluginGroups=platform==='ios'?nativeSourceGroups.filter(group=>group?.packageDirectory):[];
+ const pluginSources=pluginGroups.length?require('./plugin-native-source.cjs').verified({groups:pluginGroups,sourceFiles}):undefined;
  if(!Array.isArray(localSwiftPackages)||platform!=='ios'&&localSwiftPackages.length)fail();
  const localPackages=localSwiftPackages.map(f=>{
   if(!f||Object.keys(f).sort().join(',')!=='evaluation,manifest,name,path,products,sourceSHA256')fail();
@@ -93,6 +96,7 @@ module.exports = async function(p) {
   extrasToAdd.push({type:'contents',id:extensionID,contents:extensionContents,reasons:['extension-generated native inputs']});
  }
  if(swiftSnapshot)extrasToAdd.push({type:'contents',id:swiftSnapshot.id,contents:swiftSnapshot.contents,reasons:['selected declared local Swift package inputs']});
+ if(pluginSources)extrasToAdd.push({type:'contents',id:pluginSources.id,contents:pluginSources.contents,reasons:['selected declared plugin native sources']});
  if(extrasToAdd.length){
   const file=path.join(view,'fingerprint.config.json');
   const fingerprintConfig=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};
@@ -118,6 +122,11 @@ module.exports = async function(p) {
  const verified=await canonical.createFingerprintAsync(view,{platforms:[platform],nativeConfig:config,toolchain:record.toolchain});
  if(record.hash!==verified.hash||stable(record.sources)!==stable(verified.sources)||before!==digest(projectDir))fail();
  checkSources();
+ if(pluginSources){
+  pluginSources.recheck();
+  const source=record.sources.filter(s=>s.type==='contents'&&s.id===pluginSources.id);
+  if(source.length!==1||source[0].hash!==pluginSources.sha256)fail();
+ }
  if(swiftSnapshot){
   swiftSnapshot.recheck();
   const source=record.sources.filter(s=>s.type==='contents'&&s.id===swiftSnapshot.id);

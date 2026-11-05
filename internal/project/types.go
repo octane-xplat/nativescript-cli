@@ -30,13 +30,15 @@ type Resolved struct {
 	NativeSourceGroups []NativeSourceGroup
 }
 
-// NativeSourceGroup retains the validated app selector and concrete membership
+// NativeSourceGroup retains a validated selector and concrete membership
 // for watcher invalidation; prepared source membership remains Contributions.
 type NativeSourceGroup struct {
-	Name  string   `json:"name"`
-	Path  string   `json:"path"`
-	Root  string   `json:"root"`
-	Files []string `json:"files"`
+	Name             string   `json:"name"`
+	Path             string   `json:"path"`
+	Root             string   `json:"root"`
+	Files            []string `json:"files"`
+	PackageDirectory string   `json:"packageDirectory,omitempty"`
+	Selector         string   `json:"selector,omitempty"`
 }
 
 // ExtensionNativeInput is a portable digest of a verified generated native file.
