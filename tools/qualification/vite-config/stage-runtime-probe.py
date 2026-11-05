@@ -38,6 +38,7 @@ if owner_data.get('name') != '@xplat/app' or 'octane' not in owner_data.get('dev
 shutil.copyfile(owner, workspace / 'packages/app/package.json')
 nonce = secrets.token_hex(16)
 copies = {'main.tsx': app / 'src/main.tsx',
+          'layout-trace.ts': app / 'src/layout-trace.ts',
           'runtime.css': app / 'src/runtime.css',
           'runtime-probe.tsx': workspace / 'packages/app/src/runtime-probe.tsx'}
 hashes = {'packages/app/package.json': hashlib.sha256(owner.read_bytes()).hexdigest()}

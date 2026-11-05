@@ -4,6 +4,7 @@ import { View as MasonView } from '@octane-xplat/nativescript-mason-core';
 import { Probe } from '../../../packages/app/src/runtime-probe';
 import { nonce, profile } from './runtime-nonce';
 import './runtime.css';
+import { createLayoutTracer } from './layout-trace';
 
 const boot = String(Date.now()) + ':' + String(Math.random());
 const file = File.fromPath(knownFolders.documents().path + '/go-preset-health.json');
@@ -15,27 +16,7 @@ let ticks = 0;
 let phaseTicks = 0;
 let failure = '';
 const trace: object[] = [];
-const traced = new WeakSet<object>();
-
-function traceLayout(view: any) {
-  if (!view || traced.has(view)) return;
-  traced.add(view);
-  for (const name of ['onMeasure', 'onLayout', '_masonLayoutForeignDescendants']) {
-    const original = view[name];
-    if (typeof original !== 'function') continue;
-    view[name] = function (...args: number[]) {
-      const result = original.apply(this, args);
-      const label = page?.getViewById('preset-probe') as any;
-      const frame = label?.nativeViewProtected?.frame;
-      trace.push({ phase, id: view.id, event: name, args,
-        measuredWidth: label?.getMeasuredWidth(), measuredHeight: label?.getMeasuredHeight(),
-        width: label?.width, height: label?.height,
-        nativeFrame: frame ? { x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height } : null });
-      if (trace.length > 40) trace.shift();
-      return result;
-    };
-  }
-}
+const traceLayout = createLayoutTracer(() => phase, () => page?.getViewById('preset-probe'), trace);
 
 function layoutSample() {
   const container = page?.getViewById('mason-probe') as any;
