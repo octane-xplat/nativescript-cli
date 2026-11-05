@@ -16,7 +16,11 @@ redacted; resolver-authored remediation appears in `OperationError.Advice`.
 
 ## Supported inputs
 
-Exactly one `nativescript.config.{ts,js,cjs,mjs,json}` selects app config. JavaScript
+One `nativescript.config.{ts,js,cjs,mjs,json}` selects app or plugin config. The
+published TS/JS producer pair is also accepted: TypeScript takes precedence,
+matching NativeScript9.1.1. Both file identities are retained, but only TS is
+evaluated; a TS failure never falls back to JS. Removing TS selects the remaining
+JS config. Other multiple-config combinations reject explicitly. JavaScript
 follows Node's normal module rules. Objects, default exports and async functions
 are accepted; functions receive a copy of the helper environment. TypeScript uses
 an already installed `typescript-classic` or `typescript` compiler when available
@@ -24,7 +28,10 @@ from the config package or app. CommonJS transpilation preserves relative runtim
 imports and removes imports used only as types, including the original app's
 regular `NativeScriptConfig` import. Without an installed compiler, Node's built-in
 type stripping still supports erasable types and explicit `import type`; older
-Node returns an actionable unavailable error. Config runtime imports must already
+Node returns an actionable unavailable error. Node versions that refuse ESM type
+stripping inside `node_modules`
+return an explicit unavailable error requesting the project-installed compiler.
+Config runtime imports must already
 be installed. No compiler is installed, no global compiler is selected, and no
 upstream CLI is invoked.
 

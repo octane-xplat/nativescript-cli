@@ -171,6 +171,84 @@ func TestResolveTypeScriptAndOptionalDependencies(t *testing.T) {
 	}
 }
 
+func TestResolveTypeScriptJavaScriptProducerPair(t *testing.T) {
+	root := resolutionApp(t)
+	if err := os.Remove(filepath.Join(root, "nativescript.config.cjs")); err != nil {
+		t.Fatal(err)
+	}
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native-plugin":"1"}}`)
+	resolutionFile(t, root, "nativescript.config.ts", `export default {id:'org.example.authored'};`)
+	resolutionFile(t, root, "nativescript.config.js", `throw new Error('INACTIVE_APP_COMPANION');`)
+	plugin := "node_modules/native-plugin/"
+	resolutionFile(t, root, plugin+"package.json", `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
+	// CommonJS-form TS exercises selection without requiring a compiler install.
+	// The real ESM/type-import producer pair is qualified with the installed compiler below.
+	resolutionFile(t, root, plugin+"nativescript.config.ts", `module.exports={android:{v8Flags:'--selected-authored'}};`)
+	resolutionFile(t, root, plugin+"nativescript.config.js", `throw new Error('INACTIVE_PLUGIN_COMPANION');`)
+	client, _ := ns.New(ns.Options{})
+	ctx := context.Background()
+	first, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if errors.Is(err, ns.ErrUnavailable) && strings.Contains(err.Error(), "stripTypeScriptTypes") {
+		t.Skip("older Node: explicit unavailable verified")
+	}
+	if err != nil || first.ApplicationID != "org.example.authored" {
+		t.Fatal(first, err)
+	}
+	selected := false
+	for _, pkg := range first.Packages {
+		if pkg.Name == "native-plugin" {
+			selected = pkg.Android.V8Flags == "--selected-authored"
+		}
+	}
+	if !selected {
+		t.Fatal("plugin TypeScript config was not selected")
+	}
+	resolutionFile(t, root, plugin+"nativescript.config.ts", `export default {android:{v8Flags:'--selected-authored'}};`)
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); err != nil && (!errors.Is(err, ns.ErrUnavailable) || !strings.Contains(err.Error(), "project-installed TypeScript compiler")) {
+		t.Fatal("Node plugin type-stripping limitation lost compiler advice", err)
+	}
+	resolutionFile(t, root, plugin+"nativescript.config.ts", `module.exports={android:{v8Flags:'--selected-authored'}};`)
+	for _, name := range []string{"nativescript.config.ts", "nativescript.config.js", plugin + "nativescript.config.ts", plugin + "nativescript.config.js"} {
+		canonical, err := filepath.EvalSymlinks(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, source := range first.Sources {
+			found = found || source.Path == canonical && source.Digest != ""
+		}
+		if !found {
+			t.Fatal("producer config source identity missing", name)
+		}
+	}
+	resolutionFile(t, root, plugin+"nativescript.config.js", `throw new Error('CHANGED_INACTIVE_COMPANION');`)
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == first.Revision {
+		t.Fatal("companion edit was executed or lost its identity", err)
+	}
+	resolutionFile(t, root, plugin+"nativescript.config.ts", `throw new Error('AUTHORED_FAILURE');`)
+	resolutionFile(t, root, plugin+"nativescript.config.js", `module.exports={android:{v8Flags:'--fallback'}};`)
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) || strings.Contains(err.Error(), "AUTHORED_FAILURE") {
+		t.Fatal("failed authored config fell back or leaked diagnostics", err)
+	}
+	if err := os.Remove(filepath.Join(root, plugin, "nativescript.config.ts")); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range fallback.Packages {
+		if pkg.Name == "native-plugin" && pkg.Android.V8Flags != "--fallback" {
+			t.Fatal("JS-only config was not selected")
+		}
+	}
+	resolutionFile(t, root, "nativescript.config.mjs", `export default {id:'org.example.ambiguous'};`)
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) {
+		t.Fatal("unrecognized config coexistence accepted", err)
+	}
+}
+
 func TestResolveViteConfiguration(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.viteconfig',cli:{packageManager:'bun'},bundler:'vite',bundlerConfigPath:'vite.config.mts'}`)
@@ -365,10 +443,20 @@ func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	// This is the import shape used by the original app. Neither the type package
 	// nor its runtime is installed: the real compiler must erase the type-only use.
 	resolutionFile(t, root, "nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {id:process.env.R1_APP_ID,android:{markingMode:'none'}} as NativeScriptConfig;`)
+	resolutionFile(t, root, "nativescript.config.js", `throw new Error('INACTIVE_COMPILED_APP');`)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native-plugin":"1"}}`)
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
+	resolutionFile(t, root, "node_modules/native-plugin/nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {android:{v8Flags:'--compiled-plugin'}} as NativeScriptConfig;`)
+	resolutionFile(t, root, "node_modules/native-plugin/nativescript.config.js", `throw new Error('INACTIVE_COMPILED_PLUGIN');`)
 	client, _ := ns.New(ns.Options{Environment: map[string]string{"R1_APP_ID": "org.example.compiled"}})
 	p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
 	if err != nil || p.ApplicationID != "org.example.compiled" || p.Config.Android.MarkingMode != "none" {
 		t.Fatal("installed compiler config", p, err)
+	}
+	for _, pkg := range p.Packages {
+		if pkg.Name == "native-plugin" && pkg.Android.V8Flags != "--compiled-plugin" {
+			t.Fatal("installed compiler did not select the authored plugin config")
+		}
 	}
 	// CJS emission must preserve runtime imports relative to the config file.
 	resolutionFile(t, root, "local.cjs", `module.exports={id:'org.example.relative'}`)

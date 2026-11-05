@@ -18893,12 +18893,14 @@ var require_resolve = __commonJS({
       }
       async function config(dir, required) {
         const found = configNames.filter((name) => fs2.existsSync(path2.join(dir, name)));
-        if (found.length > 1) fail("invalid_input", "Multiple NativeScript config files; retain exactly one per package");
+        const compiledPair = found.length === 2 && found[0] === "nativescript.config.ts" && found[1] === "nativescript.config.js";
+        if (found.length > 1 && !compiledPair) fail("invalid_input", "Multiple NativeScript config files; retain one config or the TypeScript/JavaScript producer pair");
         if (!found.length) {
           if (required) fail("invalid_input", "NativeScript config missing; create nativescript.config.js, .cjs, .mjs, .ts or .json");
           return {};
         }
         const file = path2.join(dir, found[0]);
+        if (compiledPair) read(path2.join(dir, "nativescript.config.js"));
         let value;
         try {
           const text = read(file);
@@ -18937,6 +18939,7 @@ var require_resolve = __commonJS({
           return object(value, "NativeScript config");
         } catch (e) {
           if (safeFailures.has(e)) throw e;
+          if (e.code === "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING") fail("unavailable", "Installed plugin TypeScript config requires a project-installed TypeScript compiler on this Node version");
           fail("invalid_input", "NativeScript config evaluation failed; check syntax and installed config imports (no installation was attempted)");
         }
       }
