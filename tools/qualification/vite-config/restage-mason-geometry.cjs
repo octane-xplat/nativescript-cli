@@ -5,8 +5,9 @@ const { execFileSync } = require('node:child_process');
 const { transformSync } = require('esbuild');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const expectedBundle = '7b6299092eed145a7b5a195e4caa2e61396c6229c45eeef148497b1464cc9c4b';
-if (process.platform !== 'darwin' || process.argv.length !== 5 || !process.argv.slice(2).every(path.isAbsolute)) {
-  throw Error('usage on Darwin: node restage-mason-geometry.cjs ABS_SOURCE_BUILD_JSON ABS_NEW_DIRECTORY ABS_NEW_RECEIPT');
+const useCandidate = process.argv.length === 6 && process.argv[5] === '--frame-adoption-candidate';
+if (process.platform !== 'darwin' || !(process.argv.length === 5 || useCandidate) || !process.argv.slice(2, 5).every(path.isAbsolute)) {
+  throw Error('usage on Darwin: node restage-mason-geometry.cjs ABS_SOURCE_BUILD_JSON ABS_NEW_DIRECTORY ABS_NEW_RECEIPT [--frame-adoption-candidate]');
 }
 const [sourceBuild, destination, output] = process.argv.slice(2);
 if (fs.existsSync(destination) || fs.existsSync(output)) throw Error('Requires absent owned destination and receipt');
@@ -52,10 +53,31 @@ const replacement = bundle.slice(0, start) + marker + '\nvar createLayoutTracer 
   compiled + '\nreturn createLayoutTracer;\n})();\n' + bundle.slice(end);
 // A source map for the old bundle must not be advertised for diagnostic bytes.
 const diagnostic = replacement.replace(/^\/\/# sourceMappingURL=.*$/gm, '');
+let candidate = null, diagnosticVendor = null;
+if (useCandidate) {
+  const sourceFile = path.join(__dirname, 'runtime/frame-adoption-candidate.ts');
+  const candidateText = fs.readFileSync(sourceFile, 'utf8');
+  const vendor = fs.readFileSync(path.join(original, 'app/vendor.mjs'), 'utf8');
+  const methodStart = vendor.indexOf('_masonLayoutForeignDescendants() {');
+  const methodEnd = vendor.indexOf('\n\trequestLayout()', methodStart);
+  const branch = 'const b = child._getCurrentLayoutBounds();\n\t\t\t\t\tconst w = layout$1.makeMeasureSpec(b.right - b.left, layout$1.EXACTLY);\n\t\t\t\t\tconst h = layout$1.makeMeasureSpec(b.bottom - b.top, layout$1.EXACTLY);\n\t\t\t\t\tView$1.measureChild(view, child, w, h);\n\t\t\t\t\tchild.layout(b.left, b.top, b.right, b.bottom);';
+  const method = vendor.slice(methodStart, methodEnd);
+  if (methodStart < 0 || methodEnd < methodStart || method.split(branch).length !== 2 ||
+      vendor.includes('adoptMasonForeignFrame') || !candidateText.includes('export function adoptMasonForeignFrame(')) {
+    throw Error('Known foreign-child candidate boundary differs');
+  }
+  const helper = transformSync(candidateText.replace('export function adoptMasonForeignFrame(', 'function adoptMasonForeignFrame('),
+    { loader: 'ts', target: 'es2022', format: 'esm', sourcemap: false }).code;
+  diagnosticVendor = (vendor.slice(0, methodStart) + method.replace(branch,
+    'adoptMasonForeignFrame(view, child, View$1.measureChild.bind(View$1), layout$1);') + vendor.slice(methodEnd))
+    .replace(/^\/\/# sourceMappingURL=.*$/gm, '') + '\nconst adoptMasonForeignFrame = (() => {\n' + helper + '\nreturn adoptMasonForeignFrame;\n})();\n';
+  candidate = { source: sourceFile, sourceSHA256: sha(candidateText), originalMethodSHA256: sha(method),
+    sourceOwner: 'Diagnostic candidate at Mason foreign-child boundary; not a production dependency patch', nativeRepairQualified: false };
+}
 const totalBytes = Object.values(before).reduce((total, file) => total + file.bytes, 0);
 const available = fs.statfsSync(path.dirname(destination));
 // Budget a full logical clone plus the changed JS, filesystem overhead and128MiB reserve.
-const required = totalBytes + Buffer.byteLength(diagnostic) + 16 * 1024 ** 2 + 128 * 1024 ** 2;
+const required = totalBytes + Buffer.byteLength(diagnostic) + (diagnosticVendor ? Buffer.byteLength(diagnosticVendor) : 0) + 16 * 1024 ** 2 + 128 * 1024 ** 2;
 if (available.bavail * available.bsize < required) throw Error('Insufficient bounded diagnostic restaging headroom');
 fs.mkdirSync(destination);
 const target = path.join(destination, 'NativeScriptApp.app');
@@ -76,21 +98,23 @@ for relative, record in json.loads(sys.argv[3]).items():
     destination.chmod(record['mode'])
 `, original, target, JSON.stringify(before)], { stdio: 'pipe' });
 fs.writeFileSync(path.join(target, 'app/bundle.mjs'), diagnostic);
+if (diagnosticVendor) fs.writeFileSync(path.join(target, 'app/vendor.mjs'), diagnosticVendor);
 const after = inventory(target), unchanged = inventory(original);
 if (JSON.stringify(before) !== JSON.stringify(unchanged)) throw Error('Original retained app changed');
 const changed = Object.keys(before).filter(name => before[name].sha256 !== after[name].sha256);
-if (changed.length !== 1 || changed[0] !== 'app/bundle.mjs') throw Error('Unexpected diagnostic app delta');
+const allowed = useCandidate ? ['app/bundle.mjs', 'app/vendor.mjs'] : ['app/bundle.mjs'];
+if (JSON.stringify(changed.sort()) !== JSON.stringify(allowed)) throw Error('Unexpected diagnostic app delta');
 const derivedBuild = structuredClone(built.build);
 derivedBuild.Artifacts[0].Path = target;
 const receipt = {
-  scope: 'Owned JavaScript-only geometry diagnostic over retained native compilation; not a fresh public Build, repair or gate acceptance',
+  scope: 'Owned JavaScript-only geometry diagnostic' + (useCandidate ? ' with foreign-frame adoption candidate' : '') + ' over retained native compilation; not a fresh public Build, accepted repair or gate acceptance',
   derivation: { nativeBuildPerformed: false, sourceBuild, sourceBuildSHA256: sha(sourceBytes), originalApp: original,
     geometrySource: helper, geometrySourceSHA256: sha(source), replacedModuleSHA256: sha(bundle.slice(start, end)),
     changedFiles: changed, originalFiles: before, diagnosticFiles: after, originalPreserved: true,
     cloneMode: 'Darwin clonefile; no deep-copy fallback', requiredHeadroomBytes: required,
-    oldSourceMapAdvertised: false },
+    oldSourceMapAdvertised: false, frameAdoptionCandidate: candidate },
   build: derivedBuild, executableSHA256: built.executableSHA256,
-  bundledModules: { ...built.bundledModules, 'bundle.mjs': after['app/bundle.mjs'].sha256 }
+  bundledModules: { ...built.bundledModules, 'bundle.mjs': after['app/bundle.mjs'].sha256, 'vendor.mjs': after['app/vendor.mjs'].sha256 }
 };
 fs.writeFileSync(output, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 console.log('Restaged diagnostic JS only; all native bytes and original app preserved. No new Build performed.');

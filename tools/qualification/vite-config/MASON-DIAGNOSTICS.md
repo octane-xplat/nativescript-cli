@@ -87,6 +87,24 @@ code. It cannot qualify changed native inputs, a fresh build, an unimplemented
 repair or a gate. Original staged source inputs remain unchanged; the receipt
 identifies the diagnostic helper source independently from the old build source.
 
+An explicit `--frame-adoption-candidate` flag additionally replaces only the
+known Mason foreign-child branch in the cloned vendor module. Its separately
+hashed helper derives an untransformed logical rectangle from bounds and layer
+position/anchor. Normal Core layout owns the cache, layout events and background;
+the exact already-positioned frame bypasses the second native write. Other
+requests delegate to Core, and the prior own/inherited method descriptor is
+restored in `finally`. No safe-area property value or installed source changes.
+The receipt labels this a diagnostic candidate, with two changed JS files and
+unchanged native code. It is not a shipped dependency repair. Both old bundle
+and vendor source-map references are removed for these diagnostic bytes.
+
+The captured-method replay also checks the candidate's cache/events, repeated
+layout, exception restoration, transformed bounding-box fixture and subsequent
+ordinary Core safe-area behavior. Its explicit TypeScript argument can point
+to either a consumer with TypeScript5.9.3 or that exact package directory.
+UIKit/measurement are fixtures in this replay; native geometry, lifecycle and
+transform controls remain independent requirements.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh
