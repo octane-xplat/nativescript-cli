@@ -270,6 +270,37 @@ func TestConfiguredSourcesDeduplicateInstalledOwnership(t *testing.T) {
 	}
 }
 
+func TestResolveAppAndTransitiveSwiftPackages(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"plain":"1"}}`)
+	resolutionFile(t, root, "node_modules/plain/package.json", `{"name":"plain","version":"1","dependencies":{"native":"1"}}`)
+	resolutionFile(t, root, "node_modules/native/package.json", `{"name":"native","version":"1","nativescript":{"platforms":{"ios":"9.1.0"}}}`)
+	resolutionFile(t, root, "node_modules/native/nativescript.config.cjs", `module.exports={ios:{SPMPackages:[{name:'Pulsar',repositoryURL:'https://github.com/software-mansion-labs/pulsar-ios',version:'1.4.0',libs:['Pulsar']},{name:'Aztec',repositoryURL:'https://github.com/wordpress-mobile/AztecEditor-iOS',version:'#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',libs:['Aztec']}]}}`)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.test.remote',ios:{SPMPackages:[{name:'Pulsar',repositoryURL:'https://github.com/software-mansion-labs/pulsar-ios',version:'2.0.0',libs:['PulsarExtra']}]}}`)
+	client, _ := ns.New(ns.Options{})
+	p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(p.Contributions) != 2 {
+		t.Fatal("remote resolution", p.Contributions, err)
+	}
+	for _, c := range p.Contributions {
+		if c.Kind != "spm-remote" || c.SPM == nil || !filepath.IsAbs(c.Path) {
+			t.Fatal("remote domain result", c)
+		}
+		if c.SPM.Name == "Pulsar" && (c.SPM.Version != "2.0.0" || !reflect.DeepEqual(c.SPM.Products, []string{"Pulsar", "PulsarExtra"})) {
+			t.Fatal("app selection lost required products", c.SPM)
+		}
+	}
+	// Resolver is read-only: native dependency tools and workspace creation belong
+	// to Prepare, not to remote declaration discovery.
+	if _, err := os.Stat(filepath.Join(root, "platforms")); !os.IsNotExist(err) {
+		t.Fatal("Resolve created native output", err)
+	}
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.test.remote',ios:{SPMPackages:[{name:'Pulsar',repositoryURL:'https://secret@github.com/a/b',version:'1.0.0',libs:['Pulsar']}]}}`)
+	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) || strings.Contains(err.Error(), "secret") {
+		t.Fatal("unsafe repository accepted or exposed", err)
+	}
+}
+
 func TestResolveCancellationAndRemoval(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "nativescript.config.cjs", `module.exports = async () => { await new Promise(() => setInterval(()=>{},100)); }`)

@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const { stripTypeScriptTypes, createRequire } = require('node:module');
 const coreAdapter=require('./core.cjs');
 const expandNativeSources=require('./native-sources.cjs');
+const swiftPackages=require('./swift-packages.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
 const safeFailures = new WeakSet();
@@ -87,7 +88,13 @@ async function resolve({ projectDir }) {
   }
   function collect(dir, owner, cfg, resources, core=false) {
     keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android'], 'config');
-    if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource'], 'iOS config');
+    if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
+    if(cfg.ios?.SPMPackages!==undefined){
+      let declared;
+      try{declared=swiftPackages.parse(cfg.ios.SPMPackages);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','SPMPackages require named HTTPS repositories, supported version/revision requirements and library products');}
+      const origin=configNames.map(name=>path.join(dir,name)).find(fs.existsSync);
+      for(const spm of declared)contributions.push({packageDirectory:owner,platform:'ios',kind:'spm-remote',path:origin,spm});
+    }
     if(cfg.ios?.NativeSource!==undefined){
       if(dir!==root)fail('unavailable','Plugin NativeSource declarations require a qualified canonical source contract');
       let groups;
@@ -214,9 +221,13 @@ async function resolve({ projectDir }) {
   // ownership over an app declaration; otherwise choose deterministically.
   const membership=new Map();
   for(const c of contributions){
+    if(c.kind==='spm-remote')continue;
     const key=JSON.stringify([c.platform,c.kind,c.path]),previous=membership.get(key);
     if(!previous||(previous.packageDirectory===root&&c.packageDirectory!==root)||(previous.packageDirectory!==root&&c.packageDirectory!==root&&c.packageDirectory<previous.packageDirectory))membership.set(key,c);
   }
+  let remote;
+  try{remote=swiftPackages.merge(contributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
+  for(const c of remote)membership.set(JSON.stringify(['spm-remote',c.spm.repositoryURL]),c);
   const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
   if(nativeSourceGroups.length)result.nativeSourceGroups=nativeSourceGroups;
   result.revision = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');

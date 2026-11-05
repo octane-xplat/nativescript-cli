@@ -37,6 +37,13 @@ type Contribution struct {
 	Platform         string
 	Kind             string
 	Path             string
+	SPM              *SwiftPackage `json:"spm,omitempty"`
+}
+type SwiftPackage struct {
+	Name          string   `json:"name"`
+	RepositoryURL string   `json:"repositoryURL"`
+	Version       string   `json:"version"`
+	Products      []string `json:"products"`
 }
 type Source struct {
 	Path   string

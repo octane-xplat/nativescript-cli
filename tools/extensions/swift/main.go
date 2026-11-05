@@ -179,6 +179,13 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
+	if phase != "" {
+		resolved, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: app})
+		if err != nil {
+			return err
+		}
+		evidence["resolved"] = resolved
+	}
 	built, err := client.Build(ctx, q)
 	if err != nil {
 		return err

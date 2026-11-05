@@ -70,3 +70,30 @@ test('iOS XCFramework validation ignores unrelated platform slices and retains m
  resolved.contributions=[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}];fs.unlinkSync(path.join(slice,'Probe'));
  await assert.rejects(prepare({resolved,directory:path.join(dir,'invalid')}),e=>e.code==='unavailable');
 });
+
+test('remote Swift package requirements/products preserve ownership through repeat/removal',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'remote-spm-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const config=path.join(dir,'nativescript.config.js');fs.writeFileSync(config,'module.exports={}');
+ const r={directory:dir,applicationID:'org.example.remote',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[]};
+ const declared=(name,url,version,products)=>({packageDirectory:dir,platform:'ios',kind:'spm-remote',path:config,spm:{name,repositoryURL:url,version,products}});
+ r.contributions=[declared('Pulsar','https://github.com/software-mansion-labs/pulsar-ios','1.4.0',['Pulsar']),declared('Aztec','https://github.com/wordpress-mobile/AztecEditor-iOS','#'+'a'.repeat(40),['Aztec'])];
+ const q={directory:path.join(dir,'out'),resolved:r};assert.equal((await prepare(q)).spm,true);
+ const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');
+ const parse=()=>{const p=xcode.project(file);p.parseSync();return p;};
+ const entries=section=>Object.entries(section??{}).filter(([k,v])=>!k.endsWith('_comment')&&v&&typeof v==='object');
+ const unquote=v=>{try{return JSON.parse(v);}catch{return v;}};
+ let p=parse(),o=p.hash.project.objects;
+ assert.equal(entries(o.XCRemoteSwiftPackageReference).length,2);
+ const requirements=entries(o.XCRemoteSwiftPackageReference).map(([,v])=>Object.fromEntries(Object.entries(v.requirement).map(([k,v])=>[k,unquote(v)])));
+ assert.ok(requirements.some(r=>r.kind==='exactVersion'&&r.version==='1.4.0'));assert.ok(requirements.some(r=>r.kind==='revision'&&r.revision==='a'.repeat(40)));
+ assert.deepEqual(entries(o.XCSwiftPackageProductDependency).map(([,v])=>unquote(v.productName)).sort(),['Aztec','Pulsar']);
+ const original=fs.readFileSync(file,'utf8');await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),original);
+ p=parse();o=p.hash.project.objects;const unrelated='ABCDEFABCDEFABCDEFABCDEF';
+ o.XCRemoteSwiftPackageReference[unrelated]={isa:'XCRemoteSwiftPackageReference',repositoryURL:'"https://example.com/keep"',requirement:{kind:'exactVersion',version:'"1.0.0"'}};
+ o.PBXProject[p.hash.project.rootObject].packageReferences.push({value:unrelated,comment:'unrelated'});fs.writeFileSync(file,p.writeSync());
+ const pin=path.join(q.directory,'NativeScriptApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved');fs.mkdirSync(path.dirname(pin),{recursive:true});fs.writeFileSync(pin,'fixture-retained-pin');
+ r.contributions=[];assert.equal((await prepare(q)).spm,true);p=parse();o=p.hash.project.objects;
+ assert.equal(entries(o.XCRemoteSwiftPackageReference).length,1);assert.ok(o.XCRemoteSwiftPackageReference[unrelated]);assert.equal(entries(o.XCSwiftPackageProductDependency).length,0);assert.equal(fs.readFileSync(pin,'utf8'),'fixture-retained-pin');
+ const removed=fs.readFileSync(file,'utf8');await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),removed);
+ r.contributions=[declared('Keep','https://example.com/keep','2.0.0',['Keep'])];await assert.rejects(prepare(q),e=>e.code==='unavailable');assert.equal(fs.readFileSync(file,'utf8'),removed);
+});

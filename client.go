@@ -132,7 +132,11 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 		result.Dependencies = append(result.Dependencies, InstalledDependency(v))
 	}
 	for _, v := range p.Contributions {
-		result.Contributions = append(result.Contributions, NativeContribution(v))
+		item := NativeContribution{PackageDirectory: v.PackageDirectory, Platform: v.Platform, Kind: v.Kind, Path: v.Path}
+		if v.SPM != nil {
+			item.SPM = &SwiftPackage{Name: v.SPM.Name, RepositoryURL: v.SPM.RepositoryURL, Version: v.SPM.Version, Products: append([]string(nil), v.SPM.Products...)}
+		}
+		result.Contributions = append(result.Contributions, item)
 	}
 	for _, v := range p.Sources {
 		result.Sources = append(result.Sources, ProjectSource(v))

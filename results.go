@@ -72,12 +72,23 @@ type InstalledDependency struct {
 }
 
 // NativeContribution is an input for preparation, not proof of a native build.
-// Kind is source, framework, pods, spm, configuration, resource or library.
+// Kind is source, framework, pods, spm, spm-remote, configuration, resource or library.
 type NativeContribution struct {
 	PackageDirectory string
 	Platform         string
 	Kind             string
 	Path             string
+	// SPM is present for spm-remote; Path identifies its declaring config file.
+	SPM *SwiftPackage
+}
+
+// SwiftPackage describes an explicitly declared remote dependency. Resolution
+// does not fetch it; native preparation owns tool resolution and actual pins.
+type SwiftPackage struct {
+	Name          string
+	RepositoryURL string
+	Version       string
+	Products      []string
 }
 
 // ProjectSource records SHA-256 of a read config, manifest or native file.

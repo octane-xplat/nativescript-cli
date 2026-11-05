@@ -40,7 +40,7 @@ workspace-relative paths for this supported form. Removing a declaration removes
 its project membership unless an installed contribution still owns the file.
 Source packages still must remain immutable
 during the operation; this does not add arbitrary plugin config or remote SPM
-support.
+support beyond the declarations described below.
 
 A local `Package.swift` describes library products through `swift package
 dump-package`. Its implementation subtree is package-owned, not also compiled by
@@ -58,7 +58,7 @@ survive. Once a workspace has used Pods/SPM, subsequent preparation also invokes
 tools, including removal and retries, to retire integrations and retain pins.
 P1 owns its generated settings and files; callers should contribute through their
 app resources instead of editing those files. Arbitrary multi-target workspaces,
-arbitrary remote SPM contributions, in-place runtime upgrades, localized variant-group merging and
+unqualified SPM requirement/transport forms, in-place runtime upgrades, localized variant-group merging and
 binary plist merging are unavailable. Preparation is not a rollback transaction:
 a failed operation can leave incomplete generated files, but returns no success;
 retry uses retained ownership state. Source packages must remain immutable during
@@ -80,3 +80,13 @@ configuration files. XCFramework validation considers iOS device/simulator slice
 including consistent static/dynamic linkage. Unrelated Catalyst/visionOS/macOS
 slices do not determine an iOS application's embedding policy. Missing or unknown
 selected iOS binaries remain unavailable.
+
+App and installed-plugin ios.SPMPackages are normalized by resolution and rendered
+as owned XCRemoteSwiftPackageReference entries, selected product dependencies and
+Frameworks phase links. Exact version, major/minor-compatible, full commit revision
+and simple branch requirements remain distinct. Existing unowned references,
+including the runtime's reviewed package, are retained; a competing declaration
+for one fails instead of rewriting it. Product-name collisions with existing or
+contributed products fail. Repetition is stable, removal retires owned references
+and retains resolution-tool invocation/pins. Metadata inputs record the effective
+remote declarations. This does not admit arbitrary multi-target SPM mutations.

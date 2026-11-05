@@ -17697,6 +17697,74 @@ var require_ota = __commonJS({
   }
 });
 
+// bridge/resolve/swift-packages.cjs
+var require_swift_packages = __commonJS({
+  "bridge/resolve/swift-packages.cjs"(exports2) {
+    "use strict";
+    var path2 = require("node:path");
+    var fail = (code) => {
+      throw Object.assign(new Error("Invalid Swift package declaration"), { code });
+    };
+    var version = "(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?";
+    exports2.key = (url) => url.replace(/\/$/, "").replace(/\.git$/, "");
+    exports2.requirement = (value) => {
+      if (typeof value !== "string" || !value) fail("invalid_input");
+      if (/^#[a-fA-F0-9]{40}$/.test(value)) return { kind: "revision", revision: value.slice(1).toLowerCase() };
+      if (new RegExp("^" + version + "$").test(value)) return { kind: "exactVersion", version: value };
+      if (new RegExp("^[\\^~]" + version + "$").test(value)) return { kind: value[0] === "^" ? "upToNextMajorVersion" : "upToNextMinorVersion", minimumVersion: value.slice(1) };
+      if (/^[A-Za-z_][A-Za-z0-9_.\/-]*$/.test(value) && !value.includes("..") && !value.endsWith("/") && !value.endsWith(".lock")) return { kind: "branch", branch: value };
+      fail("unavailable");
+    };
+    exports2.parse = (declarations) => {
+      if (declarations === void 0) return [];
+      if (!Array.isArray(declarations)) fail("invalid_input");
+      const names = /* @__PURE__ */ new Set();
+      return declarations.map((p) => {
+        if (!p || typeof p !== "object" || Array.isArray(p) || Object.keys(p).some((k) => !["name", "repositoryURL", "version", "libs"].includes(k)) || typeof p.name !== "string" || !p.name || names.has(p.name) || typeof p.repositoryURL !== "string" || !Array.isArray(p.libs) || !p.libs.length || p.libs.some((n) => typeof n !== "string" || !n || !/^[-A-Za-z0-9_.]+$/.test(n))) fail("invalid_input");
+        names.add(p.name);
+        let url;
+        try {
+          url = new URL(p.repositoryURL);
+        } catch {
+          fail("invalid_input");
+        }
+        if (url.protocol !== "https:") fail("unavailable");
+        if (url.username || url.password || url.search || url.hash || !path2.posix.basename(url.pathname)) fail("invalid_input");
+        exports2.requirement(p.version);
+        return { name: p.name, repositoryURL: url.href.replace(/\/$/, ""), version: p.version, products: [...new Set(p.libs)].sort() };
+      });
+    };
+    exports2.merge = (contributions, app) => {
+      const repos = /* @__PURE__ */ new Map(), names = /* @__PURE__ */ new Map(), identities = /* @__PURE__ */ new Map(), products = /* @__PURE__ */ new Map();
+      for (const c of contributions) {
+        if (c.kind !== "spm-remote") continue;
+        const p = c.spm, key2 = exports2.key(p.repositoryURL);
+        const identity = path2.posix.basename(new URL(key2).pathname).toLowerCase();
+        if (names.has(p.name) && names.get(p.name) !== key2 || identities.has(identity) && identities.get(identity) !== key2) fail("invalid_input");
+        names.set(p.name, key2);
+        identities.set(identity, key2);
+        for (const product of p.products) {
+          if (products.has(product) && products.get(product) !== key2) fail("invalid_input");
+          products.set(product, key2);
+        }
+        const entry = repos.get(key2) ?? [];
+        entry.push(c);
+        repos.set(key2, entry);
+      }
+      const merged = [];
+      for (const entries of repos.values()) {
+        entries.sort((a, b) => (b.packageDirectory === app) - (a.packageDirectory === app) || (a.packageDirectory < b.packageDirectory ? -1 : a.packageDirectory > b.packageDirectory ? 1 : 0) || (a.spm.name < b.spm.name ? -1 : a.spm.name > b.spm.name ? 1 : 0) || (a.spm.repositoryURL < b.spm.repositoryURL ? -1 : a.spm.repositoryURL > b.spm.repositoryURL ? 1 : 0));
+        const selected = entries[0], versions = new Set(entries.map((c) => c.spm.version));
+        if (new Set(entries.filter((c) => c.packageDirectory === app).map((c) => c.spm.version)).size > 1) fail("invalid_input");
+        if (versions.size > 1 && selected.packageDirectory !== app) fail("invalid_input");
+        const products2 = [...new Set(entries.flatMap((c) => c.spm.products))].sort();
+        merged.push({ ...selected, spm: { ...selected.spm, products: products2 } });
+      }
+      return merged.sort((a, b) => a.spm.repositoryURL < b.spm.repositoryURL ? -1 : a.spm.repositoryURL > b.spm.repositoryURL ? 1 : 0);
+    };
+  }
+});
+
 // bridge/xcode/index.cjs
 var require_xcode2 = __commonJS({
   "bridge/xcode/index.cjs"(exports2, module2) {
@@ -17707,6 +17775,7 @@ var require_xcode2 = __commonJS({
     var xcode2 = require_xcode();
     var plist = require_plist();
     var { execFileSync } = require("node:child_process");
+    var swiftPackages = require_swift_packages();
     var fail = (code) => {
       throw Object.assign(new Error(), { code });
     };
@@ -17832,13 +17901,40 @@ var require_xcode2 = __commonJS({
       }
       const embedID = put("PBXCopyFilesBuildPhase", "embed", { buildActionMask: 2147483647, dstPath: q(""), dstSubfolderSpec: 10, name: q("Embed contributed frameworks"), files: [], runOnlyForDeploymentPostprocessing: 0 });
       target.buildPhases.push({ value: embedID, comment: "P1" });
-      const headers = [], configs = [], pods = [], packages = [], modulemaps = [];
+      const headers = [], configs = [], pods = [], packages = [], modulemaps = [], remotePackages = [];
+      const unquote = (value) => {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value;
+        }
+      };
+      const productNames = new Set(values(objects.XCSwiftPackageProductDependency).map(([, p]) => unquote(p.productName)));
       let info = { CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable: "$(EXECUTABLE_NAME)", CFBundleName: name, CFBundlePackageType: "APPL", CFBundleVersion: "1", CFBundleShortVersionString: "1.0", LSRequiresIPhoneOS: true };
       let entitlements = plist.parse(fs2.readFileSync(path2.join(template, "__PROJECT_NAME__/__PROJECT_NAME__.entitlements"), "utf8"));
       const contributions = resolved.contributions.filter((c) => c.platform === "ios").sort((a, b) => (a.packageDirectory === resolved.directory) - (b.packageDirectory === resolved.directory) || a.path.localeCompare(b.path));
       for (const c of contributions) {
         if (!path2.isAbsolute(c.path) || !fs2.existsSync(c.path)) fail("invalid_input");
         const ext = path2.extname(c.path).toLowerCase();
+        if (c.kind === "spm-remote") {
+          const p = c.spm;
+          if (!p || !Array.isArray(p.products) || !p.products.length) fail("invalid_input");
+          const key2 = swiftPackages.key(p.repositoryURL);
+          if (values(objects.XCRemoteSwiftPackageReference).some(([, ref3]) => swiftPackages.key(unquote(ref3.repositoryURL)) === key2)) fail("unavailable");
+          const requirement = Object.fromEntries(Object.entries(swiftPackages.requirement(p.version)).map(([k, v]) => [k, q(v)]));
+          const ref2 = put("XCRemoteSwiftPackageReference", "remote:" + key2, { repositoryURL: q(p.repositoryURL), requirement });
+          (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
+          for (const product of p.products) {
+            if (productNames.has(product)) fail("unavailable");
+            productNames.add(product);
+            const dependency = put("XCSwiftPackageProductDependency", `remote:${key2}:${product}`, { package: ref2, productName: q(product) });
+            (target.packageProductDependencies ||= []).push({ value: dependency, comment: "P1" });
+            const build = put("PBXBuildFile", `remote-link:${key2}:${product}`, { productRef: dependency });
+            phases.Frameworks.files.push({ value: build, comment: "P1" });
+          }
+          remotePackages.push(p);
+          continue;
+        }
         if (c.kind === "pods") {
           pods.push(c.path);
           continue;
@@ -17854,6 +17950,8 @@ var require_xcode2 = __commonJS({
           (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
           for (const product of manifest.products || []) {
             if (!product.type?.library) fail("unavailable");
+            if (productNames.has(product.name)) fail("unavailable");
+            productNames.add(product.name);
             const dependency = put("XCSwiftPackageProductDependency", `${c.path}:${product.name}`, { package: ref2, productName: q(product.name) });
             (target.packageProductDependencies ||= []).push({ value: dependency, comment: "P1" });
             const build = put("PBXBuildFile", `spm:${c.path}:${product.name}`, { productRef: dependency });
@@ -17929,13 +18027,13 @@ target '${name}' do
 ` + pods.map((p) => path2.extname(p) === ".podspec" ? `  pod ${ruby(path2.basename(p, ".podspec"))}, :path => ${ruby(path2.dirname(p))}
 ` : `  instance_eval(File.read(${ruby(p)}), ${ruby(p)})
 `).join("") + "end\n");
-      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages }, null, 2) + "\n");
+      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages, remotePackages }, null, 2) + "\n");
       write(projectFile, project.writeSync());
-      write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || !!previous.spm }) + "\n");
+      write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm }) + "\n");
       fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
       const bundlePackage = path2.join(directory, "app/package.json");
       if (!fs2.existsSync(bundlePackage)) write(bundlePackage, JSON.stringify({ main: "bundle.js" }));
-      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || !!previous.spm, target: name };
+      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm, target: name };
     };
   }
 });
@@ -18452,6 +18550,7 @@ var require_resolve = __commonJS({
     var { stripTypeScriptTypes, createRequire: createRequire2 } = require("node:module");
     var coreAdapter = require_core();
     var expandNativeSources = require_native_sources();
+    var swiftPackages = require_swift_packages();
     var { pathToFileURL } = require("node:url");
     var configNames = ["nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"];
     var safeFailures = /* @__PURE__ */ new WeakSet();
@@ -18541,7 +18640,17 @@ var require_resolve = __commonJS({
       }
       function collect(dir, owner, cfg2, resources, core = false) {
         keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android"], "config");
-        if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource"], "iOS config");
+        if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource", "SPMPackages"], "iOS config");
+        if (cfg2.ios?.SPMPackages !== void 0) {
+          let declared;
+          try {
+            declared = swiftPackages.parse(cfg2.ios.SPMPackages);
+          } catch (e) {
+            fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "SPMPackages require named HTTPS repositories, supported version/revision requirements and library products");
+          }
+          const origin = configNames.map((name) => path2.join(dir, name)).find(fs2.existsSync);
+          for (const spm of declared) contributions.push({ packageDirectory: owner, platform: "ios", kind: "spm-remote", path: origin, spm });
+        }
         if (cfg2.ios?.NativeSource !== void 0) {
           if (dir !== root) fail("unavailable", "Plugin NativeSource declarations require a qualified canonical source contract");
           let groups;
@@ -18693,9 +18802,17 @@ var require_resolve = __commonJS({
       await visit(root, app, true);
       const membership = /* @__PURE__ */ new Map();
       for (const c of contributions) {
+        if (c.kind === "spm-remote") continue;
         const key2 = JSON.stringify([c.platform, c.kind, c.path]), previous = membership.get(key2);
         if (!previous || previous.packageDirectory === root && c.packageDirectory !== root || previous.packageDirectory !== root && c.packageDirectory !== root && c.packageDirectory < previous.packageDirectory) membership.set(key2, c);
       }
+      let remote;
+      try {
+        remote = swiftPackages.merge(contributions, root);
+      } catch {
+        fail("invalid_input", "Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository");
+      }
+      for (const c of remote) membership.set(JSON.stringify(["spm-remote", c.spm.repositoryURL]), c);
       const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
       if (nativeSourceGroups.length) result.nativeSourceGroups = nativeSourceGroups;
       result.revision = crypto.createHash("sha256").update(JSON.stringify(result)).digest("hex");

@@ -40,9 +40,22 @@ empty matches, unsupported files and symlinks inside selected trees fail. Each
 selected file is read/fingerprinted. Repeated physical membership is compiled
 once, preferring installed-package ownership over an explicit app selection.
 Removal drops a selector's membership unless an installed contribution still owns
-that file. Plugin-level NativeSource
-and remote SPMPackages remain unavailable. These declarations do not authorize
+that file. Plugin-level NativeSource remains unavailable. These declarations do not authorize
 source writes or dependency installation.
+
+App and installed native-package `ios.SPMPackages` declarations become typed
+`spm-remote` contributions. Public `NativeContribution.SPM` contains the name,
+HTTPS repository URL, version requirement and selected products; Path identifies
+the declaring config. URLs with credentials, query strings or fragments reject.
+Supported requirements are exact three-part versions, `^`/`~` versions, full
+40-hex `#revision` and simple branch names. Other range/local-path config forms
+remain unavailable; installed local Package.swift contributions are separate.
+
+Same-repository declarations merge products deterministically. An explicit app
+version overrides plugin defaults for that repository; conflicting plugin versions
+without an app choice, contradictory app versions and repository/name/identity/
+product collisions reject before native output. Resolve never fetches a Swift
+package. Preparation owns Xcode resolution and concrete Package.resolved pins.
 
 Installed dependencies, optional dependencies and peers are traversed from each
 package's own Node lookup locations. Missing required packages fail; absent optional

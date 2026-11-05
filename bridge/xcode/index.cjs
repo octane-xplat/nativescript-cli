@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const xcode = require('xcode');
 const plist = require('plist');
 const { execFileSync } = require('node:child_process');
+const swiftPackages = require('../resolve/swift-packages.cjs');
 const fail = code => { throw Object.assign(new Error(), {code}); };
 const q = value => JSON.stringify(value);
 const id = value => crypto.createHash('sha256').update(`p1:${value}`).digest('hex').slice(0,24).toUpperCase();
@@ -111,13 +112,34 @@ module.exports = async ({ resolved, directory }) => {
   }
   const embedID = put('PBXCopyFilesBuildPhase','embed',{buildActionMask:2147483647,dstPath:q(''),dstSubfolderSpec:10,name:q('Embed contributed frameworks'),files:[],runOnlyForDeploymentPostprocessing:0});
   target.buildPhases.push({value:embedID,comment:'P1'});
-  const headers=[], configs=[], pods=[], packages=[], modulemaps=[];
+  const headers=[], configs=[], pods=[], packages=[], modulemaps=[], remotePackages=[];
+  const unquote=value=>{try{return JSON.parse(value);}catch{return value;}};
+  const productNames=new Set(values(objects.XCSwiftPackageProductDependency).map(([,p])=>unquote(p.productName)));
   let info = {CFBundleIdentifier:'$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleExecutable:'$(EXECUTABLE_NAME)', CFBundleName:name, CFBundlePackageType:'APPL', CFBundleVersion:'1', CFBundleShortVersionString:'1.0', LSRequiresIPhoneOS:true};
   let entitlements = plist.parse(fs.readFileSync(path.join(template,'__PROJECT_NAME__/__PROJECT_NAME__.entitlements'),'utf8'));
   const contributions = resolved.contributions.filter(c=>c.platform==='ios').sort((a,b)=>(a.packageDirectory===resolved.directory)-(b.packageDirectory===resolved.directory) || a.path.localeCompare(b.path));
   for (const c of contributions) {
     if (!path.isAbsolute(c.path) || !fs.existsSync(c.path)) fail('invalid_input');
     const ext = path.extname(c.path).toLowerCase();
+    if(c.kind==='spm-remote'){
+      const p=c.spm;
+      if(!p||!Array.isArray(p.products)||!p.products.length)fail('invalid_input');
+      const key=swiftPackages.key(p.repositoryURL);
+      // Unowned references include the runtime's reviewed package. Do not alter
+      // its requirement or create competing references to the same repository.
+      if(values(objects.XCRemoteSwiftPackageReference).some(([,ref])=>swiftPackages.key(unquote(ref.repositoryURL))===key))fail('unavailable');
+      const requirement=Object.fromEntries(Object.entries(swiftPackages.requirement(p.version)).map(([k,v])=>[k,q(v)]));
+      const ref=put('XCRemoteSwiftPackageReference','remote:'+key,{repositoryURL:q(p.repositoryURL),requirement});
+      (root.packageReferences ||= []).push({value:ref,comment:'P1'});
+      for(const product of p.products){
+        if(productNames.has(product))fail('unavailable');productNames.add(product);
+        const dependency=put('XCSwiftPackageProductDependency',`remote:${key}:${product}`,{package:ref,productName:q(product)});
+        (target.packageProductDependencies ||= []).push({value:dependency,comment:'P1'});
+        const build=put('PBXBuildFile',`remote-link:${key}:${product}`,{productRef:dependency});
+        phases.Frameworks.files.push({value:build,comment:'P1'});
+      }
+      remotePackages.push(p);continue;
+    }
     if (c.kind === 'pods') { pods.push(c.path); continue; }
     if (c.kind === 'spm') {
       let manifest;
@@ -127,6 +149,7 @@ module.exports = async ({ resolved, directory }) => {
       (root.packageReferences ||= []).push({value:ref,comment:'P1'});
       for (const product of manifest.products || []) {
         if (!product.type?.library) fail('unavailable');
+        if(productNames.has(product.name))fail('unavailable');productNames.add(product.name);
         const dependency=put('XCSwiftPackageProductDependency',`${c.path}:${product.name}`,{package:ref,productName:q(product.name)});
         (target.packageProductDependencies ||= []).push({value:dependency,comment:'P1'});
         const build=put('PBXBuildFile',`spm:${c.path}:${product.name}`,{productRef:dependency});
@@ -173,11 +196,11 @@ module.exports = async ({ resolved, directory }) => {
   for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+(modulemaps.length?`OTHER_CFLAGS = $(inherited) ${modulemaps.map(p=>'-fmodule-map-file='+q(p)).join(' ')}\nOTHER_SWIFT_FLAGS = $(inherited) ${modulemaps.map(p=>'-Xcc -fmodule-map-file='+q(p)).join(' ')}\n`:'')+configs.map(p=>`#include ${q(p)}\n`).join(''));
   const ruby = value => `'${value.replaceAll('\\','\\\\').replaceAll("'","\\'")}'`;
   if(pods.length || previous.pods) write(path.join(directory,'Podfile'), `platform :ios, '13.0'\nproject '${name}.xcodeproj'\ntarget '${name}' do\n`+pods.map(p=>path.extname(p)==='.podspec'?`  pod ${ruby(path.basename(p,'.podspec'))}, :path => ${ruby(path.dirname(p))}\n`:`  instance_eval(File.read(${ruby(p)}), ${ruby(p)})\n`).join('')+'end\n');
-  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages},null,2)+'\n');
+  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages,remotePackages},null,2)+'\n');
   write(projectFile,project.writeSync());
-  write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || !!previous.spm})+'\n');
+  write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm})+'\n');
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});
   const bundlePackage=path.join(directory,'app/package.json');
   if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.js'}));
-  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || !!previous.spm,target:name};
+  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm,target:name};
 };
