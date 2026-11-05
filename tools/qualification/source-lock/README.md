@@ -37,3 +37,9 @@ traversed identity/edge comparison; it is not acceptance of those other inputs.
 This tool does not verify tarball integrity, patch identity, frozen-lock
 installation, native compilation or device behavior. It never changes a native
 acceptance gate.
+
+Bun can bind peer dependencies from a caller's provisioning context rather than
+lexical lock ancestry. This first audit does not reconstruct those contexts.
+A peer-only version difference remains a failed comparison; independently check
+its actual installation before calling it confirmed dependency drift. Do not
+change versions or waive that comparison solely to make the audit pass.
