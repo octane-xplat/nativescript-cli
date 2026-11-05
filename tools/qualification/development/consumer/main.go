@@ -176,6 +176,8 @@ func (r *reservation) retireInstallation() error {
 
 type health struct {
 	Nonce, Boot, Token                                                             string
+	Entry                                                                          string
+	NativeProbe                                                                    *int
 	Ticks, PID, HotUpdates                                                         int
 	HotAvailable, BootComplete, FullSocketReady, FallbackSocketReady, HasWebSocket bool
 	AcceptAdapterReady                                                             bool
@@ -198,6 +200,9 @@ func run() (result error) {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "simultaneous" {
 		return runSimultaneous(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "variants-ios" {
+		return runVariants(os.Args[2:])
 	}
 	args := os.Args[1:]
 	rejectNative := len(args) == 4 && args[0] == "reject-ios"

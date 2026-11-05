@@ -1,7 +1,9 @@
 import { Application, File, Label, knownFolders } from '@nativescript/core';
 import { token } from './value';
 
+declare const DevNativeProbe: any;
 const nonce = 'G5_NONCE';
+const entryName = 'app';
 const boot = String(Date.now()) + ':' + String(Math.random());
 let observed = token;
 let ticks = 0;
@@ -42,6 +44,7 @@ setInterval(() => {
     nativeResourceRevision = revisionID ? Number(resources.getString(revisionID)) : 0;
   }
   health.writeTextSync(JSON.stringify({ nonce, boot, ticks: ++ticks, pid, token: observed, hotUpdates,
+    entry: entryName, nativeProbe: typeof DevNativeProbe !== 'undefined' ? DevNativeProbe.answer() : null,
     nativeResourceRevision, hotPending, maxHotPending, hotFailures, hotTokens,
     hotAvailable: !!import.meta.hot, bootComplete: !!state.__NS_HMR_BOOT_COMPLETE__,
     fullSocketReady: !!state.__NS_HMR_CLIENT_SOCKET_READY__,

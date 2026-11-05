@@ -93,9 +93,30 @@ JAVA_HOME=/absolute/jdk21 ANDROID_HOME=/absolute/android-sdk \
   91D40099-A056-497D-A572-ADDDFD6A8F23 5584 "$HOME/dev/reports/nativescript-cli/simultaneous-development.json"
 ```
 
+`development-consumer variants-ios APP 91D40099-A056-497D-A572-ADDDFD6A8F23 EVIDENCE_JSON`
+keeps one iOS development session open across five native changes:
+
+1. a `nativescript.config.ts` edit
+2. a root `package.json` `main` switch to `app/entry2.ts`
+3. an offline install of a local plugin whose `ios.NativeSource` Swift class answers 333
+4. an edit to the installed plugin's Swift source so it answers 444
+5. removal of that plugin
+
+Each step must produce a new app generation (new PID, boot and endpoint) inside
+the same session with the expected entry and native probe value. The plugin has a
+JavaScript `main`, because the engine's vendor pass imports every dependency.
+Edits happen only inside APP. The installed plugin copy is replaced, never
+modified in place through a shared inode.
+
+```sh
+python3 -B tools/qualification/development/stage-native.py "$PWD/.cache/native-dev-variants"
+.cache/development-consumer variants-ios "$PWD/.cache/native-dev-variants" \
+  91D40099-A056-497D-A572-ADDDFD6A8F23 "$HOME/dev/reports/nativescript-cli/ios-development-variants.json"
+```
+
 Successful native runs qualify their stated debug simulator/emulator sequences
-only. Other native contributions, framework-specific behavior, simultaneous
-targets, release, physical devices and the complete G5 matrix need separate
-qualification. The fixture does not run an OTA installer or change certificate
+only. Android config/entry/plugin variants, other native contributions,
+framework-specific behavior, release, physical devices and the complete G5
+matrix need separate qualification. The fixture does not run an OTA installer or change certificate
 trust/signing inputs. Keep run results and failures with their exact source
 revision, tool/runtime versions and native artifact identity outside Git.
