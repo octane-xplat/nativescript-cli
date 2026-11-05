@@ -73,6 +73,54 @@ func readAndroid(t *testing.T, root, name string) string {
 	}
 	return string(b)
 }
+
+func TestAndroidAppGoogleServicesConfiguration(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	file := "App_Resources/Android/google-services.json"
+	firstBody := "{\"project_info\":{\"project_id\":\"component-fixture\"}}\n"
+	resolutionFile(t, root, file, firstBody)
+	ctx := context.Background()
+	first, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"resources/Android/google-services.json", "app/google-services.json"} {
+		if readAndroid(t, first.NativeDir, name) != firstBody {
+			t.Fatal("Google services configuration bytes changed")
+		}
+	}
+	secondBody := "{\"project_info\":{\"project_id\":\"changed-component-fixture\"}}\n"
+	resolutionFile(t, root, file, secondBody)
+	second, err := client.Prepare(ctx, request)
+	if err != nil || second.Identity.Revision == first.Identity.Revision {
+		t.Fatal("Google services input did not invalidate preparation", err)
+	}
+	if readAndroid(t, second.NativeDir, "app/google-services.json") != secondBody {
+		t.Fatal("Google services update missing from app module")
+	}
+	if err := os.Remove(filepath.Join(root, file)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"resources/Android/google-services.json", "app/google-services.json"} {
+		if _, err := os.Stat(filepath.Join(removed.NativeDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("removed app configuration survived preparation", err)
+		}
+	}
+	for _, unsupported := range []string{"node_modules/native-plugin/platforms/android/google-services.json", "App_Resources/Android/unknown.json"} {
+		resolutionFile(t, root, unsupported, firstBody)
+		if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+			t.Fatal("unsupported configuration ownership/type accepted", err)
+		}
+		if err := os.Remove(filepath.Join(root, unsupported)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
 	root, c, q := androidApp(t, false)
 	p, e := c.Prepare(context.Background(), q)

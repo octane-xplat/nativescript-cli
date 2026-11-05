@@ -26,6 +26,14 @@ support both flat and `src/main` layouts, plus the runtime's app/settings/build
 scripts and `gradle.properties`. Nested AAR directories get explicit repositories.
 App manifest files replace the runtime template; no XML merge is performed here.
 
+An app-owned `App_Resources/Android/google-services.json` is an opaque
+configuration input. Preparation retains its exact bytes in the resources
+snapshot and at `app/google-services.json`, the Google Services Gradle plugin's
+module input. Changes invalidate the source revision; removal excludes both
+copies from the next generation. Plugin-owned copies and arbitrary JSON outside
+resource directories remain unsupported. Gradle plugin setup, native Firebase
+compilation and authentication behavior need their own producers and evidence.
+
 Android runtime settings use app values when present and otherwise consistent
 plugin defaults. Conflicting defaults require explicit app configuration. Vite
 emits the effective settings and application ID into the bundled package.json,

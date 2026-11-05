@@ -105,6 +105,11 @@ native trees fail with remediation. Linked package roots are supported. Resoluti
 describes Pods/SPM/native files without executing or validating their native tools.
 Platform preparation owns the next stage and may reject inputs it cannot consume.
 
+The exact app resource path `Android/google-services.json` is an Android
+configuration contribution with normal source hashing and ownership. Its values
+stay opaque to resolution. A package cannot provide the app's Google Services
+configuration, and this rule does not accept arbitrary Android JSON inputs.
+
 Native module maps are configuration contributions, including plugin-owned maps.
 Ordinary LICENSE/NOTICE files and a packaged producer's `Package.resolved` are
 read-only source identities. They are not compiled/copied as runtime resources,

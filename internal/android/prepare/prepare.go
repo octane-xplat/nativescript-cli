@@ -328,6 +328,8 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 			switch {
 			case rel == "AndroidManifest.xml":
 				target = "app/src/main/AndroidManifest.xml"
+			case rel == "google-services.json":
+				target = "app/google-services.json"
 			case strings.HasPrefix(rel, "src/main/jniLibs/"):
 				target = "app/libs/jni/" + strings.TrimPrefix(rel, "src/main/jniLibs/")
 			case strings.HasPrefix(rel, "src/main/"):
