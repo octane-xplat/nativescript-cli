@@ -94,21 +94,21 @@ async function resolve({ projectDir }) {
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) fail('invalid_input', 'Configured app/resources directory does not exist; create it or correct its config path');
     return fs.realpathSync(resolved);
   }
-  function visionOS(value){
+  function inactiveApple(value,platform){
     if(value===undefined)return undefined;
-    keys(value,['SPMPackages','discardUncaughtJsExceptions'],'visionOS declaration');
+    keys(value,['SPMPackages','discardUncaughtJsExceptions'],platform+' declaration');
     const declared={};
     if(value.discardUncaughtJsExceptions!==undefined){
-      if(typeof value.discardUncaughtJsExceptions!=='boolean')fail('invalid_input','visionOS discardUncaughtJsExceptions must be boolean');
+      if(typeof value.discardUncaughtJsExceptions!=='boolean')fail('invalid_input',platform+' discardUncaughtJsExceptions must be boolean');
       declared.discardUncaughtJsExceptions=value.discardUncaughtJsExceptions;
     }
     if(value.SPMPackages!==undefined){
-      try{declared.spmPackages=swiftPackages.parse(value.SPMPackages);}catch{fail('invalid_input','visionOS Swift package declaration is invalid');}
+      try{declared.spmPackages=swiftPackages.parse(value.SPMPackages);}catch{fail('invalid_input',platform+' Swift package declaration is invalid');}
     }
     return declared;
   }
   function collect(dir, owner, cfg, resources, core=false, metadata=new Set()) {
-    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
+    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'tvos', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
     if(dir!==root && ['cli','bundler','bundlerConfigPath'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
     if(cfg.ios?.SPMPackages!==undefined){
@@ -230,7 +230,8 @@ async function resolve({ projectDir }) {
   serializable(cfg);
   if (cfg.buildPath !== undefined && (typeof cfg.buildPath !== 'string' || !cfg.buildPath)) fail('invalid_input', 'Config buildPath must be a nonempty string');
   const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, 'app'), appResourcesPath: directory(root, cfg.appResourcesPath, 'App_Resources'), android: cfg.android ?? {} };
-  if(cfg.visionos!==undefined)normalized.visionOS=visionOS(cfg.visionos);
+  if(cfg.visionos!==undefined)normalized.visionOS=inactiveApple(cfg.visionos,'visionOS');
+  if(cfg.tvos!==undefined)normalized.tvOS=inactiveApple(cfg.tvos,'tvOS');
   if(cfg.cli!==undefined){
     keys(cfg.cli,['packageManager'],'CLI config');
     if(cfg.cli.packageManager!==undefined){
@@ -268,7 +269,8 @@ async function resolve({ projectDir }) {
         for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== 'string') fail('invalid_input','Native platform versions must be strings');
       }
       const pluginConfig = await config(dir, false);
-      if(pluginConfig.visionos!==undefined)item.visionOS=visionOS(pluginConfig.visionos);
+      if(pluginConfig.visionos!==undefined)item.visionOS=inactiveApple(pluginConfig.visionos,'visionOS');
+      if(pluginConfig.tvos!==undefined)item.tvOS=inactiveApple(pluginConfig.tvos,'tvOS');
       for (const key of ['id', 'appPath', 'appResourcesPath']) if (pluginConfig[key] !== undefined) fail('unavailable', 'App-only fields in plugin config are unsupported; move them to the application config');
       let metadata;
       try{metadata=masonMetadata(pkg,dir,read);}catch{fail('invalid_input','Packaged Mason provenance must match its artifact inventory');}

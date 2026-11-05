@@ -126,6 +126,21 @@ func visionOSDeclaration(value *project.VisionOSConfig) *VisionOSConfig {
 	}
 	return result
 }
+
+func tvOSDeclaration(value *project.TVOSConfig) *TVOSConfig {
+	if value == nil {
+		return nil
+	}
+	result := &TVOSConfig{}
+	if value.DiscardUncaughtJSExceptions != nil {
+		copy := *value.DiscardUncaughtJSExceptions
+		result.DiscardUncaughtJSExceptions = &copy
+	}
+	for _, p := range value.SPMPackages {
+		result.SPMPackages = append(result.SPMPackages, SwiftPackage{Name: p.Name, Path: p.Path, RepositoryURL: p.RepositoryURL, Version: p.Version, Products: append([]string(nil), p.Products...)})
+	}
+	return result
+}
 func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error) {
 	if err := ctx.Err(); err != nil {
 		return Project{}, operationError("resolve", err)
@@ -138,9 +153,9 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 		return Project{}, operationError("resolve", err)
 	}
 	result := Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID,
-		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android), VisionOS: visionOSDeclaration(p.Config.VisionOS)}}
+		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android), VisionOS: visionOSDeclaration(p.Config.VisionOS), TVOS: tvOSDeclaration(p.Config.TVOS)}}
 	for _, v := range p.Packages {
-		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS)})
+		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS), TVOS: tvOSDeclaration(v.TVOS)})
 	}
 	for _, v := range p.Dependencies {
 		result.Dependencies = append(result.Dependencies, InstalledDependency(v))

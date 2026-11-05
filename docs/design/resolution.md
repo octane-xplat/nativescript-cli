@@ -37,7 +37,7 @@ upstream CLI is invoked.
 
 The supported config fields are `id`, `appPath`, `appResourcesPath`, `buildPath`,
 app `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
-`bundler`/`bundlerConfigPath`, declaration-only `visionos`, and
+`bundler`/`bundlerConfigPath`, declaration-only `visionos`/`tvos`, and
 `android.v8Flags`/`android.markingMode`. The application identifier must be a
 dotted identifier. Paths become canonical absolute existing directories, defaulting
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
@@ -56,9 +56,14 @@ for one physical manifest merge requested products; conflicting products across
 different selected roots or local/remote name collisions reject. This selects
 inputs and does not establish ABI equivalence between same-name packages.
 
-Inactive `visionos` local declarations retain path metadata without resolving
+Inactive `visionos`/`tvos` local declarations retain path metadata without resolving
 the path or applying it to iOS. Active local package roots are watched recursively
 for membership/content changes; `.build` and `.swiftpm` remain tool caches.
+
+`ProjectConfig.TVOS` and each installed package's `TVOS` preserve the optional
+boolean exception setting and validated SPM declarations independently from
+`VisionOS`. Neither declaration enables another backend, changes active iOS
+products/versions or resolves inactive package paths.
 
 `cli.packageManager` records `bun`, `npm`, `pnpm` or `yarn` as public project
 metadata. It does not authorize installation: every operation still requires

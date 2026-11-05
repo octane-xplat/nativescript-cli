@@ -52,10 +52,18 @@ type ProjectConfig struct {
 	Android        AndroidRuntimeConfig
 	// VisionOS retains an inactive platform declaration, never applied to iOS.
 	VisionOS *VisionOSConfig
+	// TVOS retains an inactive platform declaration, never applied to iOS.
+	TVOS *TVOSConfig
 }
 
 // VisionOSConfig preserves declaration metadata. visionOS operations are unavailable.
 type VisionOSConfig struct {
+	DiscardUncaughtJSExceptions *bool
+	SPMPackages                 []SwiftPackage
+}
+
+// TVOSConfig preserves declaration metadata. tvOS operations are unavailable.
+type TVOSConfig struct {
 	DiscardUncaughtJSExceptions *bool
 	SPMPackages                 []SwiftPackage
 }
@@ -71,6 +79,7 @@ type InstalledPackage struct {
 	// WindowsRequirement retains metadata only; Windows execution is unavailable.
 	WindowsRequirement string
 	VisionOS           *VisionOSConfig
+	TVOS               *TVOSConfig
 	Android            AndroidRuntimeConfig
 	Name               string
 	Version            string

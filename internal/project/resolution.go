@@ -15,10 +15,17 @@ type Config struct {
 	PackageManager    string
 	Android           AndroidConfig
 	VisionOS          *VisionOSConfig
+	TVOS              *TVOSConfig
 }
 
 // VisionOSConfig is declaration metadata only; no visionOS backend is provided.
 type VisionOSConfig struct {
+	DiscardUncaughtJSExceptions *bool          `json:"discardUncaughtJsExceptions,omitempty"`
+	SPMPackages                 []SwiftPackage `json:"spmPackages,omitempty"`
+}
+
+// TVOSConfig is declaration metadata only; no tvOS backend is provided.
+type TVOSConfig struct {
 	DiscardUncaughtJSExceptions *bool          `json:"discardUncaughtJsExceptions,omitempty"`
 	SPMPackages                 []SwiftPackage `json:"spmPackages,omitempty"`
 }
@@ -31,6 +38,7 @@ type Package struct {
 	AndroidRequirement string
 	WindowsRequirement string
 	VisionOS           *VisionOSConfig
+	TVOS               *TVOSConfig
 	Android            AndroidConfig
 	Name               string
 	Version            string

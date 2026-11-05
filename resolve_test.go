@@ -421,6 +421,43 @@ func TestResolveInactiveVisionOSDeclaration(t *testing.T) {
 	}
 }
 
+func TestResolveInactiveTVOSDeclaration(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native-plugin":"1"}}`)
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"ios":"9.1"}}}`)
+	resolutionFile(t, root, "node_modules/native-plugin/nativescript.config.cjs", `module.exports={ios:{SPMPackages:[{name:'Library',repositoryURL:'https://example.com/library.git',version:'1.0.0',libs:['IOSLibrary']}]},tvos:{discardUncaughtJsExceptions:false,SPMPackages:[{name:'Library',repositoryURL:'https://example.com/library.git',version:'2.0.0',libs:['TVLibrary']}]}}`)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',tvos:{discardUncaughtJsExceptions:true,SPMPackages:[{name:'LocalTV',path:'missing-tvos-only',libs:['AppTVLibrary']}]}}`)
+	client, _ := ns.New(ns.Options{})
+	ctx := context.Background()
+	resolved, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Contributions) != 1 || resolved.Contributions[0].SPM.Version != "1.0.0" || !reflect.DeepEqual(resolved.Contributions[0].SPM.Products, []string{"IOSLibrary"}) {
+		t.Fatal("inactive tvOS changed active iOS inputs", resolved.Contributions)
+	}
+	app := resolved.Config.TVOS
+	if app == nil || app.DiscardUncaughtJSExceptions == nil || !*app.DiscardUncaughtJSExceptions || app.SPMPackages[0].Path != "missing-tvos-only" || resolved.Config.VisionOS != nil {
+		t.Fatal("app declaration lost or mixed with visionOS", resolved.Config)
+	}
+	found := false
+	for _, pkg := range resolved.Packages {
+		if pkg.Name == "native-plugin" {
+			found = pkg.TVOS != nil && pkg.TVOS.DiscardUncaughtJSExceptions != nil && !*pkg.TVOS.DiscardUncaughtJSExceptions && pkg.TVOS.SPMPackages[0].Version == "2.0.0" && reflect.DeepEqual(pkg.TVOS.SPMPackages[0].Products, []string{"TVLibrary"})
+		}
+	}
+	if !found {
+		t.Fatal("plugin tvOS declaration lost")
+	}
+	if _, err := client.Devices(ctx, ns.DeviceQuery{Platform: ns.Platform("tvos")}); !errors.Is(err, ns.ErrInvalidInput) {
+		t.Fatal("declaration metadata enabled a backend", err)
+	}
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',tvos:{discardUncaughtJsExceptions:'PRIVATE_MARKER'}}`)
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) || strings.Contains(err.Error(), "PRIVATE_MARKER") {
+		t.Fatal("invalid inactive declaration accepted or leaked", err)
+	}
+}
+
 func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	compiler := os.Getenv("NS_CONFIG_COMPILER_DIR")
 	if compiler == "" {
