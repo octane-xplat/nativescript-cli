@@ -92,6 +92,12 @@ source identities or native package directories inside those trees remain
 watched, including new members under an explicitly selected directory. Active
 iOS/Android additions and changes still require re-resolution.
 
+Each session's restart identity covers only its own platform. The other mobile
+platform's `App_Resources` subtree and native packages' `platforms/<other>` roots
+remain watched paths but are passed as `inactiveNativeRoots` and excluded from
+the compared sources. An iOS-only resource edit therefore rebuilds a concurrent
+iOS session without restarting an Android session from the same project.
+
 ## Project Vite configuration
 
 An app's selected `bundlerConfigPath` opts both normal Build and native
