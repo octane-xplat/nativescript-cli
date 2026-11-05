@@ -56,14 +56,20 @@ test('declared local SPM links requested library products and removes owned refe
  const manifest=path.join(dir,'Package.swift');
  fs.writeFileSync(manifest,'// swift-tools-version: 5.7\nimport PackageDescription\nlet package = Package(name: "Local", products: [.library(name: "Wanted", targets: ["Wanted"]), .library(name: "Unused", targets: ["Unused"]), .executable(name: "Tool", targets: ["Tool"])], targets: [.target(name: "Wanted"), .target(name: "Unused"), .executableTarget(name: "Tool")])');
  const c={platform:'ios',kind:'spm',packageDirectory:dir,path:manifest,spm:{name:'Local',path:'.',products:['Wanted']}};
- const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[c]};
- const q={directory:path.join(dir,'out'),resolved:r};await prepare(q);
+ const sourceSHA256=require('node:crypto').createHash('sha256').update(fs.readFileSync(manifest)).digest('hex');
+ const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[c],sources:[{path:manifest,digest:sourceSHA256}]};
+ const q={directory:path.join(dir,'out'),resolved:r};const prepared=await prepare(q);
+ assert.equal(prepared.localSwiftPackages.length,1);
+ const evaluation=prepared.localSwiftPackages[0];
+ assert.deepEqual({...evaluation,evaluation:undefined},{name:'Local',path:'.',products:['Wanted'],manifest,sourceSHA256,evaluation:undefined});
+ assert.deepEqual(evaluation.evaluation.products.map(product=>product.name),['Wanted','Unused','Tool']);
  const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');
  const first=fs.readFileSync(file,'utf8');assert.match(first,/productName = "Wanted"/);assert.doesNotMatch(first,/productName = "(?:Unused|Tool)"/);
  await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),first);
  c.spm.products=['Missing'];await assert.rejects(prepare(q),{code:'invalid_input'});assert.equal(fs.readFileSync(file,'utf8'),first);
  c.spm.products=['Tool'];await assert.rejects(prepare(q),{code:'unavailable'});assert.equal(fs.readFileSync(file,'utf8'),first);
- r.contributions=[];await prepare(q);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Wanted"/);
+ c.spm.products=['Wanted'];r.sources[0].digest='0'.repeat(64);await assert.rejects(prepare(q),{code:'invalid_input'});assert.equal(fs.readFileSync(file,'utf8'),first);
+ r.contributions=[];const removed=await prepare(q);assert.deepEqual(removed.localSwiftPackages,[]);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Wanted"/);
 });
 
 test('unqualified runtime versions fail before template materialization', async t=>{
@@ -74,6 +80,17 @@ test('unqualified runtime versions fail before template materialization', async 
   await assert.rejects(prepare({resolved:{applicationID:'org.example.test',packages:[{name:'@nativescript/ios',version,directory:path.resolve('internal/ios/prepare/testdata/runtime')}]},directory:path.join(dir,version)}),e=>e.code==='unavailable');
   assert.equal(fs.existsSync(path.join(dir,version)),false);
  }
+});
+
+test('declared Swift evaluation rejects a replaced symlink manifest',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 changing manifest '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const manifest=path.join(dir,'Package.swift');
+ const body='// same leased bytes through an unexpected symlink';
+ const replacement=path.join(dir,'replacement.swift');fs.writeFileSync(replacement,body);fs.symlinkSync(replacement,manifest);
+ const digest=require('node:crypto').createHash('sha256').update(body).digest('hex');
+ const resolved={directory:dir,applicationID:'org.example.changing',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],sources:[{path:manifest,digest}],contributions:[{platform:'ios',kind:'spm',path:manifest,spm:{name:'Changing',path:'.',products:['Changing']}}]};
+ await assert.rejects(prepare({resolved,directory:path.join(dir,'out')}),{code:'invalid_input'});
+ assert.equal(fs.readFileSync(manifest,'utf8'),body);
 });
 
 test('iOS XCFramework validation ignores unrelated platform slices and retains module maps',async t=>{

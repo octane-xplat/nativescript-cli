@@ -112,7 +112,7 @@ module.exports = async ({ resolved, directory }) => {
   }
   const embedID = put('PBXCopyFilesBuildPhase','embed',{buildActionMask:2147483647,dstPath:q(''),dstSubfolderSpec:10,name:q('Embed contributed frameworks'),files:[],runOnlyForDeploymentPostprocessing:0});
   target.buildPhases.push({value:embedID,comment:'P1'});
-  const headers=[], configs=[], pods=[], packages=[], modulemaps=[], remotePackages=[];
+  const headers=[], configs=[], pods=[], packages=[], modulemaps=[], remotePackages=[], localSwiftPackages=[];
   const unquote=value=>{try{return JSON.parse(value);}catch{return value;}};
   const productNames=new Set(values(objects.XCSwiftPackageProductDependency).map(([,p])=>unquote(p.productName)));
   let info = {CFBundleIdentifier:'$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleExecutable:'$(EXECUTABLE_NAME)', CFBundleName:name, CFBundlePackageType:'APPL', CFBundleVersion:'1', CFBundleShortVersionString:'1.0', LSRequiresIPhoneOS:true};
@@ -142,9 +142,13 @@ module.exports = async ({ resolved, directory }) => {
     }
     if (c.kind === 'pods') { pods.push(c.path); continue; }
     if (c.kind === 'spm') {
+      const sourceSHA256=c.spm?.path?resolved.sources?.find(source=>source.path===c.path)?.digest:undefined;
+      const manifestDigest=()=>{try{if(!fs.lstatSync(c.path).isFile())fail('invalid_input');return crypto.createHash('sha256').update(fs.readFileSync(c.path)).digest('hex');}catch{fail('invalid_input');}};
+      if(c.spm?.path&&(!/^[a-f0-9]{64}$/.test(sourceSHA256??'')||manifestDigest()!==sourceSHA256))fail('invalid_input');
       let manifest;
       try { manifest=JSON.parse(execFileSync('swift',['package','--package-path',path.dirname(c.path),'dump-package'],{encoding:'utf8',maxBuffer:4<<20,stdio:['ignore','pipe','pipe']})); }
       catch { fail('unavailable'); }
+      if(c.spm?.path&&manifestDigest()!==sourceSHA256)fail('invalid_input');
       const ref=put('XCLocalSwiftPackageReference',c.path,{relativePath:q(path.dirname(c.path))});
       (root.packageReferences ||= []).push({value:ref,comment:'P1'});
       let selectedProducts=manifest.products || [];
@@ -161,6 +165,7 @@ module.exports = async ({ resolved, directory }) => {
         const build=put('PBXBuildFile',`spm:${c.path}:${product.name}`,{productRef:dependency});
         phases.Frameworks.files.push({value:build,comment:'P1'});
       }
+      if(c.spm?.path)localSwiftPackages.push({name:c.spm.name,path:c.spm.path,products:[...c.spm.products],manifest:c.path,sourceSHA256,evaluation:manifest});
       packages.push(c.path); continue;
     }
     if (c.kind === 'configuration') {
@@ -210,5 +215,5 @@ module.exports = async ({ resolved, directory }) => {
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});
   const bundlePackage=path.join(directory,'app/package.json');
   if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.js'}));
-  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm,target:name};
+  return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm,target:name,localSwiftPackages};
 };

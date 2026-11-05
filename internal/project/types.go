@@ -1,6 +1,8 @@
 // Package project owns private stage handoffs; it must never import the facade.
 package project
 
+import "encoding/json"
+
 type Target struct {
 	Platform        string
 	DestinationKind string
@@ -48,9 +50,22 @@ type ExtensionNativeInput struct {
 	SHA256   string `json:"sha256"`
 }
 type Prepared struct {
-	Identity  Identity
-	NativeDir string
-	BundleDir string
+	Identity           Identity
+	NativeDir          string
+	BundleDir          string
+	LocalSwiftPackages []LocalSwiftPackageEvaluation
+}
+
+// LocalSwiftPackageEvaluation retains the exact manifest evaluation used to
+// select linked products. It is private stage data, not a persisted OTA stamp.
+// SourceSHA256 binds it to resolution; consumers must also recheck leased files.
+type LocalSwiftPackageEvaluation struct {
+	Name         string          `json:"name"`
+	Path         string          `json:"path"`
+	Products     []string        `json:"products"`
+	Manifest     string          `json:"manifest"`
+	SourceSHA256 string          `json:"sourceSHA256"`
+	Evaluation   json.RawMessage `json:"evaluation"`
 }
 type Bundle struct {
 	Identity  Identity

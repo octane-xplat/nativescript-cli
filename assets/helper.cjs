@@ -17954,7 +17954,7 @@ var require_xcode2 = __commonJS({
       }
       const embedID = put("PBXCopyFilesBuildPhase", "embed", { buildActionMask: 2147483647, dstPath: q(""), dstSubfolderSpec: 10, name: q("Embed contributed frameworks"), files: [], runOnlyForDeploymentPostprocessing: 0 });
       target.buildPhases.push({ value: embedID, comment: "P1" });
-      const headers = [], configs = [], pods = [], packages = [], modulemaps = [], remotePackages = [];
+      const headers = [], configs = [], pods = [], packages = [], modulemaps = [], remotePackages = [], localSwiftPackages = [];
       const unquote = (value) => {
         try {
           return JSON.parse(value);
@@ -17993,12 +17993,23 @@ var require_xcode2 = __commonJS({
           continue;
         }
         if (c.kind === "spm") {
+          const sourceSHA256 = c.spm?.path ? resolved.sources?.find((source) => source.path === c.path)?.digest : void 0;
+          const manifestDigest = () => {
+            try {
+              if (!fs2.lstatSync(c.path).isFile()) fail("invalid_input");
+              return crypto.createHash("sha256").update(fs2.readFileSync(c.path)).digest("hex");
+            } catch {
+              fail("invalid_input");
+            }
+          };
+          if (c.spm?.path && (!/^[a-f0-9]{64}$/.test(sourceSHA256 ?? "") || manifestDigest() !== sourceSHA256)) fail("invalid_input");
           let manifest;
           try {
             manifest = JSON.parse(execFileSync("swift", ["package", "--package-path", path2.dirname(c.path), "dump-package"], { encoding: "utf8", maxBuffer: 4 << 20, stdio: ["ignore", "pipe", "pipe"] }));
           } catch {
             fail("unavailable");
           }
+          if (c.spm?.path && manifestDigest() !== sourceSHA256) fail("invalid_input");
           const ref2 = put("XCLocalSwiftPackageReference", c.path, { relativePath: q(path2.dirname(c.path)) });
           (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
           let selectedProducts = manifest.products || [];
@@ -18016,6 +18027,7 @@ var require_xcode2 = __commonJS({
             const build = put("PBXBuildFile", `spm:${c.path}:${product.name}`, { productRef: dependency });
             phases.Frameworks.files.push({ value: build, comment: "P1" });
           }
+          if (c.spm?.path) localSwiftPackages.push({ name: c.spm.name, path: c.spm.path, products: [...c.spm.products], manifest: c.path, sourceSHA256, evaluation: manifest });
           packages.push(c.path);
           continue;
         }
@@ -18092,7 +18104,7 @@ target '${name}' do
       fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
       const bundlePackage = path2.join(directory, "app/package.json");
       if (!fs2.existsSync(bundlePackage)) write(bundlePackage, JSON.stringify({ main: "bundle.js" }));
-      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm, target: name };
+      return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm, target: name, localSwiftPackages };
     };
   }
 });

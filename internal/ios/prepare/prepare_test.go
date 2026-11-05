@@ -2,16 +2,21 @@ package prepare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
+	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
@@ -107,5 +112,72 @@ func TestInstalledRuntimeControlsPackageMinimum(t *testing.T) {
 		if (e == nil) != tc.supported {
 			t.Fatalf("%+v: %v", tc, e)
 		}
+	}
+}
+
+func TestLocalSwiftEvaluationSurvivesRealHelperPreparation(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("actual Swift manifest evaluation requires Darwin qualification")
+	}
+	root := t.TempDir()
+	app, local := filepath.Join(root, "app"), filepath.Join(root, "Local")
+	for _, dir := range []string{app, filepath.Join(local, "Sources")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := filepath.Join(local, "Package.swift")
+	body := []byte("// swift-tools-version: 5.7\nimport PackageDescription\nlet package = Package(name: \"Evaluated\", products: [.library(name: \"Selected\", targets: [\"Selected\"])], targets: [.target(name: \"Selected\", path: \"Sources\")])\n")
+	if err := os.WriteFile(manifest, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "Sources/Value.swift"), []byte("public let value = 111\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(body)
+	digest := hex.EncodeToString(hash[:])
+	pkg, _ := filepath.Abs("testdata/runtime")
+	assets, _ := filepath.Abs("../../../assets")
+	r := project.Resolved{Directory: app, Revision: "evaluation-fixture", ApplicationID: "org.example.evaluation", Packages: []project.Package{{Name: "@nativescript/ios", Version: "8.9.0", Directory: pkg}}, Contributions: []project.Contribution{{Platform: "ios", Kind: "spm", Path: manifest, SPM: &project.SwiftPackage{Name: "Declared", Path: "../Local", Products: []string{"Selected"}}}}, Sources: []project.Source{{Path: manifest, Digest: digest}}}
+	layout, err := workspace.NewLayout(filepath.Join(root, "state"), project.Identity{Schema: 1, ProjectDir: app, Revision: r.Revision, Target: project.Target{Platform: "ios", DestinationKind: "simulator", Architecture: "arm64", Configuration: "debug"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Directory = layout.Identity.ProjectDir
+	lease, err := workspace.Acquire(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	tools := &tool{started: make(chan process.Command, 1)}
+	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(assets)}, CacheDir: filepath.Join(root, "helper")}, Executor: tools}
+	prepared, err := a.Prepare(context.Background(), r, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.LocalSwiftPackages) != 1 {
+		t.Fatal("missing evaluated manifest")
+	}
+	e := prepared.LocalSwiftPackages[0]
+	var evaluated struct {
+		Name     string `json:"name"`
+		Products []struct {
+			Name string `json:"name"`
+		} `json:"products"`
+	}
+	if err := json.Unmarshal(e.Evaluation, &evaluated); err != nil || evaluated.Name != "Evaluated" || len(evaluated.Products) != 1 || evaluated.Products[0].Name != "Selected" || e.Name != "Declared" || e.Manifest != manifest || e.SourceSHA256 != digest {
+		t.Fatalf("evaluation lost or substituted: %v", err)
+	}
+	if command := <-tools.started; command.Executable != "xcodebuild" {
+		t.Fatal("dependency resolution adapter not exercised")
+	}
+	// The manifest evaluator is real; dependency resolution above is a fixture.
+	// A stale source identity must prevent a new prepared handoff and tool start.
+	r.Sources[0].Digest = strings.Repeat("0", 64)
+	if _, err = a.Prepare(context.Background(), r, lease); !errors.Is(err, workflow.ErrInvalid) {
+		t.Fatalf("stale manifest accepted: %v", err)
+	}
+	if len(tools.started) != 0 {
+		t.Fatal("dependency tool started after stale input rejection")
 	}
 }

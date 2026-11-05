@@ -18,6 +18,15 @@ read-only. It does not invoke Swift, resolve dependencies or create snapshots.
   `dump-package` JSON. The supplying preparation operation owns evaluation and
   must bind it to the same source lease, toolchain and execution context.
 
+iOS preparation now retains this producer fact in the private
+`Prepared.LocalSwiftPackages` handoff. Each entry carries the declared name/path,
+selected products, real manifest path, source SHA-256 and unmodified evaluated
+JSON. The helper checks the manifest hash before and after Swift evaluation; Go
+checks the receipt against the selected contributions and resolved identities
+before dependency tools start. It is not persisted as an OTA stamp or exposed in
+the public prepared-project API. OTA still needs source snapshot integration and
+freshness checks; this handoff alone does not lift the guard.
+
 The result is `{id, contents, sha256, inputs}`. `contents` is stable JSON with
 format `xplat-ns/local-spm/v1`, selected package names, sorted products, evaluated
 manifest hashes and sorted package-relative file hashes. Package-local absolute

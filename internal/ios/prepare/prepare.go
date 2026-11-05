@@ -59,6 +59,7 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 	var result struct {
 		Directory, ProjectFile, Target string
 		Pods, SPM                      bool
+		LocalSwiftPackages             []project.LocalSwiftPackageEvaluation
 	}
 	err := owner.RunHelper(ctx, func(ctx context.Context) error {
 		f, err := h.Call(ctx, jsbridge.Request{Version: jsbridge.ProtocolVersion, ID: "prepare-ios", Feature: "xcode", Operation: "prepare", Payload: payload}, nil)
@@ -76,6 +77,9 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 		}
 		if json.Unmarshal(f.Payload, &result) != nil || result.Directory != dir || result.ProjectFile != filepath.Join(dir, "NativeScriptApp.xcodeproj", "project.pbxproj") || result.Target != "NativeScriptApp" {
 			return workflow.ErrHandoff
+		}
+		if err := validateLocalSwiftPackages(r, result.LocalSwiftPackages); err != nil {
+			return err
 		}
 		// Tools retain the same lease; never return while they or descendants write.
 		executor := a.Executor
@@ -120,7 +124,7 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 	if err != nil {
 		return project.Prepared{}, err
 	}
-	return project.Prepared{Identity: l.Identity, NativeDir: dir, BundleDir: filepath.Join(dir, "app")}, nil
+	return project.Prepared{Identity: l.Identity, NativeDir: dir, BundleDir: filepath.Join(dir, "app"), LocalSwiftPackages: result.LocalSwiftPackages}, nil
 }
 
 // Validate checks lazy prerequisites before the coordinator creates output state.
