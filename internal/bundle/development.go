@@ -49,50 +49,39 @@ func nativeEntry(r project.Resolved) (string, error) {
 	return entry, nil
 }
 
-func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, target project.Target, settings Request) (*Development, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !filepath.IsAbs(r.Directory) || !filepath.IsAbs(r.Config.AppPath) || !filepath.IsAbs(r.Config.AppResourcesPath) || r.Revision == "" ||
-		(target.Platform != "ios" && target.Platform != "android") || target.Configuration != "debug" ||
-		settings.Port < 0 || settings.Port > 65535 || settings.CallerEndpoint != nil || settings.HMRPort != 0 {
-		return nil, workflow.ErrInvalid
-	}
-	for _, c := range settings.HMRHost {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
-			return nil, workflow.ErrInvalid
-		}
-	}
+// developmentRequest assembles the dev-session request. The caller owns the
+// returned session root and removes it with the session.
+func developmentRequest(r project.Resolved, target project.Target, settings Request) (Request, string, error) {
 	port := settings.Port
 	if port == 0 {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			return nil, err
+			return Request{}, "", err
 		}
 		port = listener.Addr().(*net.TCPAddr).Port
 		if err := listener.Close(); err != nil {
-			return nil, err
+			return Request{}, "", err
 		}
 	}
 	canonical, err := filepath.EvalSymlinks(r.Directory)
 	if err != nil {
-		return nil, err
+		return Request{}, "", err
 	}
 	entry, err := nativeEntry(r)
 	if err != nil {
-		return nil, err
+		return Request{}, "", err
 	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
-		return nil, err
+		return Request{}, "", err
 	}
 	cache = filepath.Join(cache, "octane-xplat", "nativescript-cli", "development")
 	if err := os.MkdirAll(cache, 0700); err != nil {
-		return nil, err
+		return Request{}, "", err
 	}
 	root, err := os.MkdirTemp(cache, "session-")
 	if err != nil {
-		return nil, err
+		return Request{}, "", err
 	}
 	q := Request{ProjectDir: canonical, AppPath: r.Config.AppPath, Entry: entry, Platform: target.Platform,
 		BundlerConfigPath: r.Config.BundlerConfigPath,
@@ -102,11 +91,36 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 	if target.Platform == "ios" {
 		q.NativeSourceGroups = append([]project.NativeSourceGroup(nil), r.NativeSourceGroups...)
 	}
-	q.NativeSources = append([]project.Source(nil), r.Sources...)
+	// This session's platform owns its own resource tree; the other platform's
+	// App_Resources subtree and plugin platform roots stay watchable inputs but
+	// are filtered out of the restart identity so their edits cannot restart it.
+	other := "ios"
+	if target.Platform == "ios" {
+		other = "android"
+	}
+	inactive := []string{filepath.Join(r.Config.AppResourcesPath, map[string]string{"ios": "iOS", "android": "Android"}[other])}
+	for _, pkg := range r.Packages {
+		if pkg.Native {
+			inactive = append(inactive, filepath.Join(pkg.Directory, "platforms", other))
+		}
+	}
+	q.InactiveNativeRoots = inactive
+	inactivePath := func(file string) bool {
+		for _, root := range inactive {
+			if rel, err := filepath.Rel(root, file); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, name := range []string{"package.json", "nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"} {
 		q.NativeInputs = append(q.NativeInputs, filepath.Join(canonical, name))
 	}
 	for _, source := range r.Sources {
+		if inactivePath(source.Path) {
+			continue
+		}
+		q.NativeSources = append(q.NativeSources, source)
 		q.NativeInputs = append(q.NativeInputs, source.Path)
 	}
 	for _, contribution := range r.Contributions {
@@ -123,9 +137,30 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 		config, err := project.AndroidSettings(r)
 		if err != nil {
 			os.RemoveAll(root)
-			return nil, workflow.ErrInvalid
+			return Request{}, "", workflow.ErrInvalid
 		}
 		q.Android = &config
+	}
+	return q, root, nil
+}
+
+func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, target project.Target, settings Request) (*Development, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(r.Directory) || !filepath.IsAbs(r.Config.AppPath) || !filepath.IsAbs(r.Config.AppResourcesPath) || r.Revision == "" ||
+		(target.Platform != "ios" && target.Platform != "android") || target.Configuration != "debug" ||
+		settings.Port < 0 || settings.Port > 65535 || settings.CallerEndpoint != nil || settings.HMRPort != 0 {
+		return nil, workflow.ErrInvalid
+	}
+	for _, c := range settings.HMRHost {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+			return nil, workflow.ErrInvalid
+		}
+	}
+	q, root, err := developmentRequest(r, target, settings)
+	if err != nil {
+		return nil, err
 	}
 	ready := make(chan Event, 1)
 	session := workflow.StartSession(ctx, func(ctx context.Context) error {
@@ -156,7 +191,7 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 	go func() { done <- session.Wait() }()
 	select {
 	case event := <-ready:
-		return &Development{Session: session, Ready: event, revision: r.Revision, project: canonical, target: target}, nil
+		return &Development{Session: session, Ready: event, revision: r.Revision, project: q.ProjectDir, target: target}, nil
 	case err := <-done:
 		if err == nil {
 			err = workflow.ErrHandoff

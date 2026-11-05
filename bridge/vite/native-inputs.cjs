@@ -5,8 +5,12 @@ const crypto = require('node:crypto');
 
 // Compare notifications with R1's actual input identity. Filesystem events can
 // describe attribute changes or tool cache writes, not changed native sources.
-module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
+module.exports = function nativeInputs(inputs, sources, groups=[], projectDir, inactiveRoots=[]) {
   const baseline = new Map(sources.map(source => [source.Path,source.Digest]));
+  const inside = (root,file) => file===root || file.startsWith(root+path.sep);
+  // The other platform's resource and plugin trees are watched inputs but never
+  // restart identity: an inactive file is ignored in or out of the baseline.
+  const inactive = file => inactiveRoots.some(root => inside(root,file));
   const packageRoots = sources.filter(source => path.basename(source.Path)==='Package.swift' || source.Path.endsWith('.podspec')).map(source => path.dirname(source.Path));
   const platformRoots = inputs.filter(input => path.basename(input)==='platforms');
   const gradleCaches = platformRoots.map(input => path.join(input,'android','.gradle'));
@@ -24,10 +28,10 @@ module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
     if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))return false;
     try{return fs.lstatSync(cache).isDirectory();}catch(error){if(error.code==='ENOENT')return true;throw error;}
   });
-  const ignored = file => !baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some(root => {
+  const ignored = file => inactive(file) || (!baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some(root => {
     const relative = path.relative(root,file);
     return relative !== '..' && !relative.startsWith('..'+path.sep) && relative.split(path.sep).some(part => ['.build','.swiftpm'].includes(part));
-  }));
+  })));
   const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const configuredFiles=new Set(groups.flatMap(group=>group.files));
   function configuredChanged(file){
@@ -54,7 +58,7 @@ module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
     const roots = file ? [file] : inputs;
     const current = new Map();
     for(const root of roots) snapshot(root,current);
-    const expected = new Map([...baseline].filter(([source]) => roots.some(root => source===root || source.startsWith(root+path.sep))));
+    const expected = new Map([...baseline].filter(([source]) => !inactive(source) && roots.some(root => source===root || source.startsWith(root+path.sep))));
     return current.size!==expected.size || [...current].some(([source,hash]) => expected.get(source)!==hash);
   };
 };

@@ -18337,8 +18337,10 @@ var require_native_inputs = __commonJS({
     var fs2 = require("node:fs");
     var path2 = require("node:path");
     var crypto = require("node:crypto");
-    module2.exports = function nativeInputs(inputs, sources, groups = [], projectDir) {
+    module2.exports = function nativeInputs(inputs, sources, groups = [], projectDir, inactiveRoots = []) {
       const baseline = new Map(sources.map((source) => [source.Path, source.Digest]));
+      const inside = (root, file) => file === root || file.startsWith(root + path2.sep);
+      const inactive = (file) => inactiveRoots.some((root) => inside(root, file));
       const packageRoots = sources.filter((source) => path2.basename(source.Path) === "Package.swift" || source.Path.endsWith(".podspec")).map((source) => path2.dirname(source.Path));
       const platformRoots = inputs.filter((input) => path2.basename(input) === "platforms");
       const gradleCaches = platformRoots.map((input) => path2.join(input, "android", ".gradle"));
@@ -18359,7 +18361,7 @@ var require_native_inputs = __commonJS({
           throw error;
         }
       });
-      const ignored = (file) => !baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some((root) => {
+      const ignored = (file) => inactive(file) || !baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some((root) => {
         const relative = path2.relative(root, file);
         return relative !== ".." && !relative.startsWith(".." + path2.sep) && relative.split(path2.sep).some((part) => [".build", ".swiftpm"].includes(part));
       }));
@@ -18395,7 +18397,7 @@ var require_native_inputs = __commonJS({
         const roots = file ? [file] : inputs;
         const current = /* @__PURE__ */ new Map();
         for (const root of roots) snapshot(root, current);
-        const expected = new Map([...baseline].filter(([source]) => roots.some((root) => source === root || source.startsWith(root + path2.sep))));
+        const expected = new Map([...baseline].filter(([source]) => !inactive(source) && roots.some((root) => source === root || source.startsWith(root + path2.sep))));
         return current.size !== expected.size || [...current].some(([source, hash]) => expected.get(source) !== hash);
       };
     };
@@ -18870,11 +18872,11 @@ var require_native = __commonJS({
     var fail = (code) => Object.assign(new Error(), { code });
     module2.exports = async function native(p, emit) {
       const development = p.mode === "native";
-      if (!["native", "native-bundle"].includes(p.mode) || !["ios", "android"].includes(p.platform) || !["debug", "release"].includes(p.configuration) || development && p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || development && (!Number.isInteger(p.port) || p.port < 1 || p.port > 65535) || !Array.isArray(p.nativeInputs ?? []) || !(p.nativeInputs ?? []).every(path2.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail("invalid_input");
+      if (!["native", "native-bundle"].includes(p.mode) || !["ios", "android"].includes(p.platform) || !["debug", "release"].includes(p.configuration) || development && p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || development && (!Number.isInteger(p.port) || p.port < 1 || p.port > 65535) || !Array.isArray(p.nativeInputs ?? []) || !(p.nativeInputs ?? []).every(path2.isAbsolute) || !Array.isArray(p.nativeSources) || !Array.isArray(p.inactiveNativeRoots ?? []) || !(p.inactiveNativeRoots ?? []).every(path2.isAbsolute)) throw fail("invalid_input");
       const req = createRequire2(path2.join(p.projectDir, "package.json"));
       const sourceGroups = p.nativeSourceGroups ?? [];
       if (!Array.isArray(sourceGroups) || !sourceGroups.every((g) => g && typeof g.name === "string" && path2.isAbsolute(g.path || "") && path2.isAbsolute(g.root || "") && Array.isArray(g.files) && g.files.every(path2.isAbsolute))) throw fail("invalid_input");
-      const nativeChanged = require_native_inputs()(p.nativeInputs ?? [], p.nativeSources, sourceGroups, p.projectDir);
+      const nativeChanged = require_native_inputs()(p.nativeInputs ?? [], p.nativeSources, sourceGroups, p.projectDir, p.inactiveNativeRoots ?? []);
       if (sourceGroups.length) {
         try {
           if (nativeChanged()) throw fail("restart_required");

@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +155,93 @@ func TestInstalledNativeDevelopmentServer(t *testing.T) {
 	defer listener.Close()
 	if _, err := a.StartDevelopment(ctx, r, target, Request{Port: listener.Addr().(*net.TCPAddr).Port}); !errors.Is(err, workspace.ErrBusy) {
 		t.Fatalf("strict native port: %v", err)
+	}
+}
+
+// An other-platform native edit must never restart this session: the outgoing
+// request declares the inactive roots and drops their source identities while
+// keeping every watchable input and all active/root-level files.
+func TestDevelopmentRequestScopesNativeIdentityToTargetPlatform(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "package.json"), `{"name":"scoped-fixture","version":"1.0.0","main":"app/app.ts"}`)
+	write(t, filepath.Join(dir, "nativescript.config.ts"), `export default {id:'org.example.scoped',appPath:'app',appResourcesPath:'App_Resources'};`)
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "app/app.ts"), "export {};\n")
+	pkg := t.TempDir()
+	source := func(parts ...string) project.Source {
+		return project.Source{Path: filepath.Join(parts...), Digest: "sha256:identity"}
+	}
+	r := project.Resolved{
+		Directory:     dir,
+		Revision:      "revision",
+		ApplicationID: "org.example.scoped",
+		Config:        project.Config{AppPath: filepath.Join(dir, "app"), AppResourcesPath: filepath.Join(dir, "App_Resources")},
+		Packages: []project.Package{
+			{Name: "plugin", Directory: pkg, Native: true},
+			{Name: "plain", Directory: filepath.Join(pkg, "plain")},
+		},
+		Sources: []project.Source{
+			source(dir, "App_Resources", "iOS", "qualification.json"),
+			source(dir, "App_Resources", "Android", "qualification.xml"),
+			source(dir, "App_Resources", "shared.txt"),
+			source(pkg, "platforms", "ios", "Bridge.swift"),
+			source(pkg, "platforms", "android", "Binding.java"),
+		},
+	}
+	dirName := map[string]string{"ios": "iOS", "android": "Android"}
+	for _, platform := range []string{"ios", "android"} {
+		t.Run(platform, func(t *testing.T) {
+			other := map[string]string{"ios": "android", "android": "ios"}[platform]
+			q, sessionRoot, err := developmentRequest(r, project.Target{Platform: platform, Configuration: "debug"}, Request{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(sessionRoot)
+			inactive := []string{filepath.Join(dir, "App_Resources", dirName[other]), filepath.Join(pkg, "platforms", other)}
+			if !reflect.DeepEqual(q.InactiveNativeRoots, inactive) {
+				t.Fatalf("inactive roots: %v", q.InactiveNativeRoots)
+			}
+			inside := func(file string, roots ...string) bool {
+				for _, root := range roots {
+					if rel, err := filepath.Rel(root, file); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+						return true
+					}
+				}
+				return false
+			}
+			for _, source := range q.NativeSources {
+				if inside(source.Path, inactive...) {
+					t.Fatalf("inactive source retained: %s", source.Path)
+				}
+			}
+			for _, active := range []string{filepath.Join(dir, "App_Resources", dirName[platform], "qualification."+map[string]string{"ios": "json", "android": "xml"}[platform]),
+				filepath.Join(dir, "App_Resources", "shared.txt"), filepath.Join(pkg, "platforms", platform, map[string]string{"ios": "Bridge.swift", "android": "Binding.java"}[platform])} {
+				found := false
+				for _, source := range q.NativeSources {
+					found = found || source.Path == active
+				}
+				if !found {
+					t.Fatalf("active source missing: %s", active)
+				}
+			}
+			for _, input := range q.NativeInputs {
+				if inside(input, inactive...) {
+					t.Fatalf("inactive input retained: %s", input)
+				}
+			}
+			for _, kept := range []string{r.Config.AppResourcesPath, filepath.Join(dir, "package.json"), filepath.Join(dir, "nativescript.config.ts"), filepath.Join(pkg, "platforms")} {
+				if !slices.Contains(q.NativeInputs, kept) {
+					t.Fatalf("watchable input missing: %s", kept)
+				}
+			}
+			if slices.Contains(q.NativeInputs, filepath.Join(pkg, "plain", "platforms")) {
+				t.Fatal("non-native package platform tree watched")
+			}
+		})
 	}
 }

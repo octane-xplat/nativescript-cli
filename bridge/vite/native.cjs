@@ -12,11 +12,12 @@ module.exports = async function native(p, emit) {
   if (!['native','native-bundle'].includes(p.mode) || !['ios','android'].includes(p.platform) || !['debug','release'].includes(p.configuration) || development && p.configuration!=='debug' ||
       ![p.projectDir,p.appPath,p.directory,p.cacheDirectory,p.entry].every(path.isAbsolute) ||
       development && (!Number.isInteger(p.port) || p.port < 1 || p.port > 65535) ||
-      !Array.isArray(p.nativeInputs??[]) || !(p.nativeInputs??[]).every(path.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail('invalid_input');
+      !Array.isArray(p.nativeInputs??[]) || !(p.nativeInputs??[]).every(path.isAbsolute) || !Array.isArray(p.nativeSources) ||
+      !Array.isArray(p.inactiveNativeRoots??[]) || !(p.inactiveNativeRoots??[]).every(path.isAbsolute)) throw fail('invalid_input');
   const req = createRequire(path.join(p.projectDir,'package.json'));
   const sourceGroups=p.nativeSourceGroups??[];
   if(!Array.isArray(sourceGroups)||!sourceGroups.every(g=>g&&typeof g.name==='string'&&path.isAbsolute(g.path||'')&&path.isAbsolute(g.root||'')&&Array.isArray(g.files)&&g.files.every(path.isAbsolute)))throw fail('invalid_input');
-  const nativeChanged = require('./native-inputs.cjs')(p.nativeInputs??[],p.nativeSources,sourceGroups,p.projectDir);
+  const nativeChanged = require('./native-inputs.cjs')(p.nativeInputs??[],p.nativeSources,sourceGroups,p.projectDir,p.inactiveNativeRoots??[]);
   if(sourceGroups.length){try{if(nativeChanged())throw fail('restart_required');}catch{throw fail('restart_required');}}
   const pkg = JSON.parse(fs.readFileSync(path.join(p.projectDir,'package.json'),'utf8'));
   // The installed engine derives its entry from the root package. Refuse a

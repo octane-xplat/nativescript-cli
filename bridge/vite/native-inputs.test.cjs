@@ -87,6 +87,31 @@ test('automatic platform snapshots match resolver ios/android ownership without 
  fs.writeFileSync(source,'class Changed {}');assert.equal(changed(source),true);fs.rmSync(source);assert.equal(changed(platforms),true);
 });
 
+test('declared inactive roots never restart the session, in or out of baseline',t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'inactive-roots-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const resources=path.join(root,'App_Resources'),iosRes=path.join(resources,'iOS'),androidRes=path.join(resources,'Android');
+  const pkg=path.join(root,'node_modules','plugin'),iosPlat=path.join(pkg,'platforms','ios'),androidPlat=path.join(pkg,'platforms','android');
+  const shared=path.join(resources,'shared.txt'),iosFile=path.join(iosRes,'qualification.json'),androidFile=path.join(androidRes,'qualification.xml');
+  const iosSource=path.join(iosPlat,'Bridge.swift'),androidSource=path.join(androidPlat,'Binding.java');
+  for(const dir of [iosRes,androidRes,iosPlat,androidPlat])fs.mkdirSync(dir,{recursive:true});
+  for(const file of [shared,iosFile,androidFile,iosSource,androidSource])fs.writeFileSync(file,'identity');
+  const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const baseline=[shared,iosFile,iosSource].map(Path=>({Path,Digest:hash(Path)}));
+  const inputs=[resources,path.join(pkg,'platforms'),shared,iosFile,iosSource];
+  const inactiveRoots=[androidRes,androidPlat];
+  const changed=nativeInputs(inputs,baseline,[],root,inactiveRoots);
+  fs.writeFileSync(androidFile,'edited');assert.equal(changed(androidFile),false);
+  const androidAdded=path.join(androidRes,'added.xml');fs.writeFileSync(androidAdded,'new');assert.equal(changed(androidAdded),false);
+  fs.writeFileSync(androidSource,'edited');assert.equal(changed(androidSource),false);
+  const pluginAdded=path.join(androidPlat,'Added.java');fs.writeFileSync(pluginAdded,'new');assert.equal(changed(pluginAdded),false);
+  // The full scan ignores inactive churn too, even when it is in the baseline.
+  assert.equal(changed(),false);
+  const baselineWithInactive=[...baseline,{Path:androidFile,Digest:hash(androidFile)}];
+  assert.equal(nativeInputs(inputs,baselineWithInactive,[],root,inactiveRoots)(),false);
+  fs.writeFileSync(iosFile,'edited');assert.equal(changed(iosFile),true);fs.writeFileSync(iosFile,'identity');
+  fs.writeFileSync(iosSource,'edited');assert.equal(changed(iosSource),true);fs.writeFileSync(iosSource,'identity');
+});
+
 test('explicit inputs inside inactive platform trees keep content and membership ownership',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'explicit-platform-inputs-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const platforms=path.join(root,'platforms'),selected=path.join(platforms,'macos','Selected'),source=path.join(selected,'Bridge.swift');

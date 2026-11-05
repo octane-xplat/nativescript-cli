@@ -35,24 +35,25 @@ type Event struct {
 	Endpoint Endpoint `json:"endpoint"`
 }
 type Request struct {
-	BundlerConfigPath  string                      `json:"bundlerConfigPath,omitempty"`
-	CacheDirectory     string                      `json:"cacheDirectory,omitempty"`
-	NativeInputs       []string                    `json:"nativeInputs,omitempty"`
-	NativeSources      []project.Source            `json:"nativeSources,omitempty"`
-	NativeSourceGroups []project.NativeSourceGroup `json:"nativeSourceGroups,omitempty"`
-	Platform           string                      `json:"platform,omitempty"`
-	AppPath            string                      `json:"appPath,omitempty"`
-	Configuration      string                      `json:"configuration,omitempty"`
-	Android            *project.AndroidConfig      `json:"android,omitempty"`
-	ApplicationID      string                      `json:"applicationID,omitempty"`
-	ProjectDir         string                      `json:"projectDir"`
-	Directory          string                      `json:"directory"`
-	Entry              string                      `json:"entry"`
-	Mode               string                      `json:"mode"`
-	Port               int                         `json:"port"`
-	HMRHost            string                      `json:"hmrHost"`
-	HMRPort            int                         `json:"hmrPort"`
-	CallerEndpoint     *Endpoint                   `json:"callerEndpoint,omitempty"`
+	BundlerConfigPath   string                      `json:"bundlerConfigPath,omitempty"`
+	CacheDirectory      string                      `json:"cacheDirectory,omitempty"`
+	NativeInputs        []string                    `json:"nativeInputs,omitempty"`
+	InactiveNativeRoots []string                    `json:"inactiveNativeRoots,omitempty"`
+	NativeSources       []project.Source            `json:"nativeSources,omitempty"`
+	NativeSourceGroups  []project.NativeSourceGroup `json:"nativeSourceGroups,omitempty"`
+	Platform            string                      `json:"platform,omitempty"`
+	AppPath             string                      `json:"appPath,omitempty"`
+	Configuration       string                      `json:"configuration,omitempty"`
+	Android             *project.AndroidConfig      `json:"android,omitempty"`
+	ApplicationID       string                      `json:"applicationID,omitempty"`
+	ProjectDir          string                      `json:"projectDir"`
+	Directory           string                      `json:"directory"`
+	Entry               string                      `json:"entry"`
+	Mode                string                      `json:"mode"`
+	Port                int                         `json:"port"`
+	HMRHost             string                      `json:"hmrHost"`
+	HMRPort             int                         `json:"hmrPort"`
+	CallerEndpoint      *Endpoint                   `json:"callerEndpoint,omitempty"`
 }
 
 func (a Adapter) call(ctx context.Context, q Request, sink func(jsbridge.Frame) error) (Manifest, error) {
