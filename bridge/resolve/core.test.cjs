@@ -12,9 +12,6 @@ test('core compatibility migration does not accept arbitrary hooks or execute co
  for(const value of [{...pkg,version:'9.1.4'},{...pkg,name:'other'},{...pkg,nativescript:{hooks:[{...descriptor,inject:false}]}},{...pkg,nativescript:{hooks:[descriptor,descriptor]}},{...pkg,nativescript:{hooks:[{...descriptor,extra:true}]}}]) {
   assert.equal(core.supported(value,'/fixture',()=>{throw new Error('unexpected read');}),false);
  }
- assert.equal(core.inventory('platforms/ios/typings/objc!Fixture.d.ts'),true);
- assert.equal(core.inventory('platforms/ios/typings/Fixture.m'),false);
- assert.equal(core.inventory('platforms/android/unknown.json'),false);
 });
 test('actual independently installed core hook matches the reviewed migration',{skip:!process.env.CORE_PACKAGE_DIR},()=>{
  const dir=path.resolve(process.env.CORE_PACKAGE_DIR);

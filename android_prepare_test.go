@@ -246,6 +246,70 @@ func TestAndroidLibraryDependencyGraph(t *testing.T) {
 	}
 }
 
+func TestNativePlatformDocumentationAndTypingsInventory(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	inventories := []string{"platforms/android/README.md", "platforms/ios/README.txt", "platforms/ios/typings/objc!Example.d.ts", "platforms/android/typings/Example.d.ts"}
+	for _, name := range inventories {
+		resolutionFile(t, root, "node_modules/native-plugin/"+name, "native producer documentation")
+	}
+	ctx := context.Background()
+	resolved, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range inventories {
+		file, _ := filepath.EvalSymlinks(filepath.Join(root, "node_modules/native-plugin", name))
+		found := false
+		for _, source := range resolved.Sources {
+			found = found || source.Path == file && source.Digest != ""
+		}
+		if !found {
+			t.Fatal("native producer documentation lost its source identity", name)
+		}
+		for _, contribution := range resolved.Contributions {
+			if contribution.Path == file {
+				t.Fatal("producer documentation became a native contribution", name)
+			}
+		}
+	}
+	prepared, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android/README.md"))
+	if len(matches) != 0 {
+		t.Fatal("producer README copied into native tree")
+	}
+	matches, _ = filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android/typings"))
+	if len(matches) != 0 {
+		t.Fatal("TypeScript declarations copied into native tree")
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/README.md", "documentation updated")
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/ios/typings/objc!Example.d.ts", "declare const changed: number;")
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == resolved.Revision {
+		t.Fatal("README change did not affect source identity", err)
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/assets/README.md", "authored asset")
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/assets/typings/Example.d.ts", "authored typing asset")
+	withAsset, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, _ = filepath.Glob(filepath.Join(withAsset.NativeDir, "contributions/*/platforms/android/assets/README.md"))
+	if len(matches) != 1 || readAndroid(t, filepath.Dir(matches[0]), "README.md") != "authored asset" {
+		t.Fatal("authored README asset was lost")
+	}
+	matches, _ = filepath.Glob(filepath.Join(withAsset.NativeDir, "contributions/*/platforms/android/assets/typings/Example.d.ts"))
+	if len(matches) != 1 || readAndroid(t, filepath.Dir(matches[0]), "Example.d.ts") != "authored typing asset" {
+		t.Fatal("authored typing asset was lost")
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/README.bin", "unknown input")
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("unknown documentation sibling accepted", err)
+	}
+}
+
 func TestAndroidPluginGradleCacheBoundary(t *testing.T) {
 	root, client, request := androidApp(t, false)
 	ctx := context.Background()

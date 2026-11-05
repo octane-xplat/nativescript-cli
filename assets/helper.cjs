@@ -18853,7 +18853,6 @@ var require_core = __commonJS({
       }
       return crypto.createHash("sha256").update(source).digest("hex") === "97baeb497a77db8909e7fd39f58dd5f3390516aadf9cb85bd30db58009c7bdd7";
     };
-    exports2.inventory = (relative) => relative.startsWith("platforms/ios/typings/") && relative.endsWith(".d.ts");
   }
 });
 
@@ -19029,7 +19028,7 @@ var require_resolve = __commonJS({
         }
         return declared;
       }
-      function collect(dir, owner, cfg2, resources, core = false, metadata = /* @__PURE__ */ new Set()) {
+      function collect(dir, owner, cfg2, resources, metadata = /* @__PURE__ */ new Set()) {
         keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android", "visionos", "tvos", "cli", "bundler", "bundlerConfigPath"], "config");
         if (dir !== root && ["cli", "bundler", "bundlerConfigPath"].some((key2) => cfg2[key2] !== void 0)) fail("unavailable", "Bundler and CLI configuration belongs to the application");
         if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource", "SPMPackages"], "iOS config");
@@ -19112,16 +19111,20 @@ var require_resolve = __commonJS({
             const file = path2.join(folder, entry.name);
             if (platform === "android" && folder === platformRoot && entry.name === ".gradle" && entry.isDirectory()) continue;
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
+            if (!resources && folder === platformRoot && entry.isFile() && /^README(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) {
+              read(file);
+              continue;
+            }
+            if (!resources && entry.isFile() && path2.relative(platformRoot, file).startsWith("typings" + path2.sep) && entry.name.endsWith(".d.ts")) {
+              read(file);
+              continue;
+            }
             if (file === usageInventory) continue;
             if (entry.isFile() && metadata.has(fs2.realpathSync(file))) {
               read(file);
               continue;
             }
             if (entry.isFile() && (entry.name === "Package.resolved" || /(?:^|\.)(?:LICENSE|NOTICE)(?:\.(?:txt|md))?$/i.test(entry.name))) {
-              read(file);
-              continue;
-            }
-            if (core && coreAdapter.inventory(path2.relative(dir, file).split(path2.sep).join("/"))) {
               read(file);
               continue;
             }
@@ -19240,7 +19243,7 @@ var require_resolve = __commonJS({
           } catch {
             fail("unavailable", "GestureHandler producer marker differs from the qualified 2.1.0 package");
           }
-          collect(dir, dir, pluginConfig, void 0, core, metadata);
+          collect(dir, dir, pluginConfig, void 0, metadata);
           item.android = pluginConfig.android ?? {};
           item.iosRequirement = pkg.nativescript.platforms?.ios ?? "";
           item.androidRequirement = pkg.nativescript.platforms?.android ?? "";

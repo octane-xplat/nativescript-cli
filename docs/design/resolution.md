@@ -162,6 +162,19 @@ read-only inventory only at its reviewed SHA-256. It is not executed, copied as
 an app asset or interpreted as a development command. Other versions or changed
 marker bytes retain strict rejection.
 
+Conventional plugin platform-root `README` documentation (bare, `.md`,
+`.markdown`, `.txt` or `.rst`) is hashed source inventory. It does not become
+native source or an app resource. This rule does not suppress documents inside
+authored assets/bundles or accept unknown sibling file types. App resources
+retain their separate resource contract.
+
+Plugin `platforms/{ios,android}/typings/**/*.d.ts` files are likewise read-only
+source inventories. They describe native APIs for TypeScript authors and are
+not Objective-C/Java sources or NativeScript metadata filters. Core and other
+plugins share this contract. Authored assets containing typing files retain
+resource membership; other file types under a typings directory retain their
+ordinary validation.
+
 An installed plugin's exact `platforms/android/.gradle/` directory is producer
 cache, excluded from source identity and native contributions. The development
 watcher ignores its creation, mutation and deletion at the same boundary.

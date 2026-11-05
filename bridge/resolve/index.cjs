@@ -107,7 +107,7 @@ async function resolve({ projectDir }) {
     }
     return declared;
   }
-  function collect(dir, owner, cfg, resources, core=false, metadata=new Set()) {
+  function collect(dir, owner, cfg, resources, metadata=new Set()) {
     keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'tvos', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
     if(dir!==root && ['cli','bundler','bundlerConfigPath'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
@@ -172,6 +172,8 @@ async function resolve({ projectDir }) {
         // exclusion at the plugin's platform root, never in resources/assets.
         if (platform === 'android' && folder === platformRoot && entry.name === '.gradle' && entry.isDirectory()) continue;
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
+        if (!resources && folder === platformRoot && entry.isFile() && /^README(?:\.(?:md|markdown|txt|rst))?$/i.test(entry.name)) { read(file); continue; }
+        if (!resources && entry.isFile() && path.relative(platformRoot,file).startsWith('typings'+path.sep) && entry.name.endsWith('.d.ts')) { read(file); continue; }
         if (file === usageInventory) continue;
         if(entry.isFile()&&metadata.has(fs.realpathSync(file))){read(file);continue;}
         // Packaged static libraries can retain their producer's Swift pins and
@@ -179,7 +181,6 @@ async function resolve({ projectDir }) {
         // without compiling legal text, installing another dependency graph or
         // replacing this application's Package.resolved with producer pins.
         if(entry.isFile() && (entry.name==='Package.resolved' || /(?:^|\.)(?:LICENSE|NOTICE)(?:\.(?:txt|md))?$/i.test(entry.name))){read(file);continue;}
-        if(core && coreAdapter.inventory(path.relative(dir,file).split(path.sep).join('/'))) { read(file); continue; }
         if (entry.isDirectory() && !/\.(framework|xcframework|xcassets|bundle)$/.test(entry.name)) { walk(file, platform); continue; }
         let kind;
         const ext = path.extname(entry.name).toLowerCase();
@@ -275,7 +276,7 @@ async function resolve({ projectDir }) {
       let metadata;
       try{metadata=masonMetadata(pkg,dir,read);}catch{fail('invalid_input','Packaged Mason provenance must match its artifact inventory');}
       try{for(const file of gestureMetadata(pkg,dir,read))metadata.add(file);}catch{fail('unavailable','GestureHandler producer marker differs from the qualified 2.1.0 package');}
-      collect(dir, dir, pluginConfig, undefined, core, metadata);
+      collect(dir, dir, pluginConfig, undefined, metadata);
       item.android = pluginConfig.android ?? {};
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';
       item.androidRequirement = pkg.nativescript.platforms?.android ?? '';
