@@ -23,8 +23,10 @@ without a supported application filtering producer. They are validated, hashed
 source identities; changes invalidate preparation. App-driven JSON metadata
 filtering remains explicitly unavailable rather than being copied as resources.
 
-Native package inputs are snapshotted beneath `contributions/`. Library modules
-provide Java/Kotlin, resources, assets, JNI inputs and manifests. Gradle owns
+Native package inputs are snapshotted beneath `contributions/`. The resolver's
+platform-root Gradle producer cache is excluded from snapshots and metadata
+inputs. Authored asset/resource subtrees retain their normal ownership. Library
+modules provide Java/Kotlin, resources, assets, JNI inputs and manifests. Gradle owns
 manifest and resource merging. A legacy library manifest's root `package`
 becomes its generated Gradle namespace; only that attribute is removed from the
 generated copy. Relative component names and other XML bytes are preserved.

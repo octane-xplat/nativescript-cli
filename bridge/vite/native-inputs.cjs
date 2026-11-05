@@ -8,10 +8,16 @@ const crypto = require('node:crypto');
 module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
   const baseline = new Map(sources.map(source => [source.Path,source.Digest]));
   const packageRoots = sources.filter(source => path.basename(source.Path)==='Package.swift' || source.Path.endsWith('.podspec')).map(source => path.dirname(source.Path));
-  const ignored = file => !baseline.has(file) && packageRoots.some(root => {
+  const gradleCaches = inputs.filter(input => path.basename(input)==='platforms').map(input => path.join(input,'android','.gradle'));
+  const gradleCache = file => gradleCaches.some(cache => {
+    const relative=path.relative(cache,file);
+    if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))return false;
+    try{return fs.lstatSync(cache).isDirectory();}catch(error){if(error.code==='ENOENT')return true;throw error;}
+  });
+  const ignored = file => !baseline.has(file) && (gradleCache(file) || packageRoots.some(root => {
     const relative = path.relative(root,file);
     return relative !== '..' && !relative.startsWith('..'+path.sep) && relative.split(path.sep).some(part => ['.build','.swiftpm'].includes(part));
-  });
+  }));
   const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const configuredFiles=new Set(groups.flatMap(group=>group.files));
   function configuredChanged(file){

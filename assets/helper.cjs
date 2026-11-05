@@ -18048,10 +18048,21 @@ var require_native_inputs = __commonJS({
     module2.exports = function nativeInputs(inputs, sources, groups = [], projectDir) {
       const baseline = new Map(sources.map((source) => [source.Path, source.Digest]));
       const packageRoots = sources.filter((source) => path2.basename(source.Path) === "Package.swift" || source.Path.endsWith(".podspec")).map((source) => path2.dirname(source.Path));
-      const ignored = (file) => !baseline.has(file) && packageRoots.some((root) => {
+      const gradleCaches = inputs.filter((input) => path2.basename(input) === "platforms").map((input) => path2.join(input, "android", ".gradle"));
+      const gradleCache = (file) => gradleCaches.some((cache) => {
+        const relative = path2.relative(cache, file);
+        if (relative === ".." || relative.startsWith(".." + path2.sep) || path2.isAbsolute(relative)) return false;
+        try {
+          return fs2.lstatSync(cache).isDirectory();
+        } catch (error) {
+          if (error.code === "ENOENT") return true;
+          throw error;
+        }
+      });
+      const ignored = (file) => !baseline.has(file) && (gradleCache(file) || packageRoots.some((root) => {
         const relative = path2.relative(root, file);
         return relative !== ".." && !relative.startsWith(".." + path2.sep) && relative.split(path2.sep).some((part) => [".build", ".swiftpm"].includes(part));
-      });
+      }));
       const digest = (file) => crypto.createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
       const configuredFiles = new Set(groups.flatMap((group) => group.files));
       function configuredChanged(file) {
@@ -19027,6 +19038,7 @@ var require_resolve = __commonJS({
           }
           for (const entry of fs2.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
             const file = path2.join(folder, entry.name);
+            if (platform === "android" && folder === platformRoot && entry.name === ".gradle" && entry.isDirectory()) continue;
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
             if (file === usageInventory) continue;
             if (entry.isFile() && metadata.has(fs2.realpathSync(file))) {

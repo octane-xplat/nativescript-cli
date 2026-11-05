@@ -44,3 +44,18 @@ test('configured globs detect membership edits and ignore unmatched/generated si
  fs.writeFileSync(source,'class Changed {}');assert.equal(changed(Path),true);
  fs.rmSync(source);assert.equal(changed(Path),true);
 });
+
+test('plugin Gradle root caches do not restart while authored assets still do',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'gradle-inputs-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const platforms=path.join(root,'platforms'),android=path.join(platforms,'android');fs.mkdirSync(android,{recursive:true});
+ const source=path.join(android,'Binding.java');fs.writeFileSync(source,'class Binding {}');
+ const changed=nativeInputs([platforms],[{Path:source,Digest:crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex')}]);
+ const cache=path.join(android,'.gradle'),file=path.join(cache,'6.4','cache.bin');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'tool cache');
+ assert.equal(changed(file),false);assert.equal(changed(platforms),false);
+ fs.writeFileSync(file,'changed tool cache');assert.equal(changed(file),false);
+ fs.rmSync(cache,{recursive:true});assert.equal(changed(cache),false);assert.equal(changed(platforms),false);
+ const asset=path.join(android,'assets','.gradle','owned.bin');fs.mkdirSync(path.dirname(asset),{recursive:true});fs.writeFileSync(asset,'authored asset');
+ assert.equal(changed(asset),true);assert.equal(changed(platforms),true);
+ fs.rmSync(path.join(android,'assets'),{recursive:true});
+ fs.symlinkSync(root,cache,'dir');assert.throws(()=>changed(cache),/symlink/);
+});

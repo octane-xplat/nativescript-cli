@@ -158,6 +158,9 @@ async function resolve({ projectDir }) {
       }
       for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name, 'en'))) {
         const file = path.join(folder, entry.name);
+        // Packaged Gradle state is not an authored native input. Keep this
+        // exclusion at the plugin's platform root, never in resources/assets.
+        if (platform === 'android' && folder === platformRoot && entry.name === '.gradle' && entry.isDirectory()) continue;
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
         if (file === usageInventory) continue;
         if(entry.isFile()&&metadata.has(fs.realpathSync(file))){read(file);continue;}

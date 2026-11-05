@@ -246,6 +246,44 @@ func TestAndroidLibraryDependencyGraph(t *testing.T) {
 	}
 }
 
+func TestAndroidPluginGradleCacheBoundary(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	ctx := context.Background()
+	first, err := client.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := "node_modules/native-plugin/platforms/android/.gradle/6.4/fileChanges/last-build.bin"
+	for _, body := range []string{"producer cache", "producer cache changed"} {
+		resolutionFile(t, root, cache, body)
+		prepared, err := client.Prepare(ctx, request)
+		if err != nil || prepared.Identity.Revision != first.Identity.Revision {
+			t.Fatal("producer cache affected native identity", err)
+		}
+		if strings.Contains(readAndroid(t, prepared.NativeDir, "metadata-inputs.json"), "/.gradle/") {
+			t.Fatal("Gradle cache became a native metadata input")
+		}
+		matches, _ := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android/.gradle"))
+		if len(matches) != 0 {
+			t.Fatal("producer cache copied to generated native tree")
+		}
+	}
+	asset := "node_modules/native-plugin/platforms/android/assets/.gradle/owned.bin"
+	resolutionFile(t, root, asset, "authored asset")
+	withAsset, err := client.Prepare(ctx, request)
+	if err != nil || withAsset.Identity.Revision == first.Identity.Revision {
+		t.Fatal("authored asset excluded with tool cache", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(withAsset.NativeDir, "contributions/*/platforms/android/assets/.gradle/owned.bin"))
+	if len(matches) != 1 || readAndroid(t, filepath.Dir(matches[0]), "owned.bin") != "authored asset" {
+		t.Fatal("authored asset was not staged", matches)
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/platforms/android/unknown.bin", "unrecognized input")
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("unrecognized sibling silently excluded", err)
+	}
+}
+
 func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
 	root, c, q := androidApp(t, false)
 	p, e := c.Prepare(context.Background(), q)

@@ -132,6 +132,12 @@ read-only inventory only at its reviewed SHA-256. It is not executed, copied as
 an app asset or interpreted as a development command. Other versions or changed
 marker bytes retain strict rejection.
 
+An installed plugin's exact `platforms/android/.gradle/` directory is producer
+cache, excluded from source identity and native contributions. The development
+watcher ignores its creation, mutation and deletion at the same boundary.
+Symlinks remain unsupported. This does not exclude arbitrary `build` directories,
+unrecognized sibling files or `.gradle` directories inside authored assets/res.
+
 The published `@octane-xplat/nativescript-mason-core` 1.0.0-beta.5 adapter recognizes
 its four platform-root manifest/provenance JSON files only when their SHA-256
 values match its `artifact-inventory.json`. Inventory and records are hashed
