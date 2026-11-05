@@ -37,17 +37,27 @@ func main() {
 	}
 }
 func run() (result error) {
-	if len(os.Args) != 4 && len(os.Args) != 5 {
-		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release [pinned|ota]")
+	if len(os.Args) < 4 || len(os.Args) > 6 {
+		return errors.New("usage: consumer APP_ROOT NEW_EVIDENCE_PREFIX debug|release [pinned|ota [NEW_OUTPUT_DIR]]")
 	}
-	pinned := len(os.Args) == 5 && os.Args[4] == "pinned"
-	ota := len(os.Args) == 5 && os.Args[4] == "ota"
-	if len(os.Args) == 5 && !pinned && !ota {
+	pinned := len(os.Args) >= 5 && os.Args[4] == "pinned"
+	ota := len(os.Args) >= 5 && os.Args[4] == "ota"
+	if len(os.Args) >= 5 && !pinned && !ota {
 		return errors.New("unknown profile")
 	}
 	app, prefix, configuration := os.Args[1], os.Args[2], ns.Configuration(os.Args[3])
 	if !filepath.IsAbs(app) || !filepath.IsAbs(prefix) || (configuration != ns.Debug && configuration != ns.Release) {
 		return errors.New("invalid arguments")
+	}
+	output := filepath.Join(app, "state")
+	if len(os.Args) == 6 {
+		output = os.Args[5]
+		if !filepath.IsAbs(output) {
+			return errors.New("new output directory must be absolute")
+		}
+		if _, err := os.Lstat(output); !os.IsNotExist(err) {
+			return errors.New("explicit output directory must not exist")
+		}
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -73,7 +83,7 @@ func run() (result error) {
 	if resolved.Config.BundlerConfigPath == "" || resolved.Config.PackageManager != "bun" {
 		return errors.New("selected project config metadata missing")
 	}
-	built, err := client.Build(ctx, ns.BuildRequest{ProjectDir: app, OutputDir: filepath.Join(app, "state"), Target: ns.Target{Platform: ns.IOS, Configuration: configuration, Destination: ns.Destination{Kind: ns.Simulator, ID: "generic", Architecture: "arm64"}}, IOS: ns.IOSBuildOptions{SigningMode: "disabled"}})
+	built, err := client.Build(ctx, ns.BuildRequest{ProjectDir: app, OutputDir: output, Target: ns.Target{Platform: ns.IOS, Configuration: configuration, Destination: ns.Destination{Kind: ns.Simulator, ID: "generic", Architecture: "arm64"}}, IOS: ns.IOSBuildOptions{SigningMode: "disabled"}})
 	if err != nil {
 		return err
 	}
@@ -244,7 +254,7 @@ func run() (result error) {
 			return err
 		}
 	}
-	evidence := map[string]any{"project": resolved, "build": built, "executableSHA256": hash(binary), "bundledModules": files, "proofSHA256": hash(proof), "runtimeManifestSHA256": hash(manifest), "retainedPrefix": prefix, "scope": "actual unsigned arm64 simulator native build; no guest startup, physical signing, OTA installer or original Octane/Bamboo preset claim"}
+	evidence := map[string]any{"project": resolved, "build": built, "outputDirectory": output, "freshOutputRequested": len(os.Args) == 6, "executableSHA256": hash(binary), "bundledModules": files, "proofSHA256": hash(proof), "runtimeManifestSHA256": hash(manifest), "retainedPrefix": prefix, "scope": "actual unsigned arm64 simulator native build; no guest startup, physical signing, OTA installer or original Octane/Bamboo preset claim"}
 	if ota {
 		evidence["scope"] = "actual public OTA-enabled unsigned simulator build, compiled canonical stamp and retained record; no installer, guest, physical signing or original V8 ABI claim"
 	}

@@ -58,6 +58,12 @@ prove every package was patched.
 Build the new app under a native-build reservation with the public build
 consumer. A retained app can then be tested without creating another simulator:
 
+The build consumer accepts an optional fresh output directory after its profile:
+`consumer APP NEW_EVIDENCE_PREFIX debug pinned NEW_OUTPUT_DIR`. It must be
+absolute and absent before the call. Use this when rebuilding an existing probe
+so the old app/state product and its recorded bytes remain preserved. Without
+that argument, the consumer retains its original app/state behavior.
+
 ```sh
 python3 tools/qualification/vite-config/qualify-retained-runtime.py \
   /absolute/app /absolute/build.json /absolute/runtime-consumer \
