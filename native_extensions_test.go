@@ -2,6 +2,7 @@ package nativescript_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,53 @@ import (
 )
 
 type nativeRegistration struct{ value string }
+
+func TestConfiguredNativeSourcePreparation(t *testing.T) {
+	root, client, q := prepareApp(t, false)
+	shared := t.TempDir()
+	resolutionFile(t, shared, "Configured.swift", "class Configured {}")
+	relative, err := filepath.Rel(root, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeConfig := func(enabled bool) {
+		t.Helper()
+		groups := []map[string]string{}
+		if enabled {
+			groups = append(groups, map[string]string{"name": "Configured", "path": filepath.ToSlash(relative) + "/*.swift"})
+		}
+		data, _ := json.Marshal(map[string]any{"id": "org.test.configured", "ios": map[string]any{"NativeSource": groups}})
+		resolutionFile(t, root, "nativescript.config.cjs", "module.exports="+string(data))
+	}
+	writeConfig(true)
+	first, err := client.Prepare(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readProject := func(p ns.PreparedProject) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(p.NativeDir, "NativeScriptApp.xcodeproj/project.pbxproj"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	if !strings.Contains(readProject(first), "Configured.swift") {
+		t.Fatal("configured Swift not in source phase")
+	}
+	repeat, err := client.Prepare(context.Background(), q)
+	if err != nil || repeat.Identity.Revision != first.Identity.Revision {
+		t.Fatal("configured repeat", err)
+	}
+	writeConfig(false)
+	removed, err := client.Prepare(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Identity.Revision == first.Identity.Revision || strings.Contains(readProject(removed), "Configured.swift") {
+		t.Fatal("configured removal retained source")
+	}
+}
 
 func (nativeRegistration) Manifest(context.Context) (extension.Manifest, error) {
 	return extension.Manifest{ID: "native", Version: "1.0.0", API: extension.APIVersion, Phases: []extension.Phase{extension.Collect}, Required: []string{"native_files"}}, nil

@@ -17477,6 +17477,64 @@ var require_canonical = __commonJS({
   }
 });
 
+// bridge/resolve/native-sources.cjs
+var require_native_sources = __commonJS({
+  "bridge/resolve/native-sources.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var fail = (code) => {
+      throw Object.assign(new Error("Invalid NativeSource declaration"), { code });
+    };
+    var inside = (root, file) => {
+      const rel = path2.relative(root, file);
+      return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
+    };
+    var ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".cache", ".turbo", "build", "dist", "Pods", ".gradle", "DerivedData"]);
+    module2.exports = function expand(root, declarations) {
+      if (declarations === void 0) return [];
+      if (!Array.isArray(declarations)) fail("invalid_input");
+      const names = /* @__PURE__ */ new Set();
+      return declarations.map((group) => {
+        if (!group || typeof group !== "object" || Array.isArray(group) || Object.keys(group).some((k) => !["name", "path"].includes(k)) || typeof group.name !== "string" || !group.name || names.has(group.name) || typeof group.path !== "string" || !group.path || group.path.includes("\0")) fail("invalid_input");
+        names.add(group.name);
+        const pattern = path2.resolve(root, group.path);
+        const prefix = pattern.split(/[*?[\]{}]/, 1)[0];
+        const logicalBase = path2.resolve(prefix.endsWith(path2.sep) ? prefix : path2.dirname(prefix));
+        let base;
+        try {
+          base = fs2.realpathSync(logicalBase);
+        } catch {
+          fail("invalid_input");
+        }
+        const files = /* @__PURE__ */ new Map();
+        function walk(file) {
+          const stat = fs2.lstatSync(file);
+          if (stat.isSymbolicLink()) fail("unavailable");
+          const realPath = fs2.realpathSync(file);
+          if (!inside(base, realPath)) fail("unavailable");
+          if (stat.isDirectory()) {
+            for (const name of fs2.readdirSync(file).sort()) if (!ignored.has(name)) walk(path2.join(file, name));
+          } else if (stat.isFile()) {
+            const ext = path2.extname(file).toLowerCase();
+            const kind = ext === ".modulemap" ? "configuration" : [".swift", ".m", ".mm", ".h", ".c", ".cpp"].includes(ext) ? "source" : void 0;
+            if (!kind) fail("unavailable");
+            files.set(file, { path: file, realPath, kind });
+          } else fail("unavailable");
+        }
+        try {
+          for (const file of fs2.globSync(pattern)) walk(file);
+        } catch (e) {
+          if (["invalid_input", "unavailable"].includes(e.code)) throw e;
+          fail("invalid_input");
+        }
+        if (!files.size) fail("invalid_input");
+        return { name: group.name, pattern, logicalBase, base, files: [...files.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
+      });
+    };
+  }
+});
+
 // bridge/extensions/ota.cjs
 var require_ota = __commonJS({
   "bridge/extensions/ota.cjs"(exports2, module2) {
@@ -17494,7 +17552,7 @@ var require_ota = __commonJS({
       return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
     }
     module2.exports = async function(p) {
-      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir } = p;
+      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir, sourceFiles = {} } = p;
       if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
       if (projectStateDir !== void 0 && (typeof projectStateDir !== "string" || !path2.isAbsolute(projectStateDir) || inside(projectStateDir, projectDir) || !inside(projectStateDir, nativeDir) || !inside(projectStateDir, stageDir))) fail();
       const req = createRequire2(path2.join(projectDir, "package.json"));
@@ -17521,8 +17579,23 @@ var require_ota = __commonJS({
       }
       const buildRoot = path2.resolve(projectDir, nativeConfig.buildPath ?? "platforms");
       if (!inside(projectDir, buildRoot) || buildRoot === projectDir) fail("unavailable");
-      const view = path2.join(stageDir, "project");
-      fs2.mkdirSync(view);
+      const sourceGroups = platform === "ios" ? require_native_sources()(projectDir, nativeConfig.ios?.NativeSource) : [];
+      if (!sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles)) fail();
+      const sourceDigest = (file) => createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
+      const checkSources = () => {
+        for (const group of sourceGroups) for (const file of group.files) if (sourceFiles[file.realPath] !== sourceDigest(file.realPath)) fail();
+      };
+      checkSources();
+      let anchor = projectDir;
+      for (const group of sourceGroups) {
+        const declaration = nativeConfig.ios.NativeSource.find((s) => s.name === group.name);
+        if (path2.isAbsolute(declaration.path) && !inside(projectDir, group.logicalBase)) fail("unavailable");
+        if (group.base !== group.logicalBase || group.files.some((file) => inside(path2.join(projectDir, "node_modules"), file.path))) fail("unavailable");
+        while (!inside(anchor, group.logicalBase)) anchor = path2.dirname(anchor);
+      }
+      const snapshot = path2.join(stageDir, "project");
+      const view = path2.join(snapshot, path2.relative(anchor, projectDir));
+      fs2.mkdirSync(view, { recursive: true });
       const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".xplat", ".xplat-ns"]);
       const excluded = (f) => inside(buildRoot, f) || inside(stageDir, f) || projectStateDir !== void 0 && inside(projectStateDir, f);
       const digest = (root) => {
@@ -17552,6 +17625,15 @@ var require_ota = __commonJS({
         if (!ignored.has(e)) copy(path2.join(projectDir, e), path2.join(view, e));
       }
       fs2.symlinkSync(path2.join(projectDir, "node_modules"), path2.join(view, "node_modules"), "dir");
+      for (const group of sourceGroups) for (const file of group.files) {
+        if (excluded(file.realPath) || excluded(file.path)) fail("unavailable");
+        const destination = path2.join(snapshot, path2.relative(anchor, file.path));
+        if (!inside(snapshot, destination)) fail();
+        if (inside(path2.join(view, "node_modules"), destination)) fail("unavailable");
+        fs2.mkdirSync(path2.dirname(destination), { recursive: true });
+        fs2.copyFileSync(file.realPath, destination);
+        if (sourceDigest(destination) !== sourceFiles[file.realPath]) fail();
+      }
       const rebase = (v) => typeof v === "string" ? v.replaceAll(projectDir, view) : Array.isArray(v) ? v.map(rebase) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebase(x)])) : v;
       const config = rebase(nativeConfig);
       const extensionID = "xplat-ns/extension-native/v1";
@@ -17594,6 +17676,7 @@ var require_ota = __commonJS({
       const record = JSON.parse(fs2.readFileSync(recordFile));
       const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
       if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
+      checkSources();
       if (extensionContents !== void 0) {
         const source = record.sources.filter((s) => s.type === "contents" && s.id === extensionID);
         if (source.length !== 1 || source[0].hash !== createHash("sha256").update(extensionContents).digest("hex")) fail();
@@ -17864,7 +17947,7 @@ var require_native_inputs = __commonJS({
     var fs2 = require("node:fs");
     var path2 = require("node:path");
     var crypto = require("node:crypto");
-    module2.exports = function nativeInputs(inputs, sources) {
+    module2.exports = function nativeInputs(inputs, sources, groups = [], projectDir) {
       const baseline = new Map(sources.map((source) => [source.Path, source.Digest]));
       const packageRoots = sources.filter((source) => path2.basename(source.Path) === "Package.swift" || source.Path.endsWith(".podspec")).map((source) => path2.dirname(source.Path));
       const ignored = (file) => !baseline.has(file) && packageRoots.some((root) => {
@@ -17872,6 +17955,17 @@ var require_native_inputs = __commonJS({
         return relative !== ".." && !relative.startsWith(".." + path2.sep) && relative.split(path2.sep).some((part) => [".build", ".swiftpm"].includes(part));
       });
       const digest = (file) => crypto.createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
+      const configuredFiles = new Set(groups.flatMap((group) => group.files));
+      function configuredChanged(file) {
+        if (!groups.length || file && !groups.some((group) => file === group.root || file.startsWith(group.root + path2.sep))) return false;
+        let selected;
+        try {
+          selected = new Set(require_native_sources()(projectDir, groups.map(({ name, path: path3 }) => ({ name, path: path3 }))).flatMap((group) => group.files.map((f) => f.realPath)));
+        } catch {
+          return true;
+        }
+        return selected.size !== configuredFiles.size || [...selected].some((file2) => !configuredFiles.has(file2) || baseline.get(file2) !== digest(file2));
+      }
       function snapshot(root, result) {
         if (ignored(root)) return;
         let stat;
@@ -17887,6 +17981,7 @@ var require_native_inputs = __commonJS({
         } else if (stat.isFile()) result.set(root, digest(root));
       }
       return (file) => {
+        if (configuredChanged(file)) return true;
         if (file && (!inputs.some((input) => file === input || file.startsWith(input + path2.sep)) || ignored(file))) return false;
         const roots = file ? [file] : inputs;
         const current = /* @__PURE__ */ new Map();
@@ -18061,7 +18156,16 @@ var require_native = __commonJS({
     module2.exports = async function native(p, emit) {
       if (!["ios", "android"].includes(p.platform) || p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 || !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path2.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail("invalid_input");
       const req = createRequire2(path2.join(p.projectDir, "package.json"));
-      const nativeChanged = require_native_inputs()(p.nativeInputs, p.nativeSources);
+      const sourceGroups = p.nativeSourceGroups ?? [];
+      if (!Array.isArray(sourceGroups) || !sourceGroups.every((g) => g && typeof g.name === "string" && path2.isAbsolute(g.path || "") && path2.isAbsolute(g.root || "") && Array.isArray(g.files) && g.files.every(path2.isAbsolute))) throw fail("invalid_input");
+      const nativeChanged = require_native_inputs()(p.nativeInputs, p.nativeSources, sourceGroups, p.projectDir);
+      if (sourceGroups.length) {
+        try {
+          if (nativeChanged()) throw fail("restart_required");
+        } catch {
+          throw fail("restart_required");
+        }
+      }
       const pkg = JSON.parse(fs2.readFileSync(path2.join(p.projectDir, "package.json"), "utf8"));
       if (typeof pkg.main !== "string" || fs2.realpathSync(path2.resolve(p.projectDir, pkg.main)) !== p.entry) throw fail("invalid_input");
       process.env.NS_VITE_DIST_DIR = p.directory;
@@ -18138,6 +18242,7 @@ var require_native = __commonJS({
           const dir = recursive ? input : path2.dirname(input);
           directories.set(dir, recursive || directories.get(dir) || false);
         }
+        for (const group of sourceGroups) directories.set(group.root, true);
         for (const [dir, recursive] of directories) {
           if (!fs2.existsSync(dir)) continue;
           const watcher = fs2.watch(dir, { recursive }, (_event, name) => {
@@ -18346,6 +18451,7 @@ var require_resolve = __commonJS({
     var crypto = require("node:crypto");
     var { stripTypeScriptTypes, createRequire: createRequire2 } = require("node:module");
     var coreAdapter = require_core();
+    var expandNativeSources = require_native_sources();
     var { pathToFileURL } = require("node:url");
     var configNames = ["nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"];
     var safeFailures = /* @__PURE__ */ new WeakSet();
@@ -18360,7 +18466,7 @@ var require_resolve = __commonJS({
     }
     async function resolve({ projectDir }) {
       if (!path2.isAbsolute(projectDir || "")) fail("invalid_input", "Project directory must be absolute");
-      const sources = /* @__PURE__ */ new Map(), packages = /* @__PURE__ */ new Map(), edges = [], contributions = [];
+      const sources = /* @__PURE__ */ new Map(), packages = /* @__PURE__ */ new Map(), edges = [], contributions = [], nativeSourceGroups = [];
       function read(file) {
         const bytes = fs2.readFileSync(file);
         sources.set(fs2.realpathSync(file), crypto.createHash("sha256").update(bytes).digest("hex"));
@@ -18435,7 +18541,23 @@ var require_resolve = __commonJS({
       }
       function collect(dir, owner, cfg2, resources, core = false) {
         keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android"], "config");
-        if (cfg2.ios !== void 0) keys(cfg2.ios, [], "iOS config");
+        if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource"], "iOS config");
+        if (cfg2.ios?.NativeSource !== void 0) {
+          if (dir !== root) fail("unavailable", "Plugin NativeSource declarations require a qualified canonical source contract");
+          let groups;
+          try {
+            groups = expandNativeSources(dir, cfg2.ios.NativeSource);
+          } catch (e) {
+            fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "NativeSource requires unique named paths matching supported ordinary iOS source/header/modulemap files");
+          }
+          for (const group of groups) {
+            nativeSourceGroups.push({ name: group.name, path: group.pattern, root: group.base, files: [...new Set(group.files.map((f) => f.realPath))].sort() });
+            for (const file of group.files) {
+              read(file.realPath);
+              contributions.push({ packageDirectory: owner, platform: "ios", kind: file.kind, path: file.realPath });
+            }
+          }
+        }
         if (cfg2.android !== void 0) keys(cfg2.android, ["v8Flags", "markingMode"], "Android config");
         for (const key2 of ["v8Flags", "markingMode"]) if (cfg2.android?.[key2] !== void 0 && typeof cfg2.android[key2] !== "string") fail("invalid_input", "Android runtime settings must be strings");
         if (fs2.existsSync(path2.join(dir, "hooks"))) fail("unavailable", "Legacy package hooks are unsupported; migrate to the extension SDK before preparing");
@@ -18569,7 +18691,13 @@ var require_resolve = __commonJS({
         }
       }
       await visit(root, app, true);
-      const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, contributions, sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
+      const membership = /* @__PURE__ */ new Map();
+      for (const c of contributions) {
+        const key2 = JSON.stringify([c.platform, c.kind, c.path]), previous = membership.get(key2);
+        if (!previous || previous.packageDirectory === root && c.packageDirectory !== root || previous.packageDirectory !== root && c.packageDirectory !== root && c.packageDirectory < previous.packageDirectory) membership.set(key2, c);
+      }
+      const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
+      if (nativeSourceGroups.length) result.nativeSourceGroups = nativeSourceGroups;
       result.revision = crypto.createHash("sha256").update(JSON.stringify(result)).digest("hex");
       return result;
     }

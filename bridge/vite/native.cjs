@@ -13,7 +13,10 @@ module.exports = async function native(p, emit) {
       !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 ||
       !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail('invalid_input');
   const req = createRequire(path.join(p.projectDir,'package.json'));
-  const nativeChanged = require('./native-inputs.cjs')(p.nativeInputs,p.nativeSources);
+  const sourceGroups=p.nativeSourceGroups??[];
+  if(!Array.isArray(sourceGroups)||!sourceGroups.every(g=>g&&typeof g.name==='string'&&path.isAbsolute(g.path||'')&&path.isAbsolute(g.root||'')&&Array.isArray(g.files)&&g.files.every(path.isAbsolute)))throw fail('invalid_input');
+  const nativeChanged = require('./native-inputs.cjs')(p.nativeInputs,p.nativeSources,sourceGroups,p.projectDir);
+  if(sourceGroups.length){try{if(nativeChanged())throw fail('restart_required');}catch{throw fail('restart_required');}}
   const pkg = JSON.parse(fs.readFileSync(path.join(p.projectDir,'package.json'),'utf8'));
   // The installed engine derives its entry from the root package. Refuse a
   // disagreement instead of emitting a bootstrap for a different application.
@@ -76,6 +79,7 @@ module.exports = async function native(p, emit) {
       const dir = recursive ? input : path.dirname(input);
       directories.set(dir,recursive || directories.get(dir) || false);
     }
+    for(const group of sourceGroups)directories.set(group.root,true);
     for (const [dir,recursive] of directories) {
       if (!fs.existsSync(dir)) continue;
       const watcher = fs.watch(dir,{recursive},(_event,name) => {

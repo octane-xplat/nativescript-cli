@@ -7,7 +7,7 @@ const {createHash} = require('node:crypto');
 function fail(code = 'invalid_input') { throw Object.assign(new Error('Canonical OTA preparation failed'), {code}); }
 function inside(root, file) { const rel=path.relative(root,file); return rel !== '..' && !rel.startsWith('..'+path.sep) && !path.isAbsolute(rel); }
 module.exports = async function(p) {
- const {projectDir,nativeDir,bundleDir,stageDir,platform,configuration,nativeConfig,architecture,destinationKind,extensionNative=[],projectStateDir}=p;
+ const {projectDir,nativeDir,bundleDir,stageDir,platform,configuration,nativeConfig,architecture,destinationKind,extensionNative=[],projectStateDir,sourceFiles={}}=p;
  if (![projectDir,nativeDir,bundleDir,stageDir].every(v=>typeof v==='string'&&path.isAbsolute(v)) || !inside(nativeDir,bundleDir) || !['ios','android'].includes(platform) || !['release','debug'].includes(configuration) || !nativeConfig || typeof nativeConfig!=='object') fail();
  if(projectStateDir!==undefined&&(typeof projectStateDir!=='string'||!path.isAbsolute(projectStateDir)||inside(projectStateDir,projectDir)||!inside(projectStateDir,nativeDir)||!inside(projectStateDir,stageDir)))fail();
  const req=createRequire(path.join(projectDir,'package.json'));
@@ -23,7 +23,22 @@ module.exports = async function(p) {
  for(const key of ['appPath','appResourcesPath']) { const selected=nativeConfig[key]; if(selected!==undefined&&(typeof selected!=='string'||!inside(projectDir,path.resolve(projectDir,selected))))fail('unavailable'); }
  const buildRoot=path.resolve(projectDir,nativeConfig.buildPath??'platforms');
  if(!inside(projectDir,buildRoot)||buildRoot===projectDir) fail('unavailable');
- const view=path.join(stageDir,'project'); fs.mkdirSync(view);
+ const sourceGroups=platform==='ios'?require('../resolve/native-sources.cjs')(projectDir,nativeConfig.ios?.NativeSource):[];
+ if(!sourceFiles||typeof sourceFiles!=='object'||Array.isArray(sourceFiles))fail();
+ const sourceDigest=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+ const checkSources=()=>{for(const group of sourceGroups)for(const file of group.files)if(sourceFiles[file.realPath]!==sourceDigest(file.realPath))fail();};
+ checkSources();
+ let anchor=projectDir;
+ for(const group of sourceGroups){
+  // Absolute external patterns retain machine-specific config values in the
+  // canonical contract. Require a relative workspace path for this snapshot.
+  const declaration=nativeConfig.ios.NativeSource.find(s=>s.name===group.name);
+  if(path.isAbsolute(declaration.path)&&!inside(projectDir,group.logicalBase))fail('unavailable');
+  if(group.base!==group.logicalBase||group.files.some(file=>inside(path.join(projectDir,'node_modules'),file.path)))fail('unavailable');
+  while(!inside(anchor,group.logicalBase))anchor=path.dirname(anchor);
+ }
+ const snapshot=path.join(stageDir,'project');
+ const view=path.join(snapshot,path.relative(anchor,projectDir));fs.mkdirSync(view,{recursive:true});
  const ignored=new Set(['node_modules','.git','.xplat','.xplat-ns']);
  const excluded=f=>inside(buildRoot,f)||inside(stageDir,f)||(projectStateDir!==undefined&&inside(projectStateDir,f));
  // Snapshot authored inputs, retaining Node's installed package lookup separately.
@@ -39,6 +54,15 @@ module.exports = async function(p) {
  };
  for(const e of fs.readdirSync(projectDir)) {if(!ignored.has(e))copy(path.join(projectDir,e),path.join(view,e));}
  fs.symlinkSync(path.join(projectDir,'node_modules'),path.join(view,'node_modules'),'dir');
+ for(const group of sourceGroups)for(const file of group.files){
+  if(excluded(file.realPath)||excluded(file.path))fail('unavailable');
+  const destination=path.join(snapshot,path.relative(anchor,file.path));
+  if(!inside(snapshot,destination))fail();
+  // Never copy through the intentionally linked installed dependency tree.
+  if(inside(path.join(view,'node_modules'),destination))fail('unavailable');
+  fs.mkdirSync(path.dirname(destination),{recursive:true});fs.copyFileSync(file.realPath,destination);
+  if(sourceDigest(destination)!==sourceFiles[file.realPath])fail();
+ }
  const rebase=v=>typeof v==='string'?v.replaceAll(projectDir,view):Array.isArray(v)?v.map(rebase):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,rebase(x)])):v;
  const config=rebase(nativeConfig);
  // Use the canonical collector's data-only extra-source contract. These values
@@ -77,6 +101,7 @@ module.exports = async function(p) {
  const record=JSON.parse(fs.readFileSync(recordFile));
  const verified=await canonical.createFingerprintAsync(view,{platforms:[platform],nativeConfig:config,toolchain:record.toolchain});
  if(record.hash!==verified.hash||stable(record.sources)!==stable(verified.sources)||before!==digest(projectDir))fail();
+ checkSources();
  if(extensionContents!==undefined){
   const source=record.sources.filter(s=>s.type==='contents'&&s.id===extensionID);
   if(source.length!==1||source[0].hash!==createHash('sha256').update(extensionContents).digest('hex'))fail();

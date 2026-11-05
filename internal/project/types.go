@@ -15,16 +15,26 @@ type Identity struct {
 	Target     Target
 }
 type Resolved struct {
-	Config          Config
-	Packages        []Package
-	Dependencies    []Dependency
-	Contributions   []Contribution
-	Sources         []Source
-	Directory       string
-	Revision        string
-	ApplicationID   string
-	SourceRevision  string
-	ExtensionNative []ExtensionNativeInput
+	Config             Config
+	Packages           []Package
+	Dependencies       []Dependency
+	Contributions      []Contribution
+	Sources            []Source
+	Directory          string
+	Revision           string
+	ApplicationID      string
+	SourceRevision     string
+	ExtensionNative    []ExtensionNativeInput
+	NativeSourceGroups []NativeSourceGroup
+}
+
+// NativeSourceGroup retains the validated app selector and concrete membership
+// for watcher invalidation; prepared source membership remains Contributions.
+type NativeSourceGroup struct {
+	Name  string   `json:"name"`
+	Path  string   `json:"path"`
+	Root  string   `json:"root"`
+	Files []string `json:"files"`
 }
 
 // ExtensionNativeInput is a portable digest of a verified generated native file.

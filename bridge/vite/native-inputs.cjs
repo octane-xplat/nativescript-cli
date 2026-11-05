@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 
 // Compare notifications with R1's actual input identity. Filesystem events can
 // describe attribute changes or tool cache writes, not changed native sources.
-module.exports = function nativeInputs(inputs, sources) {
+module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
   const baseline = new Map(sources.map(source => [source.Path,source.Digest]));
   const packageRoots = sources.filter(source => path.basename(source.Path)==='Package.swift' || source.Path.endsWith('.podspec')).map(source => path.dirname(source.Path));
   const ignored = file => !baseline.has(file) && packageRoots.some(root => {
@@ -13,6 +13,14 @@ module.exports = function nativeInputs(inputs, sources) {
     return relative !== '..' && !relative.startsWith('..'+path.sep) && relative.split(path.sep).some(part => ['.build','.swiftpm'].includes(part));
   });
   const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const configuredFiles=new Set(groups.flatMap(group=>group.files));
+  function configuredChanged(file){
+    if(!groups.length||file&&!groups.some(group=>file===group.root||file.startsWith(group.root+path.sep)))return false;
+    let selected;
+    try{selected=new Set(require('../resolve/native-sources.cjs')(projectDir,groups.map(({name,path})=>({name,path}))).flatMap(group=>group.files.map(f=>f.realPath)));}
+    catch{return true;}
+    return selected.size!==configuredFiles.size||[...selected].some(file=>!configuredFiles.has(file)||baseline.get(file)!==digest(file));
+  }
   function snapshot(root,result) {
     if (ignored(root)) return;
     let stat;
@@ -23,6 +31,7 @@ module.exports = function nativeInputs(inputs, sources) {
     } else if(stat.isFile()) result.set(root,digest(root));
   }
   return file => {
+    if(configuredChanged(file))return true;
     if (file && (!inputs.some(input => file===input || file.startsWith(input+path.sep)) || ignored(file))) return false;
     const roots = file ? [file] : inputs;
     const current = new Map();

@@ -96,6 +96,15 @@ the current endpoint (empty while rebuilding/after completion), and `Logs()` kee
 a bounded history across app launches. Stage events retain their existing ordering
 and callback ownership contract.
 
+Configured app `ios.NativeSource` globs are watched at their canonical source
+roots, including workspace directories outside the app. Their selected file set
+and content identities are compared with resolution. Added/removed matching
+files require re-resolution; unmatched siblings and generated output outside the
+selector do not trigger rebuilds. Startup also rejects a selected set that changed
+after resolution. Host checks use the real installed Vite engine with fixture
+native compilation/devices; actual configured Swift compilation has a separate
+opt-in consumer in `tools/extensions/swift/`.
+
 To run the real-engine host checks:
 
 ```sh

@@ -33,6 +33,7 @@ type otaRequest struct {
 	DestinationKind string                         `json:"destinationKind"`
 	ExtensionNative []project.ExtensionNativeInput `json:"extensionNative,omitempty"`
 	ProjectStateDir string                         `json:"projectStateDir"`
+	SourceFiles     map[string]string              `json:"sourceFiles,omitempty"`
 }
 
 func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Prepared, l workspace.Lease) error {
@@ -75,6 +76,13 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 			NativeConfig: r.Config.NativeConfig, Architecture: p.Identity.Target.Architecture,
 			DestinationKind: p.Identity.Target.DestinationKind, ExtensionNative: r.ExtensionNative,
 			ProjectStateDir: filepath.Dir(filepath.Dir(l.Layout().GeneratedRoot)),
+			SourceFiles: func() map[string]string {
+				files := make(map[string]string, len(r.Sources))
+				for _, source := range r.Sources {
+					files[source.Path] = source.Digest
+				}
+				return files
+			}(),
 		})
 		if e != nil {
 			return e

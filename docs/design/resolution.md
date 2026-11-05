@@ -28,10 +28,21 @@ Node returns an actionable unavailable error. Config runtime imports must alread
 be installed. No compiler is installed, no global compiler is selected, and no
 upstream CLI is invoked.
 
-The supported config fields are `id`, `appPath`, `appResourcesPath`, empty `ios`,
-and `android.v8Flags`/`android.markingMode`. The application identifier must be a
+The supported config fields are `id`, `appPath`, `appResourcesPath`, `buildPath`,
+app `ios.NativeSource`, and `android.v8Flags`/`android.markingMode`. The application identifier must be a
 dotted identifier. Paths become canonical absolute existing directories, defaulting
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
+
+App `ios.NativeSource` is an array of unique `{name,path}` declarations. Relative
+paths resolve from the app, including workspace paths outside it. File globs or
+directories must select ordinary supported iOS source/header/modulemap files;
+empty matches, unsupported files and symlinks inside selected trees fail. Each
+selected file is read/fingerprinted. Repeated physical membership is compiled
+once, preferring installed-package ownership over an explicit app selection.
+Removal drops a selector's membership unless an installed contribution still owns
+that file. Plugin-level NativeSource
+and remote SPMPackages remain unavailable. These declarations do not authorize
+source writes or dependency installation.
 
 Installed dependencies, optional dependencies and peers are traversed from each
 package's own Node lookup locations. Missing required packages fail; absent optional

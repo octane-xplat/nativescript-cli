@@ -36,7 +36,7 @@ func (generated) Invoke(context.Context, extension.Input) (extension.Result, err
 	return extension.Result{NativeFiles: []extension.NativeFile{{Platform: "ios", Kind: "source", Path: "H1Generated.swift", Content: []byte(swiftSource)}}}, nil
 }
 
-func inspect(built ns.BuildResult, generated bool, saved string) (map[string]any, error) {
+func inspect(built ns.BuildResult, generated bool, saved string, configured bool) (map[string]any, error) {
 	if len(built.Artifacts) != 1 || built.Artifacts[0].Kind != "app" {
 		return nil, errors.New("expected one actual iOS app")
 	}
@@ -69,7 +69,7 @@ func inspect(built ns.BuildResult, generated bool, saved string) (map[string]any
 	var fingerprint struct {
 		Hash    string
 		Sources []struct {
-			Type, ID, Hash string
+			Type, ID, FilePath, Hash string
 		}
 	}
 	if err := json.Unmarshal(record, &fingerprint); err != nil || len(fingerprint.Hash) != 64 {
@@ -77,7 +77,11 @@ func inspect(built ns.BuildResult, generated bool, saved string) (map[string]any
 	}
 	count := 0
 	for _, source := range fingerprint.Sources {
-		if source.Type == "contents" && source.ID == "xplat-ns/extension-native/v1" {
+		matches := source.Type == "contents" && source.ID == "xplat-ns/extension-native/v1"
+		if configured {
+			matches = source.Type == "file" && source.FilePath == "native-source/ios/H1Configured/H1Generated.swift"
+		}
+		if matches {
 			if len(source.Hash) != 64 {
 				return nil, errors.New("generated native compatibility source excluded")
 			}
@@ -123,10 +127,17 @@ func main() {
 	}
 }
 func run() (result error) {
-	if len(os.Args) != 3 {
-		return errors.New("usage: swift-consumer ABSOLUTE_APP NEW_EVIDENCE_JSON")
+	if len(os.Args) != 3 && len(os.Args) != 4 {
+		return errors.New("usage: swift-consumer ABSOLUTE_APP NEW_EVIDENCE_JSON [configured-with|configured-removed]")
 	}
 	app, saved := os.Args[1], os.Args[2]
+	phase := ""
+	if len(os.Args) == 4 {
+		phase = os.Args[3]
+		if phase != "configured-with" && phase != "configured-removed" {
+			return errors.New("unknown configured source phase")
+		}
+	}
 	if !filepath.IsAbs(app) || !filepath.IsAbs(saved) {
 		return errors.New("absolute app and evidence paths required")
 	}
@@ -137,6 +148,9 @@ func run() (result error) {
 	env := os.Environ()
 	writer, flags, prefix := log.Writer(), log.Flags(), log.Prefix()
 	evidence := map[string]any{"boundary": "real unsigned iOS simulator debug compilation and generated Swift class removal; no guest, runtime, installer or release claim"}
+	if phase != "" {
+		evidence["configuredPhase"] = phase
+	}
 	defer func() {
 		now, _ := os.Getwd()
 		globals := now == cwd && reflect.DeepEqual(env, os.Environ()) && log.Writer() == writer && log.Flags() == flags && log.Prefix() == prefix
@@ -157,7 +171,11 @@ func run() (result error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
 	q := ns.BuildRequest{ProjectDir: app, OutputDir: filepath.Join(app, "state"), Target: ns.Target{Platform: ns.IOS, Configuration: ns.Debug, Destination: ns.Destination{Kind: ns.Simulator, ID: "generic", Architecture: "arm64"}}, IOS: ns.IOSBuildOptions{SigningMode: "disabled"}}
-	client, err := ns.New(ns.Options{OTAStartup: true, Extensions: []extension.Extension{generated{}}})
+	registrations := []extension.Extension{generated{}}
+	if phase != "" {
+		registrations = nil
+	}
+	client, err := ns.New(ns.Options{OTAStartup: true, Extensions: registrations})
 	if err != nil {
 		return err
 	}
@@ -165,7 +183,22 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	first, err := inspect(built, true, saved+".with-native")
+	evidence["build"] = built
+	if phase != "" {
+		present := phase == "configured-with"
+		inspection, err := inspect(built, present, saved+"."+phase, true)
+		if err != nil {
+			return err
+		}
+		key := "removed"
+		if present {
+			key = "withNative"
+		}
+		evidence[key] = inspection
+		fmt.Println("PASS configured Swift class definition and compiled canonical stamp", phase)
+		return nil
+	}
+	first, err := inspect(built, true, saved+".with-native", false)
 	if err != nil {
 		return err
 	}
@@ -178,7 +211,7 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	second, err := inspect(removed, false, saved+".removed")
+	second, err := inspect(removed, false, saved+".removed", false)
 	if err != nil {
 		return err
 	}

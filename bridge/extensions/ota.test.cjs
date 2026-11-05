@@ -4,7 +4,7 @@ const fs=require('node:fs');const path=require('node:path');const os=require('no
 const ota=require('./ota.cjs');
 test('canonical adapter rejects incomplete inputs',async()=>{await assert.rejects(ota({configuration:'debug'}),e=>e.code==='invalid_input');});
 test('packed canonical producer: actual Apple tool identity, fixture native pins and boot', {skip:!process.env.OTA_CONSUMER_DIR},async()=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'canonical-ota-'));const work=fs.mkdtempSync(path.join(os.tmpdir(),'canonical-output-'));
+ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'canonical-ota-')));const work=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'canonical-output-')));
  try {
  const consumer=path.resolve(process.env.OTA_CONSUMER_DIR);
  fs.copyFileSync(path.join(consumer,'package.json'),path.join(root,'package.json'));fs.copyFileSync(path.join(consumer,'bun.lock'),path.join(root,'bun.lock'));
@@ -18,7 +18,7 @@ test('packed canonical producer: actual Apple tool identity, fixture native pins
  fs.writeFileSync(path.join(native,'Podfile.lock'),'PODS:\n  - Fixture (1.0.0)\n');
  fs.mkdirSync(path.join(native,'NativeScriptApp.xcworkspace/xcshareddata/swiftpm'),{recursive:true});
  fs.writeFileSync(path.join(native,'NativeScriptApp.xcworkspace/xcshareddata/swiftpm/Package.resolved'),JSON.stringify({version:2,pins:[{identity:'fixture',state:{revision:'abc',version:'1.0.0'}}]}));
- const run=async(configuration='release',extensionNative=[])=>{const stage=fs.mkdtempSync(path.join(work,'stage-'));const result=await ota({projectDir:root,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:stage,platform:'ios',configuration,nativeConfig,architecture:'arm64',destinationKind:'simulator',extensionNative});return {result,stage,record:JSON.parse(fs.readFileSync(path.join(stage,'native/.xplat/fingerprints/ios.json')))};};
+ const run=async(configuration='release',extensionNative=[],sourceFiles={})=>{const stage=fs.mkdtempSync(path.join(work,'stage-'));const result=await ota({projectDir:root,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:stage,platform:'ios',configuration,nativeConfig,architecture:'arm64',destinationKind:'simulator',extensionNative,sourceFiles});return {result,stage,record:JSON.parse(fs.readFileSync(path.join(stage,'native/.xplat/fingerprints/ios.json')))};};
  const first=await run();assert.match(first.result.hash,/^[a-f0-9]{64}$/);assert.match(fs.readFileSync(path.join(first.stage,'native/internal/main.m'),'utf8'),new RegExp(first.result.hash));
  assert.ok(first.record.sources.some(s=>JSON.stringify(s).includes('Podfile.lock')));assert.ok(first.record.sources.some(s=>JSON.stringify(s).includes('Package.resolved')));
  fs.copyFileSync(path.join(first.stage,'native/internal/main.m'),boot);
@@ -48,6 +48,17 @@ test('packed canonical producer: actual Apple tool identity, fixture native pins
  fs.mkdirSync(path.join(root,'custom-state/authored'));fs.writeFileSync(path.join(root,'custom-state/authored/value'),'keep');
  const authoredStage=fs.mkdtempSync(path.join(owned,'ota-'));await ota({projectDir:root,projectStateDir:owned,nativeDir:ownedNative,bundleDir:path.join(ownedNative,'app'),stageDir:authoredStage,platform:'ios',configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator'});assert.equal(fs.readFileSync(path.join(authoredStage,'project/custom-state/authored/value'),'utf8'),'keep');
  fs.rmSync(path.join(root,'custom-state'),{recursive:true});
+ const configuredDir=path.join(work,'configured');fs.mkdirSync(configuredDir);const configuredFile=path.join(configuredDir,'Configured.swift');fs.writeFileSync(configuredFile,'class Configured {}');
+ const configuredDigest=()=>require('node:crypto').createHash('sha256').update(fs.readFileSync(configuredFile)).digest('hex');
+ const configuredPath=path.relative(root,configuredDir)+'/*.swift';
+ nativeConfig.ios={NativeSource:[{name:'Configured',path:configuredPath}]};fs.writeFileSync(path.join(root,'nativescript.config.js'),'module.exports='+JSON.stringify(nativeConfig));
+ let sourceFiles={[fs.realpathSync(configuredFile)]:configuredDigest()};
+ const configured=await run('release',[],sourceFiles);assert.ok(configured.record.sources.some(s=>s.type==='file'&&s.filePath==='native-source/ios/Configured/Configured.swift'&&s.hash===configuredDigest()));
+ assert.equal((await run('release',[],sourceFiles)).result.hash,configured.result.hash);
+ fs.writeFileSync(configuredFile,'class Changed {}');await assert.rejects(run('release',[],sourceFiles),e=>e.code==='invalid_input');
+ sourceFiles={[fs.realpathSync(configuredFile)]:configuredDigest()};assert.notEqual((await run('release',[],sourceFiles)).result.hash,configured.result.hash);assert.equal(fs.readFileSync(configuredFile,'utf8'),'class Changed {}');
+ nativeConfig.ios.NativeSource[0].path=path.join(configuredDir,'*.swift');fs.writeFileSync(path.join(root,'nativescript.config.js'),'module.exports='+JSON.stringify(nativeConfig));await assert.rejects(run('release',[],sourceFiles),e=>e.code==='unavailable');
+ delete nativeConfig.ios;fs.writeFileSync(path.join(root,'nativescript.config.js'),'module.exports='+JSON.stringify(nativeConfig));assert.equal((await run()).result.hash,first.result.hash);
  fs.writeFileSync(path.join(native,'Podfile.lock'),'PODS:\n  - Fixture (2.0.0)\n');assert.notEqual((await run()).result.hash,first.result.hash);
  const debug=await run('debug');assert.equal(debug.result.release,false);assert.notEqual(debug.result.hash,first.result.hash);
  fs.writeFileSync(boot,'// xplat-updates:start\n incomplete');const before=fs.readFileSync(boot,'utf8');await assert.rejects(run());assert.equal(fs.readFileSync(boot,'utf8'),before);

@@ -2,6 +2,7 @@ package nativescript_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -201,6 +202,71 @@ func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	p, err = client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
 	if err != nil || p.ApplicationID != "org.example.relative" {
 		t.Fatal("relative config import", p, err)
+	}
+}
+
+func TestResolveConfiguredNativeSources(t *testing.T) {
+	root := resolutionApp(t)
+	shared := t.TempDir()
+	resolutionFile(t, shared, "src/Bridge.swift", "class Bridge {}")
+	resolutionFile(t, shared, "src/ignored.txt", "not selected")
+	relative, err := filepath.Rel(root, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := filepath.ToSlash(relative) + "/src/**/*.swift"
+	config := func(groups any) {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{"id": "org.test.sources", "ios": map[string]any{"NativeSource": groups}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolutionFile(t, root, "nativescript.config.cjs", "module.exports="+string(data))
+	}
+	config([]map[string]string{{"name": "Bridge", "path": pattern}})
+	client, _ := ns.New(ns.Options{})
+	resolve := func() ns.Project {
+		t.Helper()
+		p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	first := resolve()
+	if len(first.Contributions) != 1 || first.Contributions[0].Kind != "source" || first.Contributions[0].Platform != "ios" || filepath.Base(first.Contributions[0].Path) != "Bridge.swift" {
+		t.Fatal("configured membership", first.Contributions)
+	}
+	resolutionFile(t, shared, "src/Bridge.swift", "class Bridge { let changed = true }")
+	if resolve().Revision == first.Revision {
+		t.Fatal("source bytes not in identity")
+	}
+	resolutionFile(t, shared, "src/Second.swift", "class Second {}")
+	if len(resolve().Contributions) != 2 {
+		t.Fatal("new glob member missing")
+	}
+	config([]map[string]string{})
+	if len(resolve().Contributions) != 0 {
+		t.Fatal("removed declaration retained membership")
+	}
+	for _, groups := range []any{"invalid", []map[string]string{{"name": "Missing", "path": "missing/**/*.swift"}}, []map[string]string{{"name": "Same", "path": pattern}, {"name": "Same", "path": pattern}}} {
+		config(groups)
+		if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) {
+			t.Fatal("invalid NativeSource accepted", err)
+		}
+	}
+}
+
+func TestConfiguredSourcesDeduplicateInstalledOwnership(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native":"1"}}`)
+	resolutionFile(t, root, "node_modules/native/package.json", `{"name":"native","version":"1","nativescript":{"platforms":{"ios":"8"}}}`)
+	resolutionFile(t, root, "node_modules/native/platforms/ios/Bridge.swift", "class Bridge {}")
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.test.sources',ios:{NativeSource:[{name:'Explicit',path:'node_modules/native/platforms/ios/*.swift'}]}}`)
+	client, _ := ns.New(ns.Options{})
+	p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(p.Contributions) != 1 || filepath.Base(p.Contributions[0].PackageDirectory) != "native" {
+		t.Fatal("duplicate membership or lost package ownership", p.Contributions, err)
 	}
 }
 

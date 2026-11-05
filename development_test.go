@@ -2,6 +2,7 @@ package nativescript
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/octane-xplat/nativescript-cli/extension"
 	"log"
@@ -40,11 +41,12 @@ func TestDevelopmentTeardownPreservesFailures(t *testing.T) {
 // Only native preparation/compilation/device adapters are fixtures here. The
 // public workflow, resolver, helper, native Vite engine and ownership are real.
 type developmentNativeFixture struct {
-	compileError error
-	compiled     atomic.Int32
-	launched     atomic.Int32
-	retired      atomic.Int32
-	active       atomic.Int32
+	compileError      error
+	compiled          atomic.Int32
+	launched          atomic.Int32
+	retired           atomic.Int32
+	active            atomic.Int32
+	configuredSources atomic.Int32
 }
 
 type developmentNativeExtension struct{}
@@ -56,9 +58,104 @@ func (developmentNativeExtension) Invoke(context.Context, extension.Input) (exte
 	return extension.Result{NativeFiles: []extension.NativeFile{{Platform: "ios", Kind: "source", Path: "Development.swift", Content: []byte("class Development {}")}}}, nil
 }
 
-func (f *developmentNativeFixture) Prepare(_ context.Context, _ project.Resolved, l workspace.Lease) (project.Prepared, error) {
+func (f *developmentNativeFixture) Prepare(_ context.Context, r project.Resolved, l workspace.Lease) (project.Prepared, error) {
+	count := 0
+	for _, group := range r.NativeSourceGroups {
+		count += len(group.Files)
+	}
+	f.configuredSources.Store(int32(count))
 	p := project.Prepared{Identity: l.Layout().Identity, NativeDir: filepath.Join(l.Layout().GeneratedRoot, "native"), BundleDir: filepath.Join(l.Layout().GeneratedRoot, "bundle")}
 	return p, os.MkdirAll(p.NativeDir, 0700)
+}
+
+func TestPublicConfiguredSourceDevelopment(t *testing.T) {
+	installed := os.Getenv("NS_NATIVE_VITE_DIR")
+	if installed == "" {
+		t.Skip("requires installed native Vite engine; compiler/device remain fixtures")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	dir, shared := t.TempDir(), t.TempDir()
+	for _, name := range []string{"app", "App_Resources"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(file, body string) {
+		t.Helper()
+		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(dir, "package.json"), `{"name":"configured-dev","version":"1.0.0","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3"}}`)
+	write(filepath.Join(dir, "app/app.ts"), `export const initial=41;`)
+	write(filepath.Join(shared, "Configured.swift"), "class Configured {}")
+	relative, err := filepath.Rel(dir, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _ := json.Marshal(map[string]any{"id": "org.example.nativedev", "appPath": "app", "appResourcesPath": "App_Resources", "ios": map[string]any{"NativeSource": []map[string]string{{"name": "Configured", "path": filepath.ToSlash(relative) + "/*.swift"}}}})
+	write(filepath.Join(dir, "nativescript.config.ts"), "export default "+string(config))
+	if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	host := jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS("assets")}, CacheDir: t.TempDir()}
+	native := &developmentNativeFixture{}
+	c, _ := New(Options{})
+	c.engine = workflow.Engine{Factory: func(map[string]string) workflow.Stages {
+		return workflow.Stages{Resolver: resolver.Resolver{Host: host}, Bundler: bundle.Adapter{Host: host}, Preparer: native, Compiler: native, Devices: native, Launcher: native}
+	}}
+	session, err := c.Run(ctx, RunRequest{Development: &DevelopmentOptions{}, DeviceID: "fixture", Build: BuildRequest{ProjectDir: dir, OutputDir: filepath.Join(dir, ".generated"), Target: Target{Platform: IOS, Configuration: Debug, Destination: Destination{Kind: Simulator, ID: "fixture", Architecture: "arm64"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close(context.Background())
+	wait := func(launches, sources int32) {
+		t.Helper()
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for native.launched.Load() < launches || session.DevelopmentEndpoint().URL == "" {
+			select {
+			case <-ctx.Done():
+				t.Fatal("configured-source rebuild timed out", ctx.Err())
+			case <-ticker.C:
+			}
+		}
+		if native.launched.Load() != launches || native.compiled.Load() != launches || native.configuredSources.Load() != sources {
+			t.Fatal("configured-source handoff", native.launched.Load(), native.compiled.Load(), native.configuredSources.Load())
+		}
+	}
+	wait(1, 1)
+	first := session.DevelopmentEndpoint()
+	write(filepath.Join(shared, "unmatched.txt"), "not a native input")
+	if err := os.MkdirAll(filepath.Join(shared, "state"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(shared, "state/generation.json"), "{}")
+	time.Sleep(700 * time.Millisecond)
+	wait(1, 1)
+	added := filepath.Join(shared, "Second.swift")
+	write(added, "class Second {}")
+	wait(2, 2)
+	if session.DevelopmentEndpoint().URL == first.URL {
+		t.Fatal("configured addition retained old server")
+	}
+	if err := os.Remove(added); err != nil {
+		t.Fatal(err)
+	}
+	wait(3, 1)
+	last := session.DevelopmentEndpoint()
+	for range 2 {
+		if err := session.Close(context.Background()); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	}
+	if native.active.Load() != 0 || native.retired.Load() != 3 {
+		t.Fatal("configured source session leaked", native.active.Load(), native.retired.Load())
+	}
+	if _, err := http.Get(last.URL); err == nil {
+		t.Fatal("configured source server survived close")
+	}
 }
 func (f *developmentNativeFixture) Compile(ctx context.Context, p project.Prepared, b project.Bundle, l workspace.Lease) ([]project.Artifact, error) {
 	if f.compileError != nil {

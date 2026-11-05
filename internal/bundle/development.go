@@ -89,6 +89,9 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 		Configuration: target.Configuration, ApplicationID: r.ApplicationID, Mode: "native", Port: port,
 		HMRHost: settings.HMRHost, Directory: filepath.Join(root, "bundle"), CacheDirectory: filepath.Join(root, "cache")}
 	q.NativeInputs = []string{r.Config.AppResourcesPath}
+	if target.Platform == "ios" {
+		q.NativeSourceGroups = append([]project.NativeSourceGroup(nil), r.NativeSourceGroups...)
+	}
 	q.NativeSources = append([]project.Source(nil), r.Sources...)
 	for _, name := range []string{"package.json", "nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"} {
 		q.NativeInputs = append(q.NativeInputs, filepath.Join(canonical, name))

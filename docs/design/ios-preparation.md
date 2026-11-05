@@ -29,6 +29,19 @@ Configuration accepts XML `Info.plist`, entitlements and xcconfig includes.
 Other plists fail unavailable. Package files apply deterministically before app
 files, so application plist values override package values. Plist merge is shallow.
 
+App `ios.NativeSource` selectors feed these same source/header/modulemap inputs,
+including workspace-relative files outside the app. With OTAStartup, the helper
+creates a private snapshot preserving their relative workspace layout and checks
+selected bytes against the resolver's digests before and after canonical
+collection. The caller's files/config remain untouched. Current canonical
+snapshot support requires ordinary canonical source paths outside node_modules;
+absolute external selectors and symlink ancestry fail unavailable. Use explicit
+workspace-relative paths for this supported form. Removing a declaration removes
+its project membership unless an installed contribution still owns the file.
+Source packages still must remain immutable
+during the operation; this does not add arbitrary plugin config or remote SPM
+support.
+
 A local `Package.swift` describes library products through `swift package
 dump-package`. Its implementation subtree is package-owned, not also compiled by
 the application. Podspec directories have the same ownership rule. Tool caches

@@ -20,3 +20,13 @@ This does not boot a guest, install/launch an app, change signing/trust, or exer
 an OTA installer. Direct registration is the scope here; transport parity and
 Android three-form compilation have separate qualification. Cancellation and
 runtime native binding behavior are not certified by a successful compilation.
+
+The optional `configured-with` and `configured-removed` phases each perform one
+Build with no extension registration. They require an app-owned
+`ios.NativeSource` group named `H1Configured` selecting `H1Generated.swift`, then
+its removal by the fixture owner between phases. The same class symbol and the
+canonical `native-source/ios/H1Configured/H1Generated.swift` source entry must be
+present/absent respectively. The consumer never edits authored source/config.
+Use separate new evidence paths and compare the retained full records and native
+identities across phases. These phases qualify configured source ownership,
+without claiming that a build extension generated the input.

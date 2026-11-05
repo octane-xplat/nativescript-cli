@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { stripTypeScriptTypes, createRequire } = require('node:module');
 const coreAdapter=require('./core.cjs');
+const expandNativeSources=require('./native-sources.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
 const safeFailures = new WeakSet();
@@ -18,7 +19,7 @@ function object(value, label) {
 }
 async function resolve({ projectDir }) {
   if (!path.isAbsolute(projectDir || '')) fail('invalid_input', 'Project directory must be absolute');
-  const sources = new Map(), packages = new Map(), edges = [], contributions = [];
+  const sources = new Map(), packages = new Map(), edges = [], contributions = [], nativeSourceGroups = [];
   function read(file) {
     const bytes = fs.readFileSync(file);
     sources.set(fs.realpathSync(file), crypto.createHash('sha256').update(bytes).digest('hex'));
@@ -86,7 +87,16 @@ async function resolve({ projectDir }) {
   }
   function collect(dir, owner, cfg, resources, core=false) {
     keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android'], 'config');
-    if (cfg.ios !== undefined) keys(cfg.ios, [], 'iOS config');
+    if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource'], 'iOS config');
+    if(cfg.ios?.NativeSource!==undefined){
+      if(dir!==root)fail('unavailable','Plugin NativeSource declarations require a qualified canonical source contract');
+      let groups;
+      try{groups=expandNativeSources(dir,cfg.ios.NativeSource);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','NativeSource requires unique named paths matching supported ordinary iOS source/header/modulemap files');}
+      for(const group of groups){
+        nativeSourceGroups.push({name:group.name,path:group.pattern,root:group.base,files:[...new Set(group.files.map(f=>f.realPath))].sort()});
+        for(const file of group.files){read(file.realPath);contributions.push({packageDirectory:owner,platform:'ios',kind:file.kind,path:file.realPath});}
+      }
+    }
     if (cfg.android !== undefined) keys(cfg.android, ['v8Flags', 'markingMode'], 'Android config');
     for (const key of ['v8Flags', 'markingMode']) if (cfg.android?.[key] !== undefined && typeof cfg.android[key] !== 'string') fail('invalid_input', 'Android runtime settings must be strings');
     if (fs.existsSync(path.join(dir, 'hooks'))) fail('unavailable', 'Legacy package hooks are unsupported; migrate to the extension SDK before preparing');
@@ -199,7 +209,16 @@ async function resolve({ projectDir }) {
     }
   }
   await visit(root, app, true);
-  const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions, sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
+  // Explicit NativeSource groups can select a file already owned by an installed
+  // native package. Compile physical membership once, preferring that package's
+  // ownership over an app declaration; otherwise choose deterministically.
+  const membership=new Map();
+  for(const c of contributions){
+    const key=JSON.stringify([c.platform,c.kind,c.path]),previous=membership.get(key);
+    if(!previous||(previous.packageDirectory===root&&c.packageDirectory!==root)||(previous.packageDirectory!==root&&c.packageDirectory!==root&&c.packageDirectory<previous.packageDirectory))membership.set(key,c);
+  }
+  const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
+  if(nativeSourceGroups.length)result.nativeSourceGroups=nativeSourceGroups;
   result.revision = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');
   return result;
 };
