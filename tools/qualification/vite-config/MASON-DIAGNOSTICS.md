@@ -54,6 +54,13 @@ captured nested frame-write calls. Its assertions describe the known density3,
 assertions. Observing the corruption path does not qualify a repair, full
 lifecycle, transform behavior or ABI.
 
+New geometry traces also snapshot native bounds, layer position/anchor,
+CATransform3D numeric fields and Core layout/transformation flags around the same
+calls. They do not derive a cache value from the visual bounding box. Core stores
+the requested frame before resetting/restoring a transformed layer, so a generic
+native-frame-to-cache copy is not a qualified adoption rule. The geometry fields
+require a newly staged native probe; older retained traces do not contain them.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh

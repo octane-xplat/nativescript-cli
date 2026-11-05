@@ -10,9 +10,24 @@ function frame(value: any) {
     return Object.values(result).every(item => typeof item === 'number' && Number.isFinite(item)) ? result : null;
   }, null);
 }
+function numbers(value: any, keys: string[]) {
+  return safe(() => {
+    const result = Object.fromEntries(keys.map(key => [key, value[key]]));
+    return Object.values(result).every(item => typeof item === 'number' && Number.isFinite(item)) ? result : null;
+  }, null);
+}
+const transformKeys = ['m11', 'm12', 'm13', 'm14', 'm21', 'm22', 'm23', 'm24',
+  'm31', 'm32', 'm33', 'm34', 'm41', 'm42', 'm43', 'm44'];
 function state(view: any) {
   return { nativeFrame: safe(() => frame(view.nativeViewProtected.frame), null),
-    cachedFrame: safe(() => frame(view._cachedFrame), null) };
+    cachedFrame: safe(() => frame(view._cachedFrame), null),
+    nativeBounds: safe(() => frame(view.nativeViewProtected.bounds), null),
+    layerPosition: safe(() => numbers(view.nativeViewProtected.layer.position, ['x', 'y']), null),
+    layerAnchorPoint: safe(() => numbers(view.nativeViewProtected.layer.anchorPoint, ['x', 'y']), null),
+    layerTransform: safe(() => numbers(view.nativeViewProtected.layer.transform, transformKeys), null),
+    isTransformed: safe(() => typeof view._isTransformed === 'boolean' ? view._isTransformed : null, null),
+    isLaidOut: safe(() => typeof view._isLaidOut === 'boolean' ? view._isLaidOut : null, null),
+    layoutFlags: safe(() => typeof view._privateFlags === 'number' && Number.isFinite(view._privateFlags) ? view._privateFlags : null, null) };
 }
 function insets(value: any) {
   return safe(() => {
