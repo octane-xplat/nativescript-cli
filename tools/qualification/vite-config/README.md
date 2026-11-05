@@ -112,3 +112,34 @@ Set `NS_XPLAT_VITE_VENDOR_ALIAS_FAILURE=1` with the patched `pinned` profile to
 also replace the alias in the disposable test app with an unsupported virtual
 destination. The check requires startup failure and helper retirement before
 the caller deadline. It never changes the installed fixture or original configs.
+
+## Patched preset native runtime probe
+
+After staging a new pinned native workspace and applying all six patches, add
+the maintained probe with the same read-only pinned source:
+
+```sh
+python3 tools/qualification/vite-config/stage-runtime-probe.py /path/to/pinned-source .cache/new-patched-native-workspace
+python3 tools/qualification/vite-config/qualify-runtime.py .cache/new-patched-native-workspace/apps/mobile "$HOME/dev/reports/nativescript-cli/new-preset-runtime"
+```
+
+The stager verifies patch-file identities, preserves the original Vite/Bamboo
+configs and copies the byte-exact shared app package manifest. That manifest
+declares Octane ownership for shared source outside the mobile app root. It
+adds only a nonce, probe component and CSS variables to this task-owned fixture.
+The original full app and its dependency graph are not staged by this probe.
+
+The orchestrator compiles public-library consumers, reserves native compilation,
+then creates a fresh shutdown iPhone17 Pro/iOS27 guest. It hands ownership to a
+resident/exclusive broker reservation before boot/install/launch. This fixture
+currently requires Darwin arm64 and that installed simulator runtime. It uses
+unsigned simulator builds and never imports a CA, changes signing, or publishes.
+
+The guest emits nonce/PID/boot-tagged text health. The runtime consumer checks a
+live native view's Bamboo color/spacing through mount, prop update, unmount and
+remount, then heartbeat progression in the same process and repeated session
+close. It rejects cleanup failures even when joined with cancellation. The
+orchestrator removes its installation, shuts down/deletes its created guest and
+releases reservations on success or failure. Reports distinguish Build, runtime
+and resource ownership results. Failed observations remain failures; the harness
+does not establish HMR, Mason layout, full app behavior, OTA or release support.
