@@ -143,3 +143,21 @@ orchestrator removes its installation, shuts down/deletes its created guest and
 releases reservations on success or failure. Reports distinguish Build, runtime
 and resource ownership results. Failed observations remain failures; the harness
 does not establish HMR, Mason layout, full app behavior, OTA or release support.
+
+The optional `stage-runtime-probe.py --profile mason` stages a native Mason
+container with two ordinary NativeScript children. It requires a200x140 root,
+an80x30 first child at20,20 and a60x20 sibling at7,63. A prop update must resize
+the root to220x160 and first child to100x40, moving the sibling to7,73; remount
+must restore the initial bounds. Geometry comes from native view measurements,
+with less than0.75 DIP rounding tolerance. The ordinary Bamboo style and
+same-process lifecycle assertions still apply. Bounded trace wrappers call the
+original layout methods and record only dimensions and frame coordinates.
+
+This profile currently reproduces a real resize failure with the pinned
+six-patched runtime and Mason core1.0.0-beta.5: initial layout passes, then the
+first child's frame becomes100x0 at20,62. Two actual guest runs reproduce it;
+the instrumented run observes the correct100x40 native frame before a later
+Core/Mason foreign-layout pass. Root/sibling resize and native CSS stay correct.
+The failing case is retained; Mason resize/unmount/remount qualification is open.
+This finding does not invalidate the separately qualified Label profile at its
+original commit or establish an exact upstream root cause.

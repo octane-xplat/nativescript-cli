@@ -1,7 +1,8 @@
 import { Application, File, Page, knownFolders } from '@nativescript/core';
 import { renderNativeScriptApp } from '@nativescript-community/octane';
+import { View as MasonView } from '@octane-xplat/nativescript-mason-core';
 import { Probe } from '../../../packages/app/src/runtime-probe';
-import { nonce } from './runtime-nonce';
+import { nonce, profile } from './runtime-nonce';
 import './runtime.css';
 
 const boot = String(Date.now()) + ':' + String(Math.random());
@@ -13,6 +14,50 @@ let phase = 'mount';
 let ticks = 0;
 let phaseTicks = 0;
 let failure = '';
+const trace: object[] = [];
+const traced = new WeakSet<object>();
+
+function traceLayout(view: any) {
+  if (!view || traced.has(view)) return;
+  traced.add(view);
+  for (const name of ['onMeasure', 'onLayout', '_masonLayoutForeignDescendants']) {
+    const original = view[name];
+    if (typeof original !== 'function') continue;
+    view[name] = function (...args: number[]) {
+      const result = original.apply(this, args);
+      const label = page?.getViewById('preset-probe') as any;
+      const frame = label?.nativeViewProtected?.frame;
+      trace.push({ phase, id: view.id, event: name, args,
+        measuredWidth: label?.getMeasuredWidth(), measuredHeight: label?.getMeasuredHeight(),
+        width: label?.width, height: label?.height,
+        nativeFrame: frame ? { x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height } : null });
+      if (trace.length > 40) trace.shift();
+      return result;
+    };
+  }
+}
+
+function layoutSample() {
+  const container = page?.getViewById('mason-probe') as any;
+  const rect = (view: any) => {
+    const size = view?.getActualSize();
+    const location = container && view?.getLocationRelativeTo(container);
+    return { width: size?.width, height: size?.height, x: location?.x, y: location?.y };
+  };
+  return { containerIsMason: container instanceof MasonView, containerNative: !!container?.nativeViewProtected,
+    container: rect(container), first: rect(page?.getViewById('preset-probe')),
+    second: rect(page?.getViewById('mason-sibling')) };
+}
+function layoutReady(layout: ReturnType<typeof layoutSample>) {
+  const updated = phase === 'update';
+  const near = (value: number | undefined, expected: number) => typeof value === 'number' && Math.abs(value - expected) < 0.75;
+  return layout.containerIsMason && layout.containerNative &&
+    near(layout.container.width, updated ? 220 : 200) && near(layout.container.height, updated ? 160 : 140) &&
+    near(layout.first.x, 20) && near(layout.first.y, 20) &&
+    near(layout.first.width, updated ? 100 : 80) && near(layout.first.height, updated ? 40 : 30) &&
+    near(layout.second.x, 7) && near(layout.second.y, updated ? 73 : 63) &&
+    near(layout.second.width, 60) && near(layout.second.height, 20);
+}
 
 Application.run({ create() {
   page = new Page();
@@ -27,13 +72,18 @@ setInterval(() => {
     ticks++;
     phaseTicks++;
     const label = page?.getViewById('preset-probe') as any;
-    const sample = { phase, ticks, text: label?.text, className: label?.className,
+    if (profile === 'mason') {
+      traceLayout(label);
+      traceLayout(page?.getViewById('mason-probe'));
+    }
+    const layout = profile === 'mason' ? layoutSample() : undefined;
+    const sample = { phase, ticks, text: label?.text, className: label?.className, layout,
       loaded: !!label?.isLoaded, nativeView: !!label?.nativeViewProtected,
       color: label?.color ? [label.color.r, label.color.g, label.color.b] : null,
       marginTop: label?.marginTop, marginLeft: label?.marginLeft };
     const ready = label?.isLoaded && label?.nativeViewProtected &&
       label.color?.r === 18 && label.color?.g === 52 && label.color?.b === 86 &&
-      label.marginTop === 13 && label.marginLeft === 13;
+      label.marginTop === 13 && label.marginLeft === 13 && (!layout || layoutReady(layout));
     if (phase === 'mount' && ready && label.text === 'PINNED_PRESET_20261105:1' && phaseTicks >= 4) {
       snapshots.push(sample);
       root.render(Probe as never, { revision: 2 });
@@ -49,8 +99,8 @@ setInterval(() => {
       snapshots.push(sample);
       phase = 'complete'; phaseTicks = 0;
     }
-    file.writeTextSync(JSON.stringify({ nonce, boot, pid: NSProcessInfo.processInfo.processIdentifier,
-      ticks, phase, phaseTicks, sample, snapshots, failure }));
+    file.writeTextSync(JSON.stringify({ nonce, profile, boot, pid: NSProcessInfo.processInfo.processIdentifier,
+      ticks, phase, phaseTicks, sample, snapshots, trace, failure }));
   } catch (error) {
     failure = String(error);
     file.writeTextSync(JSON.stringify({ nonce, boot, ticks, phase, failure }));

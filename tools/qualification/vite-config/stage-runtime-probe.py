@@ -10,6 +10,7 @@ import shutil
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('source', type=Path, help='read-only pinned consumer source')
 parser.add_argument('workspace', type=Path)
+parser.add_argument('--profile', choices=['label', 'mason'], default='label')
 args = parser.parse_args()
 workspace = args.workspace.resolve()
 app = workspace / 'apps/mobile'
@@ -41,8 +42,9 @@ copies = {'main.tsx': app / 'src/main.tsx',
           'runtime-probe.tsx': workspace / 'packages/app/src/runtime-probe.tsx'}
 hashes = {'packages/app/package.json': hashlib.sha256(owner.read_bytes()).hexdigest()}
 for name, destination in copies.items():
-    shutil.copyfile(fixture / name, destination)
+    selected = 'runtime-probe-mason.tsx' if name == 'runtime-probe.tsx' and args.profile == 'mason' else name
+    shutil.copyfile(fixture / selected, destination)
     hashes[name] = hashlib.sha256(destination.read_bytes()).hexdigest()
-(app / 'src/runtime-nonce.ts').write_text('export const nonce=' + json.dumps(nonce) + ';\n')
-(app / 'runtime-probe.json').write_text(json.dumps({'nonce': nonce, 'filesSHA256': hashes}, indent=2) + '\n')
+(app / 'src/runtime-nonce.ts').write_text('export const nonce=' + json.dumps(nonce) + ';\nexport const profile=' + json.dumps(args.profile) + ';\n')
+(app / 'runtime-probe.json').write_text(json.dumps({'nonce': nonce, 'profile': args.profile, 'filesSHA256': hashes}, indent=2) + '\n')
 print('Staged native preset lifecycle/style probe; original Vite/Bamboo configs unchanged')
