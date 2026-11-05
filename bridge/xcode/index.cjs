@@ -36,6 +36,7 @@ const values = section => Object.entries(section || {}).filter(([key,v]) => !key
 module.exports = async ({ resolved, directory }) => {
   const normalize = value => Array.isArray(value) ? value.map(normalize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k,v])=>[k[0].toLowerCase()+k.slice(1),normalize(v)])) : value;
   resolved = normalize(resolved);
+  if(resolved)resolved.contributions??=[];
   if (!path.isAbsolute(directory || '') || !resolved?.applicationID) fail('invalid_input');
   const runtime = resolved.packages.find(p => p.name === '@nativescript/ios');
   if (!runtime || !['8.9.0','9.1.0'].includes(runtime.version)) fail('unavailable');

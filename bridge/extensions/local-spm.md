@@ -1,8 +1,8 @@
 # Selected local Swift package descriptor
 
-`local-spm.cjs` is a component for canonical fingerprint extra-source contents.
-It is not connected to OTA preparation; the declared-local-SPM OTA guard remains
-required until snapshot, publication and compiled-stamp integration are qualified.
+`local-spm.cjs` supplies canonical fingerprint extra-source contents to the private
+OTA helper. The public declared-local-SPM OTA guard remains required until native
+publication and compiled-stamp integration are qualified.
 
 `collect({projectDir, packages, sourceFiles, manifests})` is synchronous and
 read-only. It does not invoke Swift, resolve dependencies or create snapshots.
@@ -24,8 +24,8 @@ selected products, real manifest path, source SHA-256 and unmodified evaluated
 JSON. The helper checks the manifest hash before and after Swift evaluation; Go
 checks the receipt against the selected contributions and resolved identities
 before dependency tools start. It is not persisted as an OTA stamp or exposed in
-the public prepared-project API. OTA still needs source snapshot integration and
-freshness checks; this handoff alone does not lift the guard.
+the public prepared-project API. The private OTA helper consumes this receipt with
+source snapshots and freshness checks; this handoff alone does not lift the guard.
 
 The result is `{id, contents, sha256, inputs}`. `contents` is stable JSON with
 format `xplat-ns/local-spm/v1`, selected package names, sorted products, evaluated
@@ -50,3 +50,18 @@ not prove source snapshot consistency, native compilation, ABI compatibility,
 compiled fingerprint stamping, OTA publication or installer behavior.
 
 Run the component checks with `node --test bridge/extensions/local-spm.test.cjs`.
+
+`snapshot({destination, ...collectInputs})` requires a new child of an existing,
+real owned staging directory. It copies only byte-verified selected files into
+separate numbered roots, excluding SwiftPM caches. It never copies through the
+snapshot application's linked `node_modules` directory. Manifest metadata is
+rebased only for package-local absolute paths; the logical descriptor must remain
+identical. Its `recheck()` checks both original membership/bytes/evaluation and
+copied membership/bytes against the initial descriptor after the canonical producer
+has completed. Staging cleanup belongs to the operation owner.
+
+The OTA helper merges this data-only source with any extension-native extra source,
+rejects reserved-ID collisions, and verifies its exact presence and SHA-256 in the
+canonical output before creating the native output stage. App declarations without
+a matching selected preparation receipt reject. No local-package evaluation or
+dependency fetch is performed by this snapshot/OTA path.

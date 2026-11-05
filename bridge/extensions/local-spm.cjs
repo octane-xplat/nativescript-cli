@@ -62,4 +62,33 @@ function collect({projectDir,packages,sourceFiles,manifests}){
  const contents=stable({format:id,packages:selected});
  return {id,contents,sha256:sha(contents),inputs};
 }
-module.exports={collect,id};
+// Copy verified selected bytes outside the linked installed dependency tree.
+// Re-evaluate neither Swift nor selection; retain the preparation producer fact.
+function snapshot({destination,...request}){
+ if(!path.isAbsolute(destination||'')||fs.existsSync(destination)||fs.realpathSync(path.dirname(destination))!==path.dirname(destination))fail('invalid_input');
+ const descriptor=collect(request);
+ const roots=request.packages.map(pkg=>path.dirname(pkg.manifest));
+ if(roots.some(root=>inside(root,destination)||inside(destination,root)))fail('unavailable');
+ fs.mkdirSync(destination);
+ const packages=[],sourceFiles={},manifests={};
+ for(const [index,pkg] of request.packages.entries()){
+  const root=path.dirname(pkg.manifest),copy=path.join(destination,String(index));fs.mkdirSync(copy);
+  const selected=JSON.parse(descriptor.contents).packages.find(item=>item.name===pkg.name);
+  for(const file of selected.files){
+   const source=path.join(root,file.path),target=path.join(copy,file.path);
+   let fd,bytes;
+   try{fd=fs.openSync(source,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);if(!fs.fstatSync(fd).isFile())fail('invalid_input');bytes=fs.readFileSync(fd);}finally{if(fd!==undefined)fs.closeSync(fd);}
+   if(sha(bytes)!==file.sha256)fail('invalid_input');
+   fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes,{flag:'wx'});sourceFiles[target]=file.sha256;
+  }
+  const rebase=value=>typeof value==='string'&&path.isAbsolute(value)&&inside(root,value)?path.join(copy,path.relative(root,value)):Array.isArray(value)?value.map(rebase):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,rebase(item)])):value;
+  const manifest=path.join(copy,'Package.swift');
+  packages.push({...pkg,path:String(index),manifest});
+  manifests[manifest]={sourceSHA256:request.manifests[pkg.manifest].sourceSHA256,manifest:rebase(request.manifests[pkg.manifest].manifest)};
+ }
+ const copied={projectDir:destination,packages,sourceFiles,manifests};
+ const recheck=()=>{if(collect(request).contents!==descriptor.contents||collect(copied).contents!==descriptor.contents)fail('invalid_input');};
+ recheck();
+ return {...descriptor,recheck};
+}
+module.exports={collect,snapshot,id};

@@ -22,18 +22,19 @@ var ErrOTAUnavailable = errors.New("canonical OTA prerequisites unavailable")
 // contract. All outputs replace one owned native directory after helper retirement.
 type OTAStartup struct{ Host jsbridge.Host }
 type otaRequest struct {
-	ProjectDir      string                         `json:"projectDir"`
-	NativeDir       string                         `json:"nativeDir"`
-	BundleDir       string                         `json:"bundleDir"`
-	StageDir        string                         `json:"stageDir"`
-	Platform        string                         `json:"platform"`
-	Configuration   string                         `json:"configuration"`
-	NativeConfig    json.RawMessage                `json:"nativeConfig"`
-	Architecture    string                         `json:"architecture"`
-	DestinationKind string                         `json:"destinationKind"`
-	ExtensionNative []project.ExtensionNativeInput `json:"extensionNative,omitempty"`
-	ProjectStateDir string                         `json:"projectStateDir"`
-	SourceFiles     map[string]string              `json:"sourceFiles,omitempty"`
+	ProjectDir         string                                `json:"projectDir"`
+	NativeDir          string                                `json:"nativeDir"`
+	BundleDir          string                                `json:"bundleDir"`
+	StageDir           string                                `json:"stageDir"`
+	Platform           string                                `json:"platform"`
+	Configuration      string                                `json:"configuration"`
+	NativeConfig       json.RawMessage                       `json:"nativeConfig"`
+	Architecture       string                                `json:"architecture"`
+	DestinationKind    string                                `json:"destinationKind"`
+	ExtensionNative    []project.ExtensionNativeInput        `json:"extensionNative,omitempty"`
+	ProjectStateDir    string                                `json:"projectStateDir"`
+	SourceFiles        map[string]string                     `json:"sourceFiles,omitempty"`
+	LocalSwiftPackages []project.LocalSwiftPackageEvaluation `json:"localSwiftPackages,omitempty"`
 }
 
 func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Prepared, l workspace.Lease) error {
@@ -82,7 +83,8 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 			Platform: p.Identity.Target.Platform, Configuration: p.Identity.Target.Configuration,
 			NativeConfig: r.Config.NativeConfig, Architecture: p.Identity.Target.Architecture,
 			DestinationKind: p.Identity.Target.DestinationKind, ExtensionNative: r.ExtensionNative,
-			ProjectStateDir: filepath.Dir(filepath.Dir(l.Layout().GeneratedRoot)),
+			ProjectStateDir:    filepath.Dir(filepath.Dir(l.Layout().GeneratedRoot)),
+			LocalSwiftPackages: p.LocalSwiftPackages,
 			SourceFiles: func() map[string]string {
 				files := make(map[string]string, len(r.Sources))
 				for _, source := range r.Sources {

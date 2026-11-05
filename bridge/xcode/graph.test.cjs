@@ -39,6 +39,7 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  r.contributions=[];await prepare(q);const removed=fs.readFileSync(file,'utf8');assert.doesNotMatch(removed,/Binding.swift|libNative.a|Picture.png|Compiled.metallib/);assert.match(removed,/developmentRegion = fr/);
  assert.equal(fs.readFileSync(pin,'utf8'),'spm-pin');assert.equal(fs.readFileSync(path.join(output,'Podfile.lock'),'utf8'),'pod-pin');assert.doesNotMatch(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native.h/);
  await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),removed);
+ r.contributions=null;await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),removed);
 });
 test('Pods and local SPM membership and removal',{skip:process.platform!=='darwin'},async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 dependencies '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

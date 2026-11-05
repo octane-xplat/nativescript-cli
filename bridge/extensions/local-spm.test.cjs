@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
-const {collect}=require('./local-spm.cjs');
+const {collect,snapshot}=require('./local-spm.cjs');
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 function fixture(t){
  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'canonical-local-spm-')));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -45,4 +45,29 @@ test('symlinks, transitive dependencies, plugins and external evaluated paths re
  manifest.targets[0].settings=['-I'+directory+'-outside'];assert.throws(()=>f.read(),error=>error.code==='unavailable');
  manifest.targets[0].settings=[{kind:{headerSearchPath:{_0:'../outside'}}}];assert.throws(()=>f.read(),error=>error.code==='unavailable');
  manifest.targets[0].settings=[{kind:{unsafeFlags:{_0:['-DOPTION']}}}];assert.throws(()=>f.read(),error=>error.code==='unavailable');
+});
+
+test('owned snapshots preserve external and installed package identities without writing through dependency links',t=>{
+ const f=fixture(t),installed=f.add('Installed'),external=f.add('External');
+ fs.mkdirSync(path.join(f.projectDir,'node_modules'));const alias=path.join(f.projectDir,'node_modules/Installed');fs.symlinkSync(installed,alias,'dir');f.packages[0].path='node_modules/Installed';
+ fs.mkdirSync(path.join(installed,'.build'));fs.writeFileSync(path.join(installed,'.build','cache'),'unowned tool cache');
+ const request={projectDir:f.projectDir,packages:f.packages,sourceFiles:f.sourceFiles,manifests:f.manifests,destination:path.join(f.root,'owned')};
+ const before=f.read(),owned=snapshot(request);
+ assert.equal(owned.contents,before.contents);assert.equal(owned.sha256,before.sha256);owned.recheck();
+ assert.equal(fs.readlinkSync(alias),installed);assert.equal(fs.readFileSync(path.join(installed,'Bridge.swift'),'utf8'),'class Bridge {}');
+ assert.equal(fs.existsSync(path.join(request.destination,'0/.build')),false);
+ assert.equal(fs.readFileSync(path.join(request.destination,'1/Bridge.swift'),'utf8'),'class Bridge {}');
+ fs.writeFileSync(path.join(external,'Bridge.swift'),'class ChangedAfterSnapshot {}');f.refresh(external);
+ assert.throws(()=>owned.recheck(),error=>error.code==='invalid_input');
+});
+
+test('owned snapshot mutation and membership changes reject without replacing existing destinations',t=>{
+ const f=fixture(t);f.add('Selected');const destination=path.join(f.root,'owned');
+ const request={projectDir:f.projectDir,packages:f.packages,sourceFiles:f.sourceFiles,manifests:f.manifests,destination};
+ const owned=snapshot(request),file=path.join(destination,'0/Bridge.swift');
+ const bytes=fs.readFileSync(file);fs.writeFileSync(file,'class SnapshotChanged {}');assert.throws(()=>owned.recheck(),error=>error.code==='invalid_input');fs.writeFileSync(file,bytes);owned.recheck();
+ const added=path.join(destination,'0/Added.swift');fs.writeFileSync(added,'class Added {}');assert.throws(()=>owned.recheck(),error=>error.code==='invalid_input');fs.rmSync(added);owned.recheck();
+ assert.throws(()=>snapshot(request),error=>error.code==='invalid_input');assert.deepEqual(fs.readFileSync(file),bytes);
+ assert.throws(()=>snapshot({...request,destination:path.join(f.root,'Selected/snapshot')}),error=>error.code==='unavailable');
+ assert.equal(fs.existsSync(path.join(f.root,'Selected/snapshot')),false);
 });

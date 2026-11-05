@@ -37,3 +37,33 @@ contain paths/hashes rather than source contents. A coverage gap exits nonzero,
 including the currently uncovered declared local package inputs. A positive
 control is not acceptance of those missing inputs or permission to remove the
 Go OTA guard.
+
+Qualify private OTA snapshot/producer integration with an already installed,
+reviewed canonical consumer (no dependency install is performed):
+
+```sh
+mkdir -p /absolute/new-project-cache /absolute/new-report-directory
+OTA_CONSUMER_DIR=/absolute/installed-canonical-consumer \
+OTA_LOCAL_SPM_REPORT_DIR=/absolute/new-report-directory \
+OTA_LOCAL_SPM_RETAIN_DIR=/absolute/new-project-cache \
+goddard-agent resource run --json '{"resources":{"native_builds":1},"purpose":"local Swift canonical snapshot qualification"}' -- \
+  env TMPDIR=/absolute/new-project-cache \
+  go test -race ./internal/extensions -run 'TestCanonical|TestDeclaredLocalSPM' -count=1 -v
+python3 tools/qualification/local-spm/inspect-snapshot.py /absolute/new-report-directory
+```
+
+The local-package scenario deliberately invokes the private extracted helper;
+the public Go local-SPM guard remains. Actual Swift manifest evaluation feeds
+app-local, workspace-relative and installed-link snapshot cases. Canonical
+preparation captures the installed toolchain, checks source changes/idempotence,
+extension-source coexistence/removal, stale/missing receipts, collisions, selected
+package removal, boot text and JSON stamps. Runtime projects/boot inputs and
+extension-native digests are labeled fixtures. The existing nonlocal public
+adapter scenario also checks directory publication and cancellation/lease reuse.
+
+The independent inspector reconstructs descriptors from retained request facts,
+checks copied file hashes/membership and canonical extra-source hashes, and
+checks the retained boot/stamp outputs. `OTA_LOCAL_SPM_RETAIN_DIR` preserves only
+these owned fixtures for inspection; omit it for ordinary test cleanup. Report
+files must not already exist. This is not native library compilation, original
+V8 ABI, compiled-stamp, public local-SPM OTA publication or HTTPS installer proof.

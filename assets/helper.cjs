@@ -17535,168 +17535,6 @@ var require_native_sources = __commonJS({
   }
 });
 
-// bridge/extensions/ota.cjs
-var require_ota = __commonJS({
-  "bridge/extensions/ota.cjs"(exports2, module2) {
-    "use strict";
-    var fs2 = require("node:fs");
-    var path2 = require("node:path");
-    var { createRequire: createRequire2 } = require("node:module");
-    var { pathToFileURL } = require("node:url");
-    var { createHash } = require("node:crypto");
-    function fail(code = "invalid_input") {
-      throw Object.assign(new Error("Canonical OTA preparation failed"), { code });
-    }
-    function inside(root, file) {
-      const rel = path2.relative(root, file);
-      return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
-    }
-    module2.exports = async function(p) {
-      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir, sourceFiles = {} } = p;
-      if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
-      if (projectStateDir !== void 0 && (typeof projectStateDir !== "string" || !path2.isAbsolute(projectStateDir) || inside(projectStateDir, projectDir) || !inside(projectStateDir, nativeDir) || !inside(projectStateDir, stageDir))) fail();
-      const req = createRequire2(path2.join(projectDir, "package.json"));
-      let producer, fingerprintFile;
-      try {
-        producer = req.resolve("@octane-xplat/updates/prepare");
-        fingerprintFile = req.resolve("@octane-xplat/fingerprint");
-      } catch {
-        fail("unavailable");
-      }
-      if (JSON.parse(fs2.readFileSync(path2.join(path2.dirname(producer), "package.json"))).version !== "0.19.0" || JSON.parse(fs2.readFileSync(path2.join(path2.dirname(fingerprintFile), "../package.json"))).version !== "0.19.0") fail("unavailable");
-      for (const [name, expected] of Object.entries(require_canonical())) {
-        const [pkg, ...parts] = name.split("/");
-        const base = pkg === "updates" ? path2.dirname(producer) : path2.resolve(path2.dirname(fingerprintFile), "..");
-        if (createHash("sha256").update(fs2.readFileSync(path2.join(base, ...parts))).digest("hex") !== expected) fail("unavailable");
-      }
-      const canonical = await import(pathToFileURL(fingerprintFile).href);
-      const evaluated = await canonical.resolveNativeConfigAsync(projectDir);
-      const stable = (v) => JSON.stringify(v, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
-      if (stable(evaluated) !== stable(nativeConfig)) fail("unavailable");
-      for (const key2 of ["appPath", "appResourcesPath"]) {
-        const selected = nativeConfig[key2];
-        if (selected !== void 0 && (typeof selected !== "string" || !inside(projectDir, path2.resolve(projectDir, selected)))) fail("unavailable");
-      }
-      const buildRoot = path2.resolve(projectDir, nativeConfig.buildPath ?? "platforms");
-      if (!inside(projectDir, buildRoot) || buildRoot === projectDir) fail("unavailable");
-      const sourceGroups = platform === "ios" ? require_native_sources()(projectDir, nativeConfig.ios?.NativeSource) : [];
-      if (!sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles)) fail();
-      const sourceDigest = (file) => createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
-      const checkSources = () => {
-        for (const group of sourceGroups) for (const file of group.files) if (sourceFiles[file.realPath] !== sourceDigest(file.realPath)) fail();
-      };
-      checkSources();
-      let anchor = projectDir;
-      for (const group of sourceGroups) {
-        const declaration = nativeConfig.ios.NativeSource.find((s) => s.name === group.name);
-        if (path2.isAbsolute(declaration.path) && !inside(projectDir, group.logicalBase)) fail("unavailable");
-        if (group.base !== group.logicalBase || group.files.some((file) => inside(path2.join(projectDir, "node_modules"), file.path))) fail("unavailable");
-        while (!inside(anchor, group.logicalBase)) anchor = path2.dirname(anchor);
-      }
-      const snapshot = path2.join(stageDir, "project");
-      const view = path2.join(snapshot, path2.relative(anchor, projectDir));
-      fs2.mkdirSync(view, { recursive: true });
-      const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".xplat", ".xplat-ns"]);
-      const excluded = (f) => inside(buildRoot, f) || inside(stageDir, f) || projectStateDir !== void 0 && inside(projectStateDir, f);
-      const digest = (root) => {
-        const h = createHash("sha256");
-        function walk(dir) {
-          for (const e of fs2.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-            const f = path2.join(dir, e.name);
-            if (dir === root && ignored.has(e.name) || excluded(f)) continue;
-            if (e.isSymbolicLink()) fail("unavailable");
-            h.update(path2.relative(root, f));
-            if (e.isDirectory()) walk(f);
-            else h.update(fs2.readFileSync(f));
-          }
-        }
-        walk(root);
-        return h.digest("hex");
-      };
-      const before = digest(projectDir);
-      const copy = (source, destination) => {
-        if (excluded(source)) return;
-        if (inside(source, stageDir) && fs2.lstatSync(source).isDirectory()) {
-          fs2.mkdirSync(destination, { recursive: true });
-          for (const e of fs2.readdirSync(source)) copy(path2.join(source, e), path2.join(destination, e));
-        } else fs2.cpSync(source, destination, { recursive: true, dereference: false, filter: (source2) => !excluded(source2) });
-      };
-      for (const e of fs2.readdirSync(projectDir)) {
-        if (!ignored.has(e)) copy(path2.join(projectDir, e), path2.join(view, e));
-      }
-      fs2.symlinkSync(path2.join(projectDir, "node_modules"), path2.join(view, "node_modules"), "dir");
-      for (const group of sourceGroups) for (const file of group.files) {
-        if (excluded(file.realPath) || excluded(file.path)) fail("unavailable");
-        const destination = path2.join(snapshot, path2.relative(anchor, file.path));
-        if (!inside(snapshot, destination)) fail();
-        if (inside(path2.join(view, "node_modules"), destination)) fail("unavailable");
-        fs2.mkdirSync(path2.dirname(destination), { recursive: true });
-        fs2.copyFileSync(file.realPath, destination);
-        if (sourceDigest(destination) !== sourceFiles[file.realPath]) fail();
-      }
-      const rebase = (v) => typeof v === "string" ? v.replaceAll(projectDir, view) : Array.isArray(v) ? v.map(rebase) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebase(x)])) : v;
-      const config = rebase(nativeConfig);
-      const extensionID = "xplat-ns/extension-native/v1";
-      let extensionContents;
-      if (!Array.isArray(extensionNative)) fail();
-      if (extensionNative.length) {
-        const seen = /* @__PURE__ */ new Set();
-        const files = extensionNative.map((f) => {
-          if (!f || Object.keys(f).sort().join(",") !== "kind,owner,path,platform,sha256,version" || typeof f.owner !== "string" || !f.owner || typeof f.version !== "string" || !f.version || f.platform !== platform || !["source", "resource", "configuration", "library", "framework"].includes(f.kind) || typeof f.path !== "string" || !f.path || path2.posix.isAbsolute(f.path) || path2.posix.normalize(f.path) !== f.path || f.path === ".." || f.path.startsWith("../") || /[\\:\x00]/.test(f.path) || !/^([a-f0-9]{64})$/.test(f.sha256)) fail();
-          const key2 = JSON.stringify([f.owner, f.path.toLowerCase()]);
-          if (seen.has(key2)) fail();
-          seen.add(key2);
-          return f;
-        }).sort((a, b) => a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-        extensionContents = stable({ format: extensionID, files });
-        const file = path2.join(view, "fingerprint.config.json");
-        const fingerprintConfig = fs2.existsSync(file) ? JSON.parse(fs2.readFileSync(file)) : {};
-        if (!fingerprintConfig || typeof fingerprintConfig !== "object" || Array.isArray(fingerprintConfig) || fingerprintConfig.extraSources !== void 0 && !Array.isArray(fingerprintConfig.extraSources)) fail();
-        const extras = fingerprintConfig.extraSources ?? [];
-        if (extras.some((s) => s && s.id === extensionID)) fail();
-        fs2.writeFileSync(file, JSON.stringify({ ...fingerprintConfig, extraSources: [...extras, { type: "contents", id: extensionID, contents: extensionContents, reasons: ["extension-generated native inputs"] }] }));
-      }
-      const platforms = path2.resolve(view, config.buildPath ?? "platforms");
-      const native = path2.join(platforms, platform);
-      fs2.mkdirSync(path2.dirname(native), { recursive: true });
-      fs2.cpSync(nativeDir, native, { recursive: true, dereference: true });
-      const projectName = "NativeScriptApp";
-      const emitted = platform === "ios" ? path2.join(native, projectName, "app") : path2.join(native, "app/src/main/assets/app");
-      if (platform === "ios") {
-        fs2.mkdirSync(path2.dirname(emitted), { recursive: true });
-        fs2.cpSync(bundleDir, emitted, { recursive: true });
-      }
-      if (!fs2.existsSync(path2.join(emitted, "package.json"))) fail("unavailable");
-      if (platform === "ios" && fs2.existsSync(path2.join(native, "Podfile")) && !fs2.existsSync(path2.join(native, "Podfile.lock"))) fail("unavailable");
-      if (platform === "android" && !Array.from(fs2.globSync("**/{gradle.lockfile,dependency-locks/*.lockfile}", { cwd: native, exclude: ["**/build/**", "**/.gradle/**"] })).length) fail("unavailable");
-      const toolchain = await canonical.captureNativeToolchainAsync(projectDir, platform);
-      process.argv.push(destinationKind === "device" ? "--for-device" : "--emulator", "--arch", architecture);
-      await req(producer)({ projectDir: view, platform, projectName, platformsDir: platforms, nativeConfig: config, toolchain, release: configuration === "release" });
-      const recordFile = path2.join(view, ".xplat/fingerprints", platform + ".json");
-      const record = JSON.parse(fs2.readFileSync(recordFile));
-      const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
-      if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
-      checkSources();
-      if (extensionContents !== void 0) {
-        const source = record.sources.filter((s) => s.type === "contents" && s.id === extensionID);
-        if (source.length !== 1 || source[0].hash !== createHash("sha256").update(extensionContents).digest("hex")) fail();
-      }
-      const stamp = JSON.parse(fs2.readFileSync(path2.join(emitted, "xplat-native.json")));
-      if (stamp.hash !== record.hash || stamp.release !== (configuration === "release")) fail();
-      const output = path2.join(stageDir, "native");
-      fs2.cpSync(nativeDir, output, { recursive: true, dereference: true });
-      const boot = platform === "ios" ? "internal/main.m" : "app/src/main/java/com/tns/NativeScriptApplication.java";
-      fs2.copyFileSync(path2.join(native, boot), path2.join(output, boot));
-      const outputBundle = path2.join(output, path2.relative(nativeDir, bundleDir));
-      fs2.copyFileSync(path2.join(emitted, "xplat-native.json"), path2.join(outputBundle, "xplat-native.json"));
-      const records = path2.join(output, ".xplat/fingerprints");
-      fs2.mkdirSync(records, { recursive: true });
-      fs2.copyFileSync(recordFile, path2.join(records, platform + ".json"));
-      return { hash: record.hash, format: record.format, release: stamp.release };
-    };
-  }
-});
-
 // bridge/resolve/swift-packages.cjs
 var require_swift_packages = __commonJS({
   "bridge/resolve/swift-packages.cjs"(exports2) {
@@ -17818,6 +17656,317 @@ var require_swift_packages = __commonJS({
   }
 });
 
+// bridge/extensions/local-spm.cjs
+var require_local_spm = __commonJS({
+  "bridge/extensions/local-spm.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    var fail = (code) => {
+      throw Object.assign(new Error("Local Swift canonical inputs are not qualified"), { code });
+    };
+    var sha = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+    var stable = (value) => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+    var inside = (root, file) => {
+      const rel = path2.relative(root, file);
+      return rel === "" || rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
+    };
+    var id = "xplat-ns/local-spm/v1";
+    function collect({ projectDir, packages, sourceFiles, manifests }) {
+      if (!path2.isAbsolute(projectDir || "") || !Array.isArray(packages) || !sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles) || !manifests || typeof manifests !== "object" || Array.isArray(manifests)) fail("invalid_input");
+      const names = /* @__PURE__ */ new Set(), roots = /* @__PURE__ */ new Set(), products = /* @__PURE__ */ new Set(), selected = [], inputs = [];
+      for (const pkg of packages) {
+        let walk = function(folder) {
+          for (const entry of fs2.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+            if (entry.isDirectory() && [".build", ".swiftpm"].includes(entry.name)) continue;
+            const file = path2.join(folder, entry.name);
+            if (entry.isSymbolicLink()) fail("unavailable");
+            if (entry.isDirectory()) walk(file);
+            else if (entry.isFile()) {
+              const hash = sha(fs2.readFileSync(file));
+              if (sourceFiles[file] !== hash) fail("invalid_input");
+              files.push({ path: path2.relative(directory, file).split(path2.sep).join("/"), sha256: hash });
+              inputs.push({ path: file, sha256: hash });
+            } else fail("unavailable");
+          }
+        }, logical = function(value) {
+          if (typeof value === "string") {
+            if (path2.isAbsolute(value)) {
+              if (!inside(directory, value)) fail("unavailable");
+              return { packageRelativePath: path2.relative(directory, value).split(path2.sep).join("/") || "." };
+            }
+            if (value.includes(directory)) fail("unavailable");
+            if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) fail("unavailable");
+            if (/(?:^|[= ])(?:\/|[A-Za-z]:[\\/])/.test(value) || /(?:^|[= ])-[ILF]\//.test(value)) fail("unavailable");
+            return value;
+          }
+          if (Array.isArray(value)) return value.map(logical);
+          if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key2, item]) => [key2, logical(item)]));
+          if (value === null || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) return value;
+          fail("invalid_input");
+        };
+        if (!pkg || Object.keys(pkg).sort().join(",") !== "manifest,name,path,products" || typeof pkg.name !== "string" || !pkg.name || names.has(pkg.name) || typeof pkg.path !== "string" || !pkg.path || path2.isAbsolute(pkg.path) || /[\\\r\n\0]/.test(pkg.path) || !path2.isAbsolute(pkg.manifest || "") || !Array.isArray(pkg.products) || !pkg.products.length || pkg.products.some((product) => typeof product !== "string" || !/^[-A-Za-z0-9_.]+$/.test(product))) fail("invalid_input");
+        const directory = fs2.realpathSync(path2.resolve(projectDir, pkg.path)), manifest = path2.join(directory, "Package.swift");
+        if (manifest !== pkg.manifest || roots.has(directory)) fail("invalid_input");
+        names.add(pkg.name);
+        roots.add(directory);
+        const libs = [...new Set(pkg.products)].sort();
+        for (const name of libs) {
+          if (products.has(name)) fail("invalid_input");
+          products.add(name);
+        }
+        const files = [];
+        walk(directory);
+        if (!files.some((file) => file.path === "Package.swift")) fail("invalid_input");
+        const expected = Object.keys(sourceFiles).filter((file) => inside(directory, file));
+        if (expected.length !== files.length) fail("invalid_input");
+        const evaluation = manifests[manifest];
+        if (!evaluation || evaluation.sourceSHA256 !== sourceFiles[manifest]) fail("invalid_input");
+        const evaluated = evaluation.manifest;
+        const unsafe = (value) => value && typeof value === "object" && (Object.hasOwn(value, "unsafeFlags") || Object.values(value).some(unsafe));
+        if (!evaluated || unsafe(evaluated) || !Array.isArray(evaluated.dependencies) || evaluated.dependencies.length || !Array.isArray(evaluated.targets) || evaluated.targets.some((target) => !["regular", "test"].includes(target.type)) || !Array.isArray(evaluated.products)) fail("unavailable");
+        for (const name of libs) {
+          const product = evaluated.products.find((product2) => product2.name === name);
+          if (!product?.type?.library) fail("invalid_input");
+        }
+        files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
+        selected.push({ name: pkg.name, products: libs, manifestSHA256: sha(stable(logical(evaluated))), files });
+      }
+      selected.sort((a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)));
+      const contents = stable({ format: id, packages: selected });
+      return { id, contents, sha256: sha(contents), inputs };
+    }
+    function snapshot({ destination, ...request2 }) {
+      if (!path2.isAbsolute(destination || "") || fs2.existsSync(destination) || fs2.realpathSync(path2.dirname(destination)) !== path2.dirname(destination)) fail("invalid_input");
+      const descriptor = collect(request2);
+      const roots = request2.packages.map((pkg) => path2.dirname(pkg.manifest));
+      if (roots.some((root) => inside(root, destination) || inside(destination, root))) fail("unavailable");
+      fs2.mkdirSync(destination);
+      const packages = [], sourceFiles = {}, manifests = {};
+      for (const [index, pkg] of request2.packages.entries()) {
+        const root = path2.dirname(pkg.manifest), copy = path2.join(destination, String(index));
+        fs2.mkdirSync(copy);
+        const selected = JSON.parse(descriptor.contents).packages.find((item) => item.name === pkg.name);
+        for (const file of selected.files) {
+          const source = path2.join(root, file.path), target = path2.join(copy, file.path);
+          let fd, bytes;
+          try {
+            fd = fs2.openSync(source, fs2.constants.O_RDONLY | fs2.constants.O_NOFOLLOW);
+            if (!fs2.fstatSync(fd).isFile()) fail("invalid_input");
+            bytes = fs2.readFileSync(fd);
+          } finally {
+            if (fd !== void 0) fs2.closeSync(fd);
+          }
+          if (sha(bytes) !== file.sha256) fail("invalid_input");
+          fs2.mkdirSync(path2.dirname(target), { recursive: true });
+          fs2.writeFileSync(target, bytes, { flag: "wx" });
+          sourceFiles[target] = file.sha256;
+        }
+        const rebase = (value) => typeof value === "string" && path2.isAbsolute(value) && inside(root, value) ? path2.join(copy, path2.relative(root, value)) : Array.isArray(value) ? value.map(rebase) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key2, item]) => [key2, rebase(item)])) : value;
+        const manifest = path2.join(copy, "Package.swift");
+        packages.push({ ...pkg, path: String(index), manifest });
+        manifests[manifest] = { sourceSHA256: request2.manifests[pkg.manifest].sourceSHA256, manifest: rebase(request2.manifests[pkg.manifest].manifest) };
+      }
+      const copied = { projectDir: destination, packages, sourceFiles, manifests };
+      const recheck = () => {
+        if (collect(request2).contents !== descriptor.contents || collect(copied).contents !== descriptor.contents) fail("invalid_input");
+      };
+      recheck();
+      return { ...descriptor, recheck };
+    }
+    module2.exports = { collect, snapshot, id };
+  }
+});
+
+// bridge/extensions/ota.cjs
+var require_ota = __commonJS({
+  "bridge/extensions/ota.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var { createRequire: createRequire2 } = require("node:module");
+    var { pathToFileURL } = require("node:url");
+    var { createHash } = require("node:crypto");
+    function fail(code = "invalid_input") {
+      throw Object.assign(new Error("Canonical OTA preparation failed"), { code });
+    }
+    function inside(root, file) {
+      const rel = path2.relative(root, file);
+      return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
+    }
+    module2.exports = async function(p) {
+      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir, sourceFiles = {}, localSwiftPackages = [] } = p;
+      if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
+      if (projectStateDir !== void 0 && (typeof projectStateDir !== "string" || !path2.isAbsolute(projectStateDir) || inside(projectStateDir, projectDir) || !inside(projectStateDir, nativeDir) || !inside(projectStateDir, stageDir))) fail();
+      const req = createRequire2(path2.join(projectDir, "package.json"));
+      let producer, fingerprintFile;
+      try {
+        producer = req.resolve("@octane-xplat/updates/prepare");
+        fingerprintFile = req.resolve("@octane-xplat/fingerprint");
+      } catch {
+        fail("unavailable");
+      }
+      if (JSON.parse(fs2.readFileSync(path2.join(path2.dirname(producer), "package.json"))).version !== "0.19.0" || JSON.parse(fs2.readFileSync(path2.join(path2.dirname(fingerprintFile), "../package.json"))).version !== "0.19.0") fail("unavailable");
+      for (const [name, expected] of Object.entries(require_canonical())) {
+        const [pkg, ...parts] = name.split("/");
+        const base = pkg === "updates" ? path2.dirname(producer) : path2.resolve(path2.dirname(fingerprintFile), "..");
+        if (createHash("sha256").update(fs2.readFileSync(path2.join(base, ...parts))).digest("hex") !== expected) fail("unavailable");
+      }
+      const canonical = await import(pathToFileURL(fingerprintFile).href);
+      const evaluated = await canonical.resolveNativeConfigAsync(projectDir);
+      const stable = (v) => JSON.stringify(v, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
+      if (stable(evaluated) !== stable(nativeConfig)) fail("unavailable");
+      for (const key2 of ["appPath", "appResourcesPath"]) {
+        const selected = nativeConfig[key2];
+        if (selected !== void 0 && (typeof selected !== "string" || !inside(projectDir, path2.resolve(projectDir, selected)))) fail("unavailable");
+      }
+      const buildRoot = path2.resolve(projectDir, nativeConfig.buildPath ?? "platforms");
+      if (!inside(projectDir, buildRoot) || buildRoot === projectDir) fail("unavailable");
+      const sourceGroups = platform === "ios" ? require_native_sources()(projectDir, nativeConfig.ios?.NativeSource) : [];
+      if (!sourceFiles || typeof sourceFiles !== "object" || Array.isArray(sourceFiles)) fail();
+      if (!Array.isArray(localSwiftPackages) || platform !== "ios" && localSwiftPackages.length) fail();
+      const localPackages = localSwiftPackages.map((f) => {
+        if (!f || Object.keys(f).sort().join(",") !== "evaluation,manifest,name,path,products,sourceSHA256") fail();
+        return { name: f.name, path: f.path, products: f.products, manifest: f.manifest };
+      });
+      const localManifests = Object.fromEntries(localSwiftPackages.map((f) => [f.manifest, { sourceSHA256: f.sourceSHA256, manifest: f.evaluation }]));
+      if (platform === "ios") for (const declaration of require_swift_packages().parse(nativeConfig.ios?.SPMPackages).filter((p2) => p2.path)) {
+        let manifest;
+        try {
+          manifest = path2.join(fs2.realpathSync(path2.resolve(projectDir, declaration.path)), "Package.swift");
+        } catch {
+          fail();
+        }
+        if (!localPackages.some((p2) => p2.manifest === manifest && declaration.products.every((product) => p2.products.includes(product)))) fail("unavailable");
+      }
+      const swiftSnapshot = localPackages.length ? require_local_spm().snapshot({ projectDir, packages: localPackages, sourceFiles, manifests: localManifests, destination: path2.join(stageDir, "local-swift") }) : void 0;
+      const sourceDigest = (file) => createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
+      const checkSources = () => {
+        for (const group of sourceGroups) for (const file of group.files) if (sourceFiles[file.realPath] !== sourceDigest(file.realPath)) fail();
+      };
+      checkSources();
+      let anchor = projectDir;
+      for (const group of sourceGroups) {
+        const declaration = nativeConfig.ios.NativeSource.find((s) => s.name === group.name);
+        if (path2.isAbsolute(declaration.path) && !inside(projectDir, group.logicalBase)) fail("unavailable");
+        if (group.base !== group.logicalBase || group.files.some((file) => inside(path2.join(projectDir, "node_modules"), file.path))) fail("unavailable");
+        while (!inside(anchor, group.logicalBase)) anchor = path2.dirname(anchor);
+      }
+      const snapshot = path2.join(stageDir, "project");
+      const view = path2.join(snapshot, path2.relative(anchor, projectDir));
+      fs2.mkdirSync(view, { recursive: true });
+      const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".xplat", ".xplat-ns"]);
+      const excluded = (f) => inside(buildRoot, f) || inside(stageDir, f) || projectStateDir !== void 0 && inside(projectStateDir, f);
+      const digest = (root) => {
+        const h = createHash("sha256");
+        function walk(dir) {
+          for (const e of fs2.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+            const f = path2.join(dir, e.name);
+            if (dir === root && ignored.has(e.name) || excluded(f)) continue;
+            if (e.isSymbolicLink()) fail("unavailable");
+            h.update(path2.relative(root, f));
+            if (e.isDirectory()) walk(f);
+            else h.update(fs2.readFileSync(f));
+          }
+        }
+        walk(root);
+        return h.digest("hex");
+      };
+      const before = digest(projectDir);
+      const copy = (source, destination) => {
+        if (excluded(source)) return;
+        if (inside(source, stageDir) && fs2.lstatSync(source).isDirectory()) {
+          fs2.mkdirSync(destination, { recursive: true });
+          for (const e of fs2.readdirSync(source)) copy(path2.join(source, e), path2.join(destination, e));
+        } else fs2.cpSync(source, destination, { recursive: true, dereference: false, filter: (source2) => !excluded(source2) });
+      };
+      for (const e of fs2.readdirSync(projectDir)) {
+        if (!ignored.has(e)) copy(path2.join(projectDir, e), path2.join(view, e));
+      }
+      fs2.symlinkSync(path2.join(projectDir, "node_modules"), path2.join(view, "node_modules"), "dir");
+      for (const group of sourceGroups) for (const file of group.files) {
+        if (excluded(file.realPath) || excluded(file.path)) fail("unavailable");
+        const destination = path2.join(snapshot, path2.relative(anchor, file.path));
+        if (!inside(snapshot, destination)) fail();
+        if (inside(path2.join(view, "node_modules"), destination)) fail("unavailable");
+        fs2.mkdirSync(path2.dirname(destination), { recursive: true });
+        fs2.copyFileSync(file.realPath, destination);
+        if (sourceDigest(destination) !== sourceFiles[file.realPath]) fail();
+      }
+      const rebase = (v) => typeof v === "string" ? v.replaceAll(projectDir, view) : Array.isArray(v) ? v.map(rebase) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebase(x)])) : v;
+      const config = rebase(nativeConfig);
+      const extensionID = "xplat-ns/extension-native/v1";
+      const extrasToAdd = [];
+      let extensionContents;
+      if (!Array.isArray(extensionNative)) fail();
+      if (extensionNative.length) {
+        const seen = /* @__PURE__ */ new Set();
+        const files = extensionNative.map((f) => {
+          if (!f || Object.keys(f).sort().join(",") !== "kind,owner,path,platform,sha256,version" || typeof f.owner !== "string" || !f.owner || typeof f.version !== "string" || !f.version || f.platform !== platform || !["source", "resource", "configuration", "library", "framework"].includes(f.kind) || typeof f.path !== "string" || !f.path || path2.posix.isAbsolute(f.path) || path2.posix.normalize(f.path) !== f.path || f.path === ".." || f.path.startsWith("../") || /[\\:\x00]/.test(f.path) || !/^([a-f0-9]{64})$/.test(f.sha256)) fail();
+          const key2 = JSON.stringify([f.owner, f.path.toLowerCase()]);
+          if (seen.has(key2)) fail();
+          seen.add(key2);
+          return f;
+        }).sort((a, b) => a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+        extensionContents = stable({ format: extensionID, files });
+        extrasToAdd.push({ type: "contents", id: extensionID, contents: extensionContents, reasons: ["extension-generated native inputs"] });
+      }
+      if (swiftSnapshot) extrasToAdd.push({ type: "contents", id: swiftSnapshot.id, contents: swiftSnapshot.contents, reasons: ["selected declared local Swift package inputs"] });
+      if (extrasToAdd.length) {
+        const file = path2.join(view, "fingerprint.config.json");
+        const fingerprintConfig = fs2.existsSync(file) ? JSON.parse(fs2.readFileSync(file)) : {};
+        if (!fingerprintConfig || typeof fingerprintConfig !== "object" || Array.isArray(fingerprintConfig) || fingerprintConfig.extraSources !== void 0 && !Array.isArray(fingerprintConfig.extraSources)) fail();
+        const extras = fingerprintConfig.extraSources ?? [];
+        if (extras.some((s) => s && extrasToAdd.some((owned) => owned.id === s.id))) fail();
+        fs2.writeFileSync(file, JSON.stringify({ ...fingerprintConfig, extraSources: [...extras, ...extrasToAdd] }));
+      }
+      const platforms = path2.resolve(view, config.buildPath ?? "platforms");
+      const native = path2.join(platforms, platform);
+      fs2.mkdirSync(path2.dirname(native), { recursive: true });
+      fs2.cpSync(nativeDir, native, { recursive: true, dereference: true });
+      const projectName = "NativeScriptApp";
+      const emitted = platform === "ios" ? path2.join(native, projectName, "app") : path2.join(native, "app/src/main/assets/app");
+      if (platform === "ios") {
+        fs2.mkdirSync(path2.dirname(emitted), { recursive: true });
+        fs2.cpSync(bundleDir, emitted, { recursive: true });
+      }
+      if (!fs2.existsSync(path2.join(emitted, "package.json"))) fail("unavailable");
+      if (platform === "ios" && fs2.existsSync(path2.join(native, "Podfile")) && !fs2.existsSync(path2.join(native, "Podfile.lock"))) fail("unavailable");
+      if (platform === "android" && !Array.from(fs2.globSync("**/{gradle.lockfile,dependency-locks/*.lockfile}", { cwd: native, exclude: ["**/build/**", "**/.gradle/**"] })).length) fail("unavailable");
+      const toolchain = await canonical.captureNativeToolchainAsync(projectDir, platform);
+      process.argv.push(destinationKind === "device" ? "--for-device" : "--emulator", "--arch", architecture);
+      await req(producer)({ projectDir: view, platform, projectName, platformsDir: platforms, nativeConfig: config, toolchain, release: configuration === "release" });
+      const recordFile = path2.join(view, ".xplat/fingerprints", platform + ".json");
+      const record = JSON.parse(fs2.readFileSync(recordFile));
+      const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
+      if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
+      checkSources();
+      if (swiftSnapshot) {
+        swiftSnapshot.recheck();
+        const source = record.sources.filter((s) => s.type === "contents" && s.id === swiftSnapshot.id);
+        if (source.length !== 1 || source[0].hash !== swiftSnapshot.sha256) fail();
+      }
+      if (extensionContents !== void 0) {
+        const source = record.sources.filter((s) => s.type === "contents" && s.id === extensionID);
+        if (source.length !== 1 || source[0].hash !== createHash("sha256").update(extensionContents).digest("hex")) fail();
+      }
+      const stamp = JSON.parse(fs2.readFileSync(path2.join(emitted, "xplat-native.json")));
+      if (stamp.hash !== record.hash || stamp.release !== (configuration === "release")) fail();
+      const output = path2.join(stageDir, "native");
+      fs2.cpSync(nativeDir, output, { recursive: true, dereference: true });
+      const boot = platform === "ios" ? "internal/main.m" : "app/src/main/java/com/tns/NativeScriptApplication.java";
+      fs2.copyFileSync(path2.join(native, boot), path2.join(output, boot));
+      const outputBundle = path2.join(output, path2.relative(nativeDir, bundleDir));
+      fs2.copyFileSync(path2.join(emitted, "xplat-native.json"), path2.join(outputBundle, "xplat-native.json"));
+      const records = path2.join(output, ".xplat/fingerprints");
+      fs2.mkdirSync(records, { recursive: true });
+      fs2.copyFileSync(recordFile, path2.join(records, platform + ".json"));
+      return { hash: record.hash, format: record.format, release: stamp.release };
+    };
+  }
+});
+
 // bridge/xcode/index.cjs
 var require_xcode2 = __commonJS({
   "bridge/xcode/index.cjs"(exports2, module2) {
@@ -17873,6 +18022,7 @@ var require_xcode2 = __commonJS({
     module2.exports = async ({ resolved, directory }) => {
       const normalize = (value) => Array.isArray(value) ? value.map(normalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k[0].toLowerCase() + k.slice(1), normalize(v)])) : value;
       resolved = normalize(resolved);
+      if (resolved) resolved.contributions ??= [];
       if (!path2.isAbsolute(directory || "") || !resolved?.applicationID) fail("invalid_input");
       const runtime = resolved.packages.find((p) => p.name === "@nativescript/ios");
       if (!runtime || !["8.9.0", "9.1.0"].includes(runtime.version)) fail("unavailable");
