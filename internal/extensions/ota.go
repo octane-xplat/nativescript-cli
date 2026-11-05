@@ -22,15 +22,17 @@ var ErrOTAUnavailable = errors.New("canonical OTA prerequisites unavailable")
 // contract. All outputs replace one owned native directory after helper retirement.
 type OTAStartup struct{ Host jsbridge.Host }
 type otaRequest struct {
-	ProjectDir      string          `json:"projectDir"`
-	NativeDir       string          `json:"nativeDir"`
-	BundleDir       string          `json:"bundleDir"`
-	StageDir        string          `json:"stageDir"`
-	Platform        string          `json:"platform"`
-	Configuration   string          `json:"configuration"`
-	NativeConfig    json.RawMessage `json:"nativeConfig"`
-	Architecture    string          `json:"architecture"`
-	DestinationKind string          `json:"destinationKind"`
+	ProjectDir      string                         `json:"projectDir"`
+	NativeDir       string                         `json:"nativeDir"`
+	BundleDir       string                         `json:"bundleDir"`
+	StageDir        string                         `json:"stageDir"`
+	Platform        string                         `json:"platform"`
+	Configuration   string                         `json:"configuration"`
+	NativeConfig    json.RawMessage                `json:"nativeConfig"`
+	Architecture    string                         `json:"architecture"`
+	DestinationKind string                         `json:"destinationKind"`
+	ExtensionNative []project.ExtensionNativeInput `json:"extensionNative,omitempty"`
+	ProjectStateDir string                         `json:"projectStateDir"`
 }
 
 func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Prepared, l workspace.Lease) error {
@@ -67,7 +69,13 @@ func (a OTAStartup) Apply(ctx context.Context, r project.Resolved, p project.Pre
 				_ = os.RemoveAll(stage)
 			}
 		}()
-		payload, e := json.Marshal(otaRequest{r.Directory, p.NativeDir, p.BundleDir, stage, p.Identity.Target.Platform, p.Identity.Target.Configuration, r.Config.NativeConfig, p.Identity.Target.Architecture, p.Identity.Target.DestinationKind})
+		payload, e := json.Marshal(otaRequest{
+			ProjectDir: r.Directory, NativeDir: p.NativeDir, BundleDir: p.BundleDir, StageDir: stage,
+			Platform: p.Identity.Target.Platform, Configuration: p.Identity.Target.Configuration,
+			NativeConfig: r.Config.NativeConfig, Architecture: p.Identity.Target.Architecture,
+			DestinationKind: p.Identity.Target.DestinationKind, ExtensionNative: r.ExtensionNative,
+			ProjectStateDir: filepath.Dir(filepath.Dir(l.Layout().GeneratedRoot)),
+		})
 		if e != nil {
 			return e
 		}

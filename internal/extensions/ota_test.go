@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,8 @@ func TestCanonicalOTAOwnedHelperPublication(t *testing.T) {
 	}
 	adapter := OTAStartup{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(assets)}, CacheDir: t.TempDir()}}
 	resolved := project.Resolved{Directory: root, Revision: "fixture", Config: project.Config{NativeConfig: config}}
+	// Digest fixture isolates the Go/helper handoff; native compilation is qualified separately.
+	resolved.ExtensionNative = []project.ExtensionNativeInput{{Owner: "fixture", Version: "1.0.0", Platform: "ios", Kind: "source", Path: "Fixture.swift", SHA256: strings.Repeat("a", 64)}}
 	prepared := project.Prepared{Identity: layout.Identity, NativeDir: native, BundleDir: filepath.Join(native, "app")}
 	if e = adapter.Apply(context.Background(), resolved, prepared, lease); e != nil {
 		t.Fatal(e)
@@ -92,6 +95,10 @@ func TestCanonicalOTAOwnedHelperPublication(t *testing.T) {
 	}
 	if _, e = os.Stat(filepath.Join(native, ".xplat/fingerprints/ios.json")); e != nil {
 		t.Fatal(e)
+	}
+	record, e := os.ReadFile(filepath.Join(native, ".xplat/fingerprints/ios.json"))
+	if e != nil || !strings.Contains(string(record), "xplat-ns/extension-native/v1") {
+		t.Fatal("canonical extension source not published", e)
 	}
 	// A FIFO blocks snapshot reading inside the real canonical helper. The
 	// deadline must retire that Node process before the lease can be reused.

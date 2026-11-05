@@ -45,10 +45,18 @@ bootstrap checks its original source revision while the prepared generation uses
 the derived revision. Extension implementation hot-reloading itself is not added.
 
 These generation revisions are not canonical OTA compatibility fingerprints.
-OTAStartup plus generated native files rejects before native output creation
-until canonical fingerprint integration supports them. This is an open H1/G4
-requirement, not a compatibility waiver. Native additions/removal and runtime
-behavior must be qualified separately for each platform/contribution type.
+With OTAStartup, verified native file descriptors enter the installed canonical
+collector through its data-only extra-source contract. The reserved contents
+source `xplat-ns/extension-native/v1` hashes sorted owner/version/platform/kind/path
+and SHA256 records; it contains no generated-state or host paths. The adapter
+adds it only to the private snapshot, preserves caller extra sources, and rejects
+collision or exclusion of this source. It verifies the producer's record against
+the canonical collector before publishing startup code, stamp and record together.
+No generated inputs preserves the existing canonical identity. Update tooling
+must obtain that identity through the same public preparation/build path; running
+the collector against authored inputs alone cannot reproduce generated inputs.
+Native additions/removal and runtime behavior still require qualification for
+each platform/contribution type.
 
 Post-build handlers receive `Input.Artifacts`, typed descriptors containing each
 completed compiler output's absolute path, kind and application ID. Earlier

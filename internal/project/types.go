@@ -15,15 +15,27 @@ type Identity struct {
 	Target     Target
 }
 type Resolved struct {
-	Config         Config
-	Packages       []Package
-	Dependencies   []Dependency
-	Contributions  []Contribution
-	Sources        []Source
-	Directory      string
-	Revision       string
-	ApplicationID  string
-	SourceRevision string
+	Config          Config
+	Packages        []Package
+	Dependencies    []Dependency
+	Contributions   []Contribution
+	Sources         []Source
+	Directory       string
+	Revision        string
+	ApplicationID   string
+	SourceRevision  string
+	ExtensionNative []ExtensionNativeInput
+}
+
+// ExtensionNativeInput is a portable digest of a verified generated native file.
+// Canonical OTA collection must not depend on generated-state or host paths.
+type ExtensionNativeInput struct {
+	Owner    string `json:"owner"`
+	Version  string `json:"version"`
+	Platform string `json:"platform"`
+	Kind     string `json:"kind"`
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256"`
 }
 type Prepared struct {
 	Identity  Identity

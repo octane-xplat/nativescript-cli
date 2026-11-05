@@ -17494,8 +17494,9 @@ var require_ota = __commonJS({
       return rel !== ".." && !rel.startsWith(".." + path2.sep) && !path2.isAbsolute(rel);
     }
     module2.exports = async function(p) {
-      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind } = p;
+      const { projectDir, nativeDir, bundleDir, stageDir, platform, configuration, nativeConfig, architecture, destinationKind, extensionNative = [], projectStateDir } = p;
       if (![projectDir, nativeDir, bundleDir, stageDir].every((v) => typeof v === "string" && path2.isAbsolute(v)) || !inside(nativeDir, bundleDir) || !["ios", "android"].includes(platform) || !["release", "debug"].includes(configuration) || !nativeConfig || typeof nativeConfig !== "object") fail();
+      if (projectStateDir !== void 0 && (typeof projectStateDir !== "string" || !path2.isAbsolute(projectStateDir) || inside(projectStateDir, projectDir) || !inside(projectStateDir, nativeDir) || !inside(projectStateDir, stageDir))) fail();
       const req = createRequire2(path2.join(projectDir, "package.json"));
       let producer, fingerprintFile;
       try {
@@ -17523,12 +17524,13 @@ var require_ota = __commonJS({
       const view = path2.join(stageDir, "project");
       fs2.mkdirSync(view);
       const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".xplat", ".xplat-ns"]);
+      const excluded = (f) => inside(buildRoot, f) || inside(stageDir, f) || projectStateDir !== void 0 && inside(projectStateDir, f);
       const digest = (root) => {
         const h = createHash("sha256");
         function walk(dir) {
           for (const e of fs2.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
             const f = path2.join(dir, e.name);
-            if (dir === root && ignored.has(e.name) || inside(buildRoot, f) || inside(stageDir, f)) continue;
+            if (dir === root && ignored.has(e.name) || excluded(f)) continue;
             if (e.isSymbolicLink()) fail("unavailable");
             h.update(path2.relative(root, f));
             if (e.isDirectory()) walk(f);
@@ -17539,14 +17541,39 @@ var require_ota = __commonJS({
         return h.digest("hex");
       };
       const before = digest(projectDir);
+      const copy = (source, destination) => {
+        if (excluded(source)) return;
+        if (inside(source, stageDir) && fs2.lstatSync(source).isDirectory()) {
+          fs2.mkdirSync(destination, { recursive: true });
+          for (const e of fs2.readdirSync(source)) copy(path2.join(source, e), path2.join(destination, e));
+        } else fs2.cpSync(source, destination, { recursive: true, dereference: false, filter: (source2) => !excluded(source2) });
+      };
       for (const e of fs2.readdirSync(projectDir)) {
-        const f = path2.join(projectDir, e);
-        if (ignored.has(e) || inside(buildRoot, f) || inside(stageDir, f)) continue;
-        fs2.cpSync(f, path2.join(view, e), { recursive: true, dereference: false, filter: (source) => !inside(buildRoot, source) && !inside(stageDir, source) });
+        if (!ignored.has(e)) copy(path2.join(projectDir, e), path2.join(view, e));
       }
       fs2.symlinkSync(path2.join(projectDir, "node_modules"), path2.join(view, "node_modules"), "dir");
       const rebase = (v) => typeof v === "string" ? v.replaceAll(projectDir, view) : Array.isArray(v) ? v.map(rebase) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebase(x)])) : v;
       const config = rebase(nativeConfig);
+      const extensionID = "xplat-ns/extension-native/v1";
+      let extensionContents;
+      if (!Array.isArray(extensionNative)) fail();
+      if (extensionNative.length) {
+        const seen = /* @__PURE__ */ new Set();
+        const files = extensionNative.map((f) => {
+          if (!f || Object.keys(f).sort().join(",") !== "kind,owner,path,platform,sha256,version" || typeof f.owner !== "string" || !f.owner || typeof f.version !== "string" || !f.version || f.platform !== platform || !["source", "resource", "configuration", "library", "framework"].includes(f.kind) || typeof f.path !== "string" || !f.path || path2.posix.isAbsolute(f.path) || path2.posix.normalize(f.path) !== f.path || f.path === ".." || f.path.startsWith("../") || /[\\:\x00]/.test(f.path) || !/^([a-f0-9]{64})$/.test(f.sha256)) fail();
+          const key2 = JSON.stringify([f.owner, f.path.toLowerCase()]);
+          if (seen.has(key2)) fail();
+          seen.add(key2);
+          return f;
+        }).sort((a, b) => a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+        extensionContents = stable({ format: extensionID, files });
+        const file = path2.join(view, "fingerprint.config.json");
+        const fingerprintConfig = fs2.existsSync(file) ? JSON.parse(fs2.readFileSync(file)) : {};
+        if (!fingerprintConfig || typeof fingerprintConfig !== "object" || Array.isArray(fingerprintConfig) || fingerprintConfig.extraSources !== void 0 && !Array.isArray(fingerprintConfig.extraSources)) fail();
+        const extras = fingerprintConfig.extraSources ?? [];
+        if (extras.some((s) => s && s.id === extensionID)) fail();
+        fs2.writeFileSync(file, JSON.stringify({ ...fingerprintConfig, extraSources: [...extras, { type: "contents", id: extensionID, contents: extensionContents, reasons: ["extension-generated native inputs"] }] }));
+      }
       const platforms = path2.resolve(view, config.buildPath ?? "platforms");
       const native = path2.join(platforms, platform);
       fs2.mkdirSync(path2.dirname(native), { recursive: true });
@@ -17567,6 +17594,10 @@ var require_ota = __commonJS({
       const record = JSON.parse(fs2.readFileSync(recordFile));
       const verified = await canonical.createFingerprintAsync(view, { platforms: [platform], nativeConfig: config, toolchain: record.toolchain });
       if (record.hash !== verified.hash || stable(record.sources) !== stable(verified.sources) || before !== digest(projectDir)) fail();
+      if (extensionContents !== void 0) {
+        const source = record.sources.filter((s) => s.type === "contents" && s.id === extensionID);
+        if (source.length !== 1 || source[0].hash !== createHash("sha256").update(extensionContents).digest("hex")) fail();
+      }
       const stamp = JSON.parse(fs2.readFileSync(path2.join(emitted, "xplat-native.json")));
       if (stamp.hash !== record.hash || stamp.release !== (configuration === "release")) fail();
       const output = path2.join(stageDir, "native");

@@ -18,7 +18,7 @@ test('packed canonical producer: actual Apple tool identity, fixture native pins
  fs.writeFileSync(path.join(native,'Podfile.lock'),'PODS:\n  - Fixture (1.0.0)\n');
  fs.mkdirSync(path.join(native,'NativeScriptApp.xcworkspace/xcshareddata/swiftpm'),{recursive:true});
  fs.writeFileSync(path.join(native,'NativeScriptApp.xcworkspace/xcshareddata/swiftpm/Package.resolved'),JSON.stringify({version:2,pins:[{identity:'fixture',state:{revision:'abc',version:'1.0.0'}}]}));
- const run=async(configuration='release')=>{const stage=fs.mkdtempSync(path.join(work,'stage-'));const result=await ota({projectDir:root,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:stage,platform:'ios',configuration,nativeConfig,architecture:'arm64',destinationKind:'simulator'});return {result,stage,record:JSON.parse(fs.readFileSync(path.join(stage,'native/.xplat/fingerprints/ios.json')))};};
+ const run=async(configuration='release',extensionNative=[])=>{const stage=fs.mkdtempSync(path.join(work,'stage-'));const result=await ota({projectDir:root,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:stage,platform:'ios',configuration,nativeConfig,architecture:'arm64',destinationKind:'simulator',extensionNative});return {result,stage,record:JSON.parse(fs.readFileSync(path.join(stage,'native/.xplat/fingerprints/ios.json')))};};
  const first=await run();assert.match(first.result.hash,/^[a-f0-9]{64}$/);assert.match(fs.readFileSync(path.join(first.stage,'native/internal/main.m'),'utf8'),new RegExp(first.result.hash));
  assert.ok(first.record.sources.some(s=>JSON.stringify(s).includes('Podfile.lock')));assert.ok(first.record.sources.some(s=>JSON.stringify(s).includes('Package.resolved')));
  fs.copyFileSync(path.join(first.stage,'native/internal/main.m'),boot);
@@ -26,6 +26,28 @@ test('packed canonical producer: actual Apple tool identity, fixture native pins
  const relocated=path.join(work,'relocated-app');fs.cpSync(root,relocated,{recursive:true,dereference:false});const relocationStage=fs.mkdtempSync(path.join(work,'relocated-stage-'));
  const relocatedResult=await ota({projectDir:relocated,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:relocationStage,platform:'ios',configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator'});assert.equal(relocatedResult.hash,first.result.hash);
  fs.writeFileSync(path.join(root,'app/app.js'),'// js two');assert.equal((await run()).result.hash,first.result.hash);
+ const generated={owner:'native',version:'1.0.0',platform:'ios',kind:'source',path:'Injected.swift',sha256:require('node:crypto').createHash('sha256').update('class Injected {}').digest('hex')};
+ const withNative=await run('release',[generated]);assert.notEqual(withNative.result.hash,first.result.hash);
+ assert.ok(withNative.record.sources.some(s=>s.type==='contents'&&s.id==='xplat-ns/extension-native/v1'&&/^[a-f0-9]{64}$/.test(s.hash)));
+ assert.equal((await run('release',[generated])).result.hash,withNative.result.hash);
+ for(const [key,value] of Object.entries({owner:'another',version:'2.0.0',kind:'configuration',path:'Other.swift',sha256:'a'.repeat(64)}))assert.notEqual((await run('release',[{...generated,[key]:value}])).result.hash,withNative.result.hash,key);
+ const second={...generated,owner:'second'};assert.equal((await run('release',[generated,second])).result.hash,(await run('release',[second,generated])).result.hash);
+ const extensionRelocationStage=fs.mkdtempSync(path.join(work,'extension-relocated-stage-'));
+ const extensionRelocated=await ota({projectDir:relocated,nativeDir:native,bundleDir:path.join(native,'app'),stageDir:extensionRelocationStage,platform:'ios',configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator',extensionNative:[generated]});assert.equal(extensionRelocated.hash,withNative.result.hash);
+ assert.equal((await run()).result.hash,first.result.hash); // removal restores canonical identity
+ const fingerprintConfig=path.join(root,'fingerprint.config.json');
+ fs.writeFileSync(fingerprintConfig,JSON.stringify({extraSources:[{type:'contents',id:'caller-owned',contents:'preserved',reasons:['fixture']}]}));
+ const preserved=await run('release',[generated]);assert.ok(preserved.record.sources.some(s=>s.id==='caller-owned'));assert.equal(JSON.parse(fs.readFileSync(fingerprintConfig)).extraSources.length,1);
+ fs.writeFileSync(fingerprintConfig,JSON.stringify({extraSources:[{type:'contents',id:'xplat-ns/extension-native/v1',contents:'collision',reasons:[]}]}));await assert.rejects(run('release',[generated]),e=>e.code==='invalid_input');fs.unlinkSync(fingerprintConfig);
+ fs.writeFileSync(path.join(root,'.fingerprintignore'),'xplat-ns/extension-native/**\n');await assert.rejects(run('release',[generated]),e=>e.code==='invalid_input');fs.unlinkSync(path.join(root,'.fingerprintignore'));
+ await assert.rejects(run('release',[generated,generated]),e=>e.code==='invalid_input');
+ assert.equal((await run()).result.hash,first.result.hash);
+ const owned=path.join(root,'custom-state/project-id');const ownedNative=path.join(owned,'target/native');fs.mkdirSync(path.dirname(ownedNative),{recursive:true});fs.cpSync(native,ownedNative,{recursive:true});
+ const ownedStage=fs.mkdtempSync(path.join(owned,'ota-'));const customOutput=await ota({projectDir:root,projectStateDir:owned,nativeDir:ownedNative,bundleDir:path.join(ownedNative,'app'),stageDir:ownedStage,platform:'ios',configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator',extensionNative:[generated]});assert.equal(customOutput.hash,withNative.result.hash);
+ // Authored siblings of the owned state branch still enter native collection.
+ fs.mkdirSync(path.join(root,'custom-state/authored'));fs.writeFileSync(path.join(root,'custom-state/authored/value'),'keep');
+ const authoredStage=fs.mkdtempSync(path.join(owned,'ota-'));await ota({projectDir:root,projectStateDir:owned,nativeDir:ownedNative,bundleDir:path.join(ownedNative,'app'),stageDir:authoredStage,platform:'ios',configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator'});assert.equal(fs.readFileSync(path.join(authoredStage,'project/custom-state/authored/value'),'utf8'),'keep');
+ fs.rmSync(path.join(root,'custom-state'),{recursive:true});
  fs.writeFileSync(path.join(native,'Podfile.lock'),'PODS:\n  - Fixture (2.0.0)\n');assert.notEqual((await run()).result.hash,first.result.hash);
  const debug=await run('debug');assert.equal(debug.result.release,false);assert.notEqual(debug.result.hash,first.result.hash);
  fs.writeFileSync(boot,'// xplat-updates:start\n incomplete');const before=fs.readFileSync(boot,'utf8');await assert.rejects(run());assert.equal(fs.readFileSync(boot,'utf8'),before);

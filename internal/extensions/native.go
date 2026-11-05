@@ -223,12 +223,18 @@ func MaterializeNative(ctx context.Context, r project.Resolved, l workspace.Leas
 	}
 	r.Contributions = append([]project.Contribution(nil), r.Contributions...)
 	r.Sources = append([]project.Source(nil), r.Sources...)
+	r.ExtensionNative = append([]project.ExtensionNativeInput(nil), r.ExtensionNative...)
 	for _, input := range inputs {
 		owner := filepath.Join(dest, owners[input.Owner])
 		file := filepath.Join(owner, "platforms", input.File.Platform, filepath.FromSlash(input.File.Path))
 		r.Contributions = append(r.Contributions, project.Contribution{PackageDirectory: owner, Platform: input.File.Platform, Kind: input.File.Kind, Path: file})
 		hash := sha256.Sum256(input.File.Content)
-		r.Sources = append(r.Sources, project.Source{Path: file, Digest: hex.EncodeToString(hash[:])})
+		digest := hex.EncodeToString(hash[:])
+		r.Sources = append(r.Sources, project.Source{Path: file, Digest: digest})
+		r.ExtensionNative = append(r.ExtensionNative, project.ExtensionNativeInput{
+			Owner: input.Owner, Version: input.Version, Platform: input.File.Platform,
+			Kind: input.File.Kind, Path: input.File.Path, SHA256: digest,
+		})
 	}
 	return r, nil
 }

@@ -2,7 +2,6 @@ package nativescript_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,14 +88,6 @@ func TestPublicNativeExtensionPreparationAndRemoval(t *testing.T) {
 			verify(removed, false)
 			if removed.Identity.Revision != resolved.Revision {
 				t.Fatal("removal identity")
-			}
-			request.OutputDir = filepath.Join(t.TempDir(), "must-remain-absent")
-			ota, _ := ns.New(ns.Options{OTAStartup: true, Extensions: []extension.Extension{nativeRegistration{"one"}}})
-			if _, err := ota.Prepare(ctx, request); !errors.Is(err, ns.ErrUnavailable) {
-				t.Fatal("unsupported OTA combination", err)
-			}
-			if _, err := os.Stat(request.OutputDir); !os.IsNotExist(err) {
-				t.Fatal("OTA guard wrote state", err)
 			}
 		})
 	}

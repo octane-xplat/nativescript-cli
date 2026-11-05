@@ -41,7 +41,7 @@ type Target struct {
 // Sink may be called concurrently by independent operations.
 type Options struct {
 	// OTAStartup opts into installed canonical @octane-xplat/updates and fingerprint 0.19.0 preparation.
-	// Automatic native compatibility fingerprinting is unavailable.
+	// Requires the exact supported producer packages and resolved native dependency locks.
 	OTAStartup bool
 	// Extensions are explicit registrations; IDs must be unique across all execution forms.
 	Extensions  []extension.Extension

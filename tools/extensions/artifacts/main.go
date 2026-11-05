@@ -33,6 +33,90 @@ type inspector struct{ id string }
 
 var generatedClasses = []string{"FromDirect", "FromExecutable", "FromJavascript"}
 
+type nativeFingerprint struct {
+	Hash     string `json:"hash"`
+	Format   string `json:"format"`
+	Platform string `json:"platform"`
+	Release  bool   `json:"release"`
+	Sources  []struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Hash string `json:"hash"`
+	} `json:"sources"`
+}
+
+func verifyFingerprint(built ns.BuildResult, generated bool) (nativeFingerprint, error) {
+	var record nativeFingerprint
+	data, err := os.ReadFile(filepath.Join(built.Prepared.NativeDir, ".xplat/fingerprints/android.json"))
+	if err != nil {
+		return record, err
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		return record, err
+	}
+	if len(record.Hash) != 64 || record.Format != "octane-xplat.native-fingerprint.v1" || record.Platform != "android" || record.Release {
+		return record, errors.New("invalid canonical debug fingerprint")
+	}
+	count := 0
+	var expectedFiles []map[string]string
+	for i, owner := range []string{"direct", "executable", "javascript"} {
+		name := generatedClasses[i]
+		source := "package org.example.generated; public class " + name + " { public static int value() { return 42; } }"
+		hash := sha256.Sum256([]byte(source))
+		expectedFiles = append(expectedFiles, map[string]string{
+			"owner": owner, "version": "1.0.0", "platform": "android", "kind": "source",
+			"path": "org/example/generated/" + name + ".java", "sha256": hex.EncodeToString(hash[:]),
+		})
+	}
+	// Go's sorted map keys reproduce the canonical stable JSON for these ASCII
+	// descriptors, independently of the core's private materialization handoff.
+	manifest, err := json.Marshal(map[string]any{"format": "xplat-ns/extension-native/v1", "files": expectedFiles})
+	if err != nil {
+		return record, err
+	}
+	expectedHash := sha256.Sum256(manifest)
+	for _, s := range record.Sources {
+		if s.Type == "contents" && s.ID == "xplat-ns/extension-native/v1" {
+			if s.Hash != hex.EncodeToString(expectedHash[:]) {
+				return record, errors.New("generated native fingerprint source differs from independent descriptor hash")
+			}
+			count++
+		}
+	}
+	want := 0
+	if generated {
+		want = 1
+	}
+	if count != want {
+		return record, errors.New("generated native fingerprint membership mismatch")
+	}
+	archive, err := zip.OpenReader(built.Artifacts[0].Path)
+	if err != nil {
+		return record, err
+	}
+	defer archive.Close()
+	for _, file := range archive.File {
+		if file.Name != "assets/app/xplat-native.json" {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			return record, err
+		}
+		data, err := io.ReadAll(io.LimitReader(reader, 1<<20))
+		reader.Close()
+		if err != nil {
+			return record, err
+		}
+		var stamp nativeFingerprint
+		if json.Unmarshal(data, &stamp) != nil || stamp.Hash != record.Hash || stamp.Format != record.Format || stamp.Release != record.Release {
+			return record, errors.New("compiled canonical stamp mismatch")
+		}
+		return record, nil
+	}
+	return record, errors.New("compiled canonical stamp absent")
+}
+
 func verifyClasses(apk string, present bool) error {
 	archive, err := zip.OpenReader(apk)
 	if err != nil {
@@ -138,6 +222,8 @@ func run() (result error) {
 	env := os.Environ()
 	writer, flags, prefix := log.Writer(), log.Flags(), log.Prefix()
 	evidence := map[string]any{"boundary": "real Android debug Build and three-form read-only artifact inspection; no device/runtime/release claim"}
+	ota := os.Getenv("OTA_STARTUP") == "1"
+	evidence["canonicalOTA"] = ota
 	defer func() {
 		now, _ := os.Getwd()
 		globals := now == cwd && reflect.DeepEqual(env, os.Environ()) && log.Writer() == writer && log.Flags() == flags && log.Prefix() == prefix
@@ -173,7 +259,7 @@ func run() (result error) {
 		return err
 	}
 	defer closeJS()
-	client, err := ns.New(ns.Options{Extensions: []extension.Extension{inspector{"direct"}, external, javascript}})
+	client, err := ns.New(ns.Options{OTAStartup: ota, Extensions: []extension.Extension{inspector{"direct"}, external, javascript}})
 	if err != nil {
 		return err
 	}
@@ -211,7 +297,15 @@ func run() (result error) {
 	if err := retainAPK(built.Artifacts[0].Path, saved+".with-native.apk"); err != nil {
 		return err
 	}
-	plain, err := ns.New(ns.Options{})
+	var firstFingerprint nativeFingerprint
+	if ota {
+		firstFingerprint, err = verifyFingerprint(built, true)
+		if err != nil {
+			return err
+		}
+		evidence["nativeFingerprint"] = firstFingerprint
+	}
+	plain, err := ns.New(ns.Options{OTAStartup: ota})
 	if err != nil {
 		return err
 	}
@@ -227,6 +321,16 @@ func run() (result error) {
 	}
 	if err := retainAPK(removed.Artifacts[0].Path, saved+".removed.apk"); err != nil {
 		return err
+	}
+	if ota {
+		fingerprint, err := verifyFingerprint(removed, false)
+		if err != nil {
+			return err
+		}
+		if fingerprint.Hash == firstFingerprint.Hash {
+			return errors.New("native extension removal did not change canonical fingerprint")
+		}
+		evidence["removedNativeFingerprint"] = fingerprint
 	}
 	evidence["generatedClasses"] = generatedClasses
 	evidence["removedBuild"] = removed

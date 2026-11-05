@@ -1,5 +1,11 @@
 # Three-form native inputs and post-build artifact inspection
 
+Set `OTA_STARTUP=1` to also run the installed exact canonical OTA producer. This
+requires supported runtime9.1 and resolved native locks. The consumer checks the
+compiled APK stamp against the canonical record, requires the generated native
+source entry before removal, and verifies removal changes the compatibility hash.
+This debug build check does not exercise an OTA installer or runtime activation.
+
 This opt-in public-library consumer builds the maintained
 `tools/qualification/android/app` fixture and registers direct Go, executable Go
 and Node inspectors in one operation. Each requires `build_artifacts`, reads the

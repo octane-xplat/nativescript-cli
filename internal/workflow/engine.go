@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/octane-xplat/nativescript-cli/extension"
 	"github.com/octane-xplat/nativescript-cli/internal/extensions"
 	"path/filepath"
@@ -130,9 +129,6 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 			return err
 		}
 		if len(nativeInputs) > 0 {
-			if s.OTA != nil {
-				return fmt.Errorf("%w: canonical OTA cannot yet fingerprint extension native files", ErrUnavailable)
-			}
 			r.SourceRevision = r.Revision
 			r.Revision = extensions.NativeRevision(r.Revision, nativeInputs)
 			input.Revision = r.Revision

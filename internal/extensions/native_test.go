@@ -54,8 +54,12 @@ func TestNativeValidationIdentityAndImmutableInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(materialized.Contributions) != 1 || len(materialized.Sources) != 1 {
+	if len(materialized.Contributions) != 1 || len(materialized.Sources) != 1 || len(materialized.ExtensionNative) != 1 {
 		t.Fatal("missing native source handoff", materialized)
+	}
+	digest := materialized.ExtensionNative[0]
+	if digest.Owner != input.Owner || digest.Version != input.Version || digest.Platform != input.File.Platform || digest.Kind != input.File.Kind || digest.Path != input.File.Path || digest.SHA256 != materialized.Sources[0].Digest {
+		t.Fatal("canonical native input handoff", digest)
 	}
 	file := materialized.Contributions[0].Path
 	if data, err := os.ReadFile(file); err != nil || string(data) != "class Hello {}" {
