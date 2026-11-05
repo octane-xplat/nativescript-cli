@@ -223,3 +223,12 @@ The native fixture queues a second save during an async callback, rejects one
 callback, then applies another; it checks ordered tokens, exact counts and no
 overlap in the original PID/boot before rebuilding a native resource. This
 qualifies that scenario only, not every callback/disposal or G5 failure mode.
+
+For the registered Octane0.2.1 development strategy, adapt its separate handler
+after project configuration registers it. A deferred module delta is emitted
+only when that operation changes a module hash or dependency identity; explicit
+removals still propagate. An identical entry save must not replay an earlier
+transaction. This adapter is limited to the qualified0.2.1 provider and the
+SDK versions above; other Octane development provider versions fail unavailable.
+Installed provider files and client framework behavior remain unchanged. Host
+protocol checks do not establish native callback execution or complete G5.

@@ -32,7 +32,7 @@ module.exports = async function native(p, emit) {
   let aliases;
   try{aliases=require('./native-aliases.cjs')(req);}catch{throw fail('unavailable');}
   try { return await aliases.run(async()=>{
-  let engine, vite;
+  let engine, vite, updates;
   try {
     const engineFile = req.resolve('@nativescript/vite');
     const enginePkg = JSON.parse(fs.readFileSync(path.join(path.dirname(engineFile),'package.json'),'utf8'));
@@ -42,9 +42,9 @@ module.exports = async function native(p, emit) {
     vite = await import(pathToFileURL(req.resolve('vite')).href);
     if (!/^8\./.test(vite.version)) throw fail('unavailable');
     const framework = await import(pathToFileURL(req.resolve('@nativescript/vite/framework')).href);
-    require('./native-update.cjs')(framework);
+    updates=require('./native-update.cjs')(framework,req);
   } catch (error) { throw fail(error.code === 'invalid_input' ? 'invalid_input' : 'unavailable'); }
-  const configs=require('./native-config.cjs')(p,vite,engine,development,aliases);
+  const configs=require('./native-config.cjs')(p,vite,engine,development,aliases,updates);
   function manifest(){
     const files=[];
     function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){

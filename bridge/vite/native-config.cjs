@@ -9,7 +9,7 @@ const optionalDigest = file => {try{return digest(file);}catch(error){if(error.c
 // Configs/plugins are trusted project code, not a sandbox. The adapter still
 // owns Vite's normal output, cache and listening settings. A plugin overriding
 // those settings fails before output or server startup.
-module.exports = function nativeConfig(p, vite, engine, development, aliases) {
+module.exports = function nativeConfig(p, vite, engine, development, aliases, updates) {
   const mode = p.configuration === 'debug' ? 'development' : 'production';
   const dependencies = new Map();
   if(p.bundlerConfigPath){
@@ -36,6 +36,7 @@ module.exports = function nativeConfig(p, vite, engine, development, aliases) {
       }
       if(changed())throw fail('restart_required');
     } else result=engine.typescriptConfig({mode},{typeCheck:false});
+    if(development&&updates)updates();
     // Vite reads mode-specific env files after loading the config. Track absent
     // files too, so creating one requests re-resolution rather than an in-place
     // server restart with stale inline config.

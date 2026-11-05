@@ -18297,7 +18297,7 @@ var require_native_aliases = __commonJS({
 var require_native_update = __commonJS({
   "bridge/vite/native-update.cjs"(exports2, module2) {
     "use strict";
-    module2.exports = (framework) => {
+    module2.exports = (framework, projectRequire) => {
       const strategy = framework.typescriptServerStrategy;
       const update = strategy.handleHotUpdate;
       strategy.handleHotUpdate = async (context, dependencies) => {
@@ -18318,6 +18318,41 @@ var require_native_update = __commonJS({
           }
         });
         return update(context, { ...dependencies, moduleGraph: scopedGraph });
+      };
+      const adapted = /* @__PURE__ */ new WeakSet();
+      return () => {
+        const strategy2 = framework.getFrameworkFlavor?.("octane")?.server;
+        if (!strategy2 || adapted.has(strategy2)) return;
+        let metadata;
+        try {
+          metadata = JSON.parse(require("node:fs").readFileSync(projectRequire.resolve("@nativescript-community/vite-octane/package.json"), "utf8"));
+        } catch {
+          throw Object.assign(new Error(), { code: "unavailable" });
+        }
+        if (metadata.version !== "0.2.1" || strategy2.flavor !== "octane" || strategy2.deferDeltaBroadcast !== true || typeof strategy2.handleHotUpdate !== "function") throw Object.assign(new Error(), { code: "unavailable" });
+        const update2 = strategy2.handleHotUpdate;
+        strategy2.handleHotUpdate = async (context, dependencies) => {
+          const graph = dependencies.moduleGraph, initial = /* @__PURE__ */ new Map(), changed = /* @__PURE__ */ new Set();
+          const identity = (node) => node && JSON.stringify([node.hash, node.deps]);
+          const scoped = new Proxy(graph, { get(target, property) {
+            if (property === "upsert") return (id, code, imports, options) => {
+              const key2 = target.normalizeGraphId(id);
+              if (!initial.has(key2)) initial.set(key2, identity(target.get(key2)));
+              const node = target.upsert(id, code, imports, options);
+              if (identity(node) === initial.get(key2)) changed.delete(key2);
+              else changed.add(key2);
+              return node;
+            };
+            if (property === "emitDelta") return (nodes, removed) => {
+              const selected = nodes.filter((node) => changed.has(target.normalizeGraphId(node.id)));
+              if (selected.length || removed.length) return target.emitDelta(selected, removed);
+            };
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          } });
+          return update2(context, { ...dependencies, moduleGraph: scoped });
+        };
+        adapted.add(strategy2);
       };
     };
   }
@@ -18461,7 +18496,7 @@ var require_native_config = __commonJS({
         throw error;
       }
     };
-    module2.exports = function nativeConfig(p, vite, engine, development, aliases) {
+    module2.exports = function nativeConfig(p, vite, engine, development, aliases, updates) {
       const mode = p.configuration === "debug" ? "development" : "production";
       const dependencies = /* @__PURE__ */ new Map();
       if (p.bundlerConfigPath) {
@@ -18491,6 +18526,7 @@ var require_native_config = __commonJS({
           }
           if (changed()) throw fail("restart_required");
         } else result = engine.typescriptConfig({ mode }, { typeCheck: false });
+        if (development && updates) updates();
         if (result.envFile !== false) {
           const envDir = path2.resolve(p.projectDir, result.envDir ?? ".");
           for (const name of [".env", ".env.local", `.env.${mode}`, `.env.${mode}.local`]) {
@@ -18594,7 +18630,7 @@ var require_native = __commonJS({
       }
       try {
         return await aliases.run(async () => {
-          let engine, vite;
+          let engine, vite, updates;
           try {
             const engineFile = req.resolve("@nativescript/vite");
             const enginePkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(engineFile), "package.json"), "utf8"));
@@ -18603,11 +18639,11 @@ var require_native = __commonJS({
             vite = await import(pathToFileURL(req.resolve("vite")).href);
             if (!/^8\./.test(vite.version)) throw fail("unavailable");
             const framework = await import(pathToFileURL(req.resolve("@nativescript/vite/framework")).href);
-            require_native_update()(framework);
+            updates = require_native_update()(framework, req);
           } catch (error) {
             throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
           }
-          const configs = require_native_config()(p, vite, engine, development, aliases);
+          const configs = require_native_config()(p, vite, engine, development, aliases, updates);
           function manifest() {
             const files = [];
             function walk(dir) {
