@@ -1,0 +1,1 @@
+import {NativeScriptConfig} from '@nativescript/core'; export default {id:'org.example.xplatpreset',appPath:'src',appResourcesPath:'App_Resources',cli:{packageManager:'bun'},bundler:'vite',bundlerConfigPath:'vite.config.mts'} as NativeScriptConfig;
