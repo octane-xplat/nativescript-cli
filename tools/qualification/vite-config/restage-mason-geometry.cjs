@@ -5,9 +5,10 @@ const { execFileSync } = require('node:child_process');
 const { transformSync } = require('esbuild');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const expectedBundle = '7b6299092eed145a7b5a195e4caa2e61396c6229c45eeef148497b1464cc9c4b';
-const useCandidate = process.argv.length === 6 && process.argv[5] === '--frame-adoption-candidate';
+const useControls = process.argv.length === 6 && process.argv[5] === '--frame-adoption-controls';
+const useCandidate = useControls || process.argv.length === 6 && process.argv[5] === '--frame-adoption-candidate';
 if (process.platform !== 'darwin' || !(process.argv.length === 5 || useCandidate) || !process.argv.slice(2, 5).every(path.isAbsolute)) {
-  throw Error('usage on Darwin: node restage-mason-geometry.cjs ABS_SOURCE_BUILD_JSON ABS_NEW_DIRECTORY ABS_NEW_RECEIPT [--frame-adoption-candidate]');
+  throw Error('usage on Darwin: node restage-mason-geometry.cjs ABS_SOURCE_BUILD_JSON ABS_NEW_DIRECTORY ABS_NEW_RECEIPT [--frame-adoption-candidate|--frame-adoption-controls]');
 }
 const [sourceBuild, destination, output] = process.argv.slice(2);
 if (fs.existsSync(destination) || fs.existsSync(output)) throw Error('Requires absent owned destination and receipt');
@@ -52,7 +53,20 @@ const compiled = transformSync(source.replace('export function createLayoutTrace
 const replacement = bundle.slice(0, start) + marker + '\nvar createLayoutTracer = (() => {\n' +
   compiled + '\nreturn createLayoutTracer;\n})();\n' + bundle.slice(end);
 // A source map for the old bundle must not be advertised for diagnostic bytes.
-const diagnostic = replacement.replace(/^\/\/# sourceMappingURL=.*$/gm, '');
+let diagnostic = replacement.replace(/^\/\/# sourceMappingURL=.*$/gm, '');
+let controls = null;
+if (useControls) {
+  const controlFile = path.join(__dirname, 'runtime/frame-adoption-controls.ts');
+  const text = fs.readFileSync(controlFile, 'utf8');
+  const boundary = 'phase = "complete";';
+  if (diagnostic.split(boundary).length !== 2 || diagnostic.includes('runMasonFrameAdoptionControls')) throw Error('Control lifecycle boundary differs');
+  const controlCode = transformSync(text.replace('export function runMasonFrameAdoptionControls(', 'function runMasonFrameAdoptionControls('),
+    { loader: 'ts', target: 'es2022', format: 'esm', sourcemap: false }).code;
+  diagnostic = diagnostic.replace(boundary,
+    'const controls = runMasonFrameAdoptionControls(page, Label); trace.push({ event: "frame-adoption-controls", ...controls }); if (!controls.passed) failure = controls.error; ' + boundary) +
+    '\nconst runMasonFrameAdoptionControls = (() => {\n' + controlCode + '\nreturn runMasonFrameAdoptionControls;\n})();\n';
+  controls = { source: controlFile, sourceSHA256: sha(text), scope: 'Additional actual UIKit controls; separate from basic lifecycle assertions' };
+}
 let candidate = null, diagnosticVendor = null;
 if (useCandidate) {
   const sourceFile = path.join(__dirname, 'runtime/frame-adoption-candidate.ts');
@@ -112,7 +126,7 @@ const receipt = {
     geometrySource: helper, geometrySourceSHA256: sha(source), replacedModuleSHA256: sha(bundle.slice(start, end)),
     changedFiles: changed, originalFiles: before, diagnosticFiles: after, originalPreserved: true,
     cloneMode: 'Darwin clonefile; no deep-copy fallback', requiredHeadroomBytes: required,
-    oldSourceMapAdvertised: false, frameAdoptionCandidate: candidate },
+    oldSourceMapAdvertised: false, frameAdoptionCandidate: candidate, frameAdoptionControls: controls },
   build: derivedBuild, executableSHA256: built.executableSHA256,
   bundledModules: { ...built.bundledModules, 'bundle.mjs': after['app/bundle.mjs'].sha256, 'vendor.mjs': after['app/vendor.mjs'].sha256 }
 };

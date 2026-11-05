@@ -105,6 +105,31 @@ to either a consumer with TypeScript5.9.3 or that exact package directory.
 UIKit/measurement are fixtures in this replay; native geometry, lifecycle and
 transform controls remain independent requirements.
 
+`--frame-adoption-controls` implies the candidate and adds actual UIKit controls
+after the four normal Mason lifecycle snapshots. It checks unchanged/repeated
+layout, scale1.25x0.75 plus23-degree rotation, bounds origin3,7 and anchor0.25,0.75,
+native geometry preservation, logical cache and layoutChanged counts. It restores
+Mason geometry, then replaces only the owned probe Page's content with a plain
+Core Label and checks natural positive safe-area clipping outside Mason. The
+result is retained in the health trace; a failed control sets the health failure
+field so the unchanged runtime consumer rejects it. This is an explicit
+qualification profile, not the normal application flow.
+
+Independently inspect the completed controls and cleanup:
+
+```sh
+node tools/qualification/vite-config/inspect-mason-adoption-controls.cjs \
+  /absolute/diagnostic-receipt.json /absolute/runtime.json \
+  /absolute/ownership.json /absolute/new-report.json
+```
+
+This verifier checks current candidate/control source hashes, original and
+diagnostic file hashes, actual before/after/repeated geometry and events,
+trigonometric transform components, logical cache, positive non-Mason insets,
+four lifecycle snapshots and owned cleanup/PID absence. Assertions are specific
+to the exact retained iPhone probe, including density3. Production source
+integration, other native views and the full original application remain separate.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh
