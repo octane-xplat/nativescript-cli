@@ -838,37 +838,41 @@ func TestResolvePluginNativeUsageInventory(t *testing.T) {
 }
 
 func TestResolveGestureProducerMarker(t *testing.T) {
-	root := resolutionApp(t)
-	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"@nativescript-community/gesturehandler":"2.1.0"}}`)
-	plugin := "node_modules/@nativescript-community/gesturehandler"
-	manifest := `{"name":"@nativescript-community/gesturehandler","version":"2.1.0","nativescript":{"platforms":{"android":"9"}}}`
-	resolutionFile(t, root, plugin+"/package.json", manifest)
-	marker := plugin + "/platforms/android/sync"
-	resolutionFile(t, root, marker, "force livesync\n")
-	client, _ := ns.New(ns.Options{})
-	resolved, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
-	if err != nil || len(resolved.Contributions) != 0 {
-		t.Fatal("qualified inert marker became an input or instruction", err)
-	}
-	canonical, err := filepath.EvalSymlinks(filepath.Join(root, marker))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tracked := false
-	for _, source := range resolved.Sources {
-		tracked = tracked || source.Path == canonical
-	}
-	if !tracked {
-		t.Fatal("producer marker identity missing")
-	}
-	resolutionFile(t, root, marker, "changed marker")
-	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
-		t.Fatal("changed producer marker accepted", err)
-	}
-	resolutionFile(t, root, marker, "force livesync\n")
-	resolutionFile(t, root, plugin+"/package.json", strings.Replace(manifest, "2.1.0", "2.1.1", 1))
-	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
-		t.Fatal("unqualified marker version accepted", err)
+	for _, version := range []string{"2.0.45", "2.1.0"} {
+		t.Run(version, func(t *testing.T) {
+			root := resolutionApp(t)
+			resolutionFile(t, root, "package.json", fmt.Sprintf(`{"name":"app","version":"1","dependencies":{"@nativescript-community/gesturehandler":%q}}`, version))
+			plugin := "node_modules/@nativescript-community/gesturehandler"
+			manifest := fmt.Sprintf(`{"name":"@nativescript-community/gesturehandler","version":%q,"nativescript":{"platforms":{"android":"9"}}}`, version)
+			resolutionFile(t, root, plugin+"/package.json", manifest)
+			marker := plugin + "/platforms/android/sync"
+			resolutionFile(t, root, marker, "force livesync\n")
+			client, _ := ns.New(ns.Options{})
+			resolved, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+			if err != nil || len(resolved.Contributions) != 0 {
+				t.Fatal("qualified inert marker became an input or instruction", err)
+			}
+			canonical, err := filepath.EvalSymlinks(filepath.Join(root, marker))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracked := false
+			for _, source := range resolved.Sources {
+				tracked = tracked || source.Path == canonical
+			}
+			if !tracked {
+				t.Fatal("producer marker identity missing")
+			}
+			resolutionFile(t, root, marker, "changed marker")
+			if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+				t.Fatal("changed producer marker accepted", err)
+			}
+			resolutionFile(t, root, marker, "force livesync\n")
+			resolutionFile(t, root, plugin+"/package.json", strings.Replace(manifest, version, "2.1.1", 1))
+			if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+				t.Fatal("unqualified marker version accepted", err)
+			}
+		})
 	}
 }
 

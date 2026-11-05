@@ -282,7 +282,7 @@ async function resolve({ projectDir }) {
       for (const key of ['id', 'appPath', 'appResourcesPath']) if (pluginConfig[key] !== undefined) fail('unavailable', 'App-only fields in plugin config are unsupported; move them to the application config');
       let metadata;
       try{metadata=masonMetadata(pkg,dir,read);}catch{fail('invalid_input','Packaged Mason provenance must match its artifact inventory');}
-      try{for(const file of gestureMetadata(pkg,dir,read))metadata.add(file);}catch{fail('unavailable','GestureHandler producer marker differs from the qualified 2.1.0 package');}
+      try{for(const file of gestureMetadata(pkg,dir,read))metadata.add(file);}catch{fail('unavailable','GestureHandler producer marker differs from the qualified package');}
       collect(dir, dir, pluginConfig, undefined, metadata);
       item.android = pluginConfig.android ?? {};
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';

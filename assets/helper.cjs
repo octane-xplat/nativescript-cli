@@ -18897,7 +18897,7 @@ var require_gesturehandler = __commonJS({
     var path2 = require("node:path");
     var crypto = require("node:crypto");
     module2.exports = function marker(pkg, dir, read) {
-      if (pkg.name !== "@nativescript-community/gesturehandler" || pkg.version !== "2.1.0") return [];
+      if (pkg.name !== "@nativescript-community/gesturehandler" || !["2.0.45", "2.1.0"].includes(pkg.version)) return [];
       const file = path2.join(dir, "platforms/android/sync");
       if (!fs2.existsSync(file)) return [];
       if (!fs2.lstatSync(file).isFile() || crypto.createHash("sha256").update(read(file)).digest("hex") !== "0d943433d4a07b21b932a01fdbe81c66c2cecd977d79cd22601e97a9d34076b2") {
@@ -19247,7 +19247,7 @@ var require_resolve = __commonJS({
           try {
             for (const file of gestureMetadata(pkg, dir, read)) metadata.add(file);
           } catch {
-            fail("unavailable", "GestureHandler producer marker differs from the qualified 2.1.0 package");
+            fail("unavailable", "GestureHandler producer marker differs from the qualified package");
           }
           collect(dir, dir, pluginConfig, void 0, metadata);
           item.android = pluginConfig.android ?? {};
