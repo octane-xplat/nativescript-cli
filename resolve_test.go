@@ -2,8 +2,10 @@ package nativescript_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -212,6 +214,132 @@ func TestResolveViteConfiguration(t *testing.T) {
 		if _, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, tc.kind) {
 			t.Fatal(tc.config, err)
 		}
+	}
+}
+
+func TestResolveNativeAuxiliaryInputs(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1.0.0","dependencies":{"native-package":"1"}}`)
+	resolutionFile(t, root, "node_modules/native-package/package.json", `{"name":"native-package","version":"1","nativescript":{"platforms":{"ios":"9.1","windows":"9.1.0"}}}`)
+	for name, text := range map[string]string{
+		"include/module.modulemap": `module Auxiliary { header "Health.h" export * }`,
+		"include/Health.h":         "void AuxiliaryHealth(void);",
+		"Producer.LICENSE":         "producer license bytes",
+		"NOTICE.txt":               "producer notice bytes",
+		"Package.resolved":         `{"version":3,"pins":[]}`,
+	} {
+		resolutionFile(t, root, "node_modules/native-package/platforms/ios/"+name, text)
+	}
+	c, _ := ns.New(ns.Options{})
+	p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Contributions) != 2 {
+		t.Fatalf("auxiliary files became native inputs: %+v", p.Contributions)
+	}
+	var modulemap bool
+	for _, contribution := range p.Contributions {
+		if strings.HasSuffix(contribution.Path, "module.modulemap") && contribution.Kind == "configuration" {
+			modulemap = true
+		}
+	}
+	if !modulemap {
+		t.Fatal("plugin module map missing")
+	}
+	var windows bool
+	for _, pkg := range p.Packages {
+		if pkg.Name == "native-package" && pkg.WindowsRequirement == "9.1.0" {
+			windows = true
+		}
+	}
+	if !windows {
+		t.Fatal("lost foreign platform declaration")
+	}
+	for _, name := range []string{"Producer.LICENSE", "NOTICE.txt", "Package.resolved"} {
+		var found bool
+		for _, source := range p.Sources {
+			if strings.HasSuffix(source.Path, "/"+name) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("lost packaged metadata identity", name)
+		}
+		resolutionFile(t, root, "node_modules/native-package/platforms/ios/"+name, "changed producer input")
+		next, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+		if err != nil || next.Revision == p.Revision {
+			t.Fatal("stale auxiliary identity", name, err)
+		}
+		p = next
+	}
+}
+
+func TestResolveMasonProvenanceBoundary(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"@octane-xplat/nativescript-mason-core":"1.0.0-beta.5"}}`)
+	plugin := "node_modules/@octane-xplat/nativescript-mason-core/"
+	resolutionFile(t, root, plugin+"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"1.0.0-beta.5","nativescript":{"platforms":{"ios":"9.1","android":"9.1"}}}`)
+	const metadata = `{"platform":"Android","abi":"arm64-v8a"}`
+	digest := sha256.Sum256([]byte(metadata))
+	inventory, _ := json.Marshal([]map[string]string{{"name": "platforms/android/manifest.json", "sha256": fmt.Sprintf("%x", digest)}})
+	resolutionFile(t, root, plugin+"artifact-inventory.json", string(inventory))
+	resolutionFile(t, root, plugin+"platforms/android/manifest.json", metadata)
+	resolutionFile(t, root, plugin+"platforms/android/Core.aar", "library fixture")
+	c, _ := ns.New(ns.Options{})
+	p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(p.Contributions) != 1 || p.Contributions[0].Kind != "library" {
+		t.Fatal(p, err)
+	}
+	for _, tc := range []struct {
+		name, text string
+		kind       error
+	}{
+		{"platforms/android/manifest.json", `{"platform":"modified"}`, ns.ErrInvalidInput},
+		{"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"unqualified","nativescript":{}}`, ns.ErrUnavailable},
+	} {
+		resolutionFile(t, root, plugin+"platforms/android/manifest.json", metadata)
+		resolutionFile(t, root, plugin+tc.name, tc.text)
+		if _, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, tc.kind) {
+			t.Fatal(tc.name, err)
+		}
+	}
+}
+
+func TestResolveInactiveVisionOSDeclaration(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"font-plugin":"1"}}`)
+	resolutionFile(t, root, "node_modules/font-plugin/package.json", `{"name":"font-plugin","version":"1","nativescript":{"platforms":{"ios":"9.1","windows":"9.1"}}}`)
+	const url = "https://github.com/example/fonts.git"
+	resolutionFile(t, root, "node_modules/font-plugin/nativescript.config.cjs", `module.exports={ios:{SPMPackages:[{name:'Font',libs:['Font'],repositoryURL:'`+url+`',version:'1.0.20'}]},visionos:{discardUncaughtJsExceptions:false,SPMPackages:[{name:'Font',libs:['VisionFont'],repositoryURL:'`+url+`',version:'1.0.12'}]}}`)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',visionos:{discardUncaughtJsExceptions:true,SPMPackages:[{name:'Font',libs:['AppVisionFont'],repositoryURL:'`+url+`',version:'2.0.0'}]}}`)
+	c, _ := ns.New(ns.Options{})
+	p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Contributions) != 1 || p.Contributions[0].Platform != "ios" || p.Contributions[0].SPM.Version != "1.0.20" || !reflect.DeepEqual(p.Contributions[0].SPM.Products, []string{"Font"}) {
+		t.Fatal("inactive platform changed iOS dependency graph", p.Contributions)
+	}
+	if p.Config.VisionOS == nil || p.Config.VisionOS.DiscardUncaughtJSExceptions == nil || !*p.Config.VisionOS.DiscardUncaughtJSExceptions || p.Config.VisionOS.SPMPackages[0].Version != "2.0.0" {
+		t.Fatal("lost app declaration", p.Config)
+	}
+	var found bool
+	for _, pkg := range p.Packages {
+		if pkg.Name == "font-plugin" {
+			v := pkg.VisionOS
+			if v == nil || v.DiscardUncaughtJSExceptions == nil || *v.DiscardUncaughtJSExceptions || v.SPMPackages[0].Version != "1.0.12" || !reflect.DeepEqual(v.SPMPackages[0].Products, []string{"VisionFont"}) {
+				t.Fatal("lost plugin declaration", pkg)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing plugin")
+	}
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',visionos:{discardUncaughtJsExceptions:'SECRET_VALUE'}}`)
+	if _, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) || strings.Contains(err.Error(), "SECRET_VALUE") {
+		t.Fatal("invalid inactive declaration accepted or leaked", err)
 	}
 }
 

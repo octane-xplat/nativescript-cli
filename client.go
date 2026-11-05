@@ -112,6 +112,20 @@ func (c *Client) notify(op string) workflow.Notify {
 	}
 }
 func (c *Client) stages() workflow.Stages { return c.engine.Stages(maps.Clone(c.options.Environment)) }
+func visionOSDeclaration(value *project.VisionOSConfig) *VisionOSConfig {
+	if value == nil {
+		return nil
+	}
+	result := &VisionOSConfig{}
+	if value.DiscardUncaughtJSExceptions != nil {
+		copy := *value.DiscardUncaughtJSExceptions
+		result.DiscardUncaughtJSExceptions = &copy
+	}
+	for _, p := range value.SPMPackages {
+		result.SPMPackages = append(result.SPMPackages, SwiftPackage{Name: p.Name, RepositoryURL: p.RepositoryURL, Version: p.Version, Products: append([]string(nil), p.Products...)})
+	}
+	return result
+}
 func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error) {
 	if err := ctx.Err(); err != nil {
 		return Project{}, operationError("resolve", err)
@@ -124,9 +138,9 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 		return Project{}, operationError("resolve", err)
 	}
 	result := Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID,
-		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android)}}
+		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android), VisionOS: visionOSDeclaration(p.Config.VisionOS)}}
 	for _, v := range p.Packages {
-		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, Android: AndroidRuntimeConfig(v.Android)})
+		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS)})
 	}
 	for _, v := range p.Dependencies {
 		result.Dependencies = append(result.Dependencies, InstalledDependency(v))

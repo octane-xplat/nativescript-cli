@@ -50,6 +50,14 @@ type ProjectConfig struct {
 	// PackageManager records the app preference; operations never install packages.
 	PackageManager string
 	Android        AndroidRuntimeConfig
+	// VisionOS retains an inactive platform declaration, never applied to iOS.
+	VisionOS *VisionOSConfig
+}
+
+// VisionOSConfig preserves declaration metadata. visionOS operations are unavailable.
+type VisionOSConfig struct {
+	DiscardUncaughtJSExceptions *bool
+	SPMPackages                 []SwiftPackage
 }
 type AndroidRuntimeConfig struct {
 	V8Flags     string
@@ -60,6 +68,9 @@ type AndroidRuntimeConfig struct {
 type InstalledPackage struct {
 	IOSRequirement     string
 	AndroidRequirement string
+	// WindowsRequirement retains metadata only; Windows execution is unavailable.
+	WindowsRequirement string
+	VisionOS           *VisionOSConfig
 	Android            AndroidRuntimeConfig
 	Name               string
 	Version            string

@@ -14,6 +14,13 @@ type Config struct {
 	BundlerConfigPath string
 	PackageManager    string
 	Android           AndroidConfig
+	VisionOS          *VisionOSConfig
+}
+
+// VisionOSConfig is declaration metadata only; no visionOS backend is provided.
+type VisionOSConfig struct {
+	DiscardUncaughtJSExceptions *bool          `json:"discardUncaughtJsExceptions,omitempty"`
+	SPMPackages                 []SwiftPackage `json:"spmPackages,omitempty"`
 }
 type AndroidConfig struct {
 	V8Flags     string `json:"v8Flags,omitempty"`
@@ -22,6 +29,8 @@ type AndroidConfig struct {
 type Package struct {
 	IOSRequirement     string
 	AndroidRequirement string
+	WindowsRequirement string
+	VisionOS           *VisionOSConfig
 	Android            AndroidConfig
 	Name               string
 	Version            string

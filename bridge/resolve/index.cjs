@@ -6,6 +6,7 @@ const { stripTypeScriptTypes, createRequire } = require('node:module');
 const coreAdapter=require('./core.cjs');
 const expandNativeSources=require('./native-sources.cjs');
 const swiftPackages=require('./swift-packages.cjs');
+const masonMetadata=require('./mason.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
 const safeFailures = new WeakSet();
@@ -86,8 +87,21 @@ async function resolve({ projectDir }) {
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) fail('invalid_input', 'Configured app/resources directory does not exist; create it or correct its config path');
     return fs.realpathSync(resolved);
   }
-  function collect(dir, owner, cfg, resources, core=false) {
-    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
+  function visionOS(value){
+    if(value===undefined)return undefined;
+    keys(value,['SPMPackages','discardUncaughtJsExceptions'],'visionOS declaration');
+    const declared={};
+    if(value.discardUncaughtJsExceptions!==undefined){
+      if(typeof value.discardUncaughtJsExceptions!=='boolean')fail('invalid_input','visionOS discardUncaughtJsExceptions must be boolean');
+      declared.discardUncaughtJsExceptions=value.discardUncaughtJsExceptions;
+    }
+    if(value.SPMPackages!==undefined){
+      try{declared.spmPackages=swiftPackages.parse(value.SPMPackages);}catch{fail('invalid_input','visionOS Swift package declaration is invalid');}
+    }
+    return declared;
+  }
+  function collect(dir, owner, cfg, resources, core=false, metadata=new Set()) {
+    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
     if(dir!==root && ['cli','bundler','bundlerConfigPath'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
     if(cfg.ios?.SPMPackages!==undefined){
@@ -125,12 +139,18 @@ async function resolve({ projectDir }) {
       for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name, 'en'))) {
         const file = path.join(folder, entry.name);
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
+        if(entry.isFile()&&metadata.has(fs.realpathSync(file))){read(file);continue;}
+        // Packaged static libraries can retain their producer's Swift pins and
+        // legal notices beside the actual inputs. Preserve their source identity
+        // without compiling legal text, installing another dependency graph or
+        // replacing this application's Package.resolved with producer pins.
+        if(entry.isFile() && (entry.name==='Package.resolved' || /(?:^|\.)(?:LICENSE|NOTICE)(?:\.(?:txt|md))?$/i.test(entry.name))){read(file);continue;}
         if(core && coreAdapter.inventory(path.relative(dir,file).split(path.sep).join('/'))) { read(file); continue; }
         if (entry.isDirectory() && !/\.(framework|xcframework|xcassets|bundle)$/.test(entry.name)) { walk(file, platform); continue; }
         let kind;
         const ext = path.extname(entry.name).toLowerCase();
         if (platform === 'ios') {
-          if(core && path.relative(dir,file).split(path.sep).join('/')==='platforms/ios/src/module.modulemap') kind='configuration';
+          if(ext==='.modulemap') kind='configuration';
           else if (entry.name === 'Podfile' || ext === '.podspec') kind = 'pods';
           else if (entry.name === 'Package.swift') kind = 'spm';
           else if (['.swift', '.m', '.mm', '.h', '.c', '.cpp'].includes(ext)) kind = 'source';
@@ -175,6 +195,7 @@ async function resolve({ projectDir }) {
   serializable(cfg);
   if (cfg.buildPath !== undefined && (typeof cfg.buildPath !== 'string' || !cfg.buildPath)) fail('invalid_input', 'Config buildPath must be a nonempty string');
   const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, 'app'), appResourcesPath: directory(root, cfg.appResourcesPath, 'App_Resources'), android: cfg.android ?? {} };
+  if(cfg.visionos!==undefined)normalized.visionOS=visionOS(cfg.visionos);
   if(cfg.cli!==undefined){
     keys(cfg.cli,['packageManager'],'CLI config');
     if(cfg.cli.packageManager!==undefined){
@@ -208,15 +229,19 @@ async function resolve({ projectDir }) {
       if(core&&!coreAdapter.supported(pkg,dir,read)) fail('unavailable','NativeScript core requires the reviewed 9.1.3 compatibility-hook contract');
       keys(pkg.nativescript, core?['platforms','hooks']:['platforms'], 'package nativescript metadata');
       if (pkg.nativescript.platforms) {
-        keys(pkg.nativescript.platforms, ['ios','android'], 'package platforms');
+        keys(pkg.nativescript.platforms, ['ios','android','windows'], 'package platforms');
         for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== 'string') fail('invalid_input','Native platform versions must be strings');
       }
       const pluginConfig = await config(dir, false);
+      if(pluginConfig.visionos!==undefined)item.visionOS=visionOS(pluginConfig.visionos);
       for (const key of ['id', 'appPath', 'appResourcesPath']) if (pluginConfig[key] !== undefined) fail('unavailable', 'App-only fields in plugin config are unsupported; move them to the application config');
-      collect(dir, dir, pluginConfig, undefined, core);
+      let metadata;
+      try{metadata=masonMetadata(pkg,dir,read);}catch{fail('invalid_input','Packaged Mason provenance must match its artifact inventory');}
+      collect(dir, dir, pluginConfig, undefined, core, metadata);
       item.android = pluginConfig.android ?? {};
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';
       item.androidRequirement = pkg.nativescript.platforms?.android ?? '';
+      item.windowsRequirement = pkg.nativescript.platforms?.windows ?? '';
     }
     for (const key of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       if (pkg[key] !== undefined) object(pkg[key], key);

@@ -30,7 +30,8 @@ upstream CLI is invoked.
 
 The supported config fields are `id`, `appPath`, `appResourcesPath`, `buildPath`,
 app `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
-`bundler`/`bundlerConfigPath`, and `android.v8Flags`/`android.markingMode`. The application identifier must be a
+`bundler`/`bundlerConfigPath`, declaration-only `visionos`, and
+`android.v8Flags`/`android.markingMode`. The application identifier must be a
 dotted identifier. Paths become canonical absolute existing directories, defaulting
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
 
@@ -80,7 +81,17 @@ break graph cycles and deduplicate links; distinct installations remain distinct
 even when names or versions match. Edges retain lookup and canonical paths.
 
 Packages marked with `package.json.nativescript` contribute native inputs.
-Supported metadata is `platforms.ios`/`platforms.android` version requirements.
+Supported metadata is `platforms.ios`/`platforms.android`/`platforms.windows`
+version requirements. WindowsRequirement is retained as declaration metadata;
+Windows preparation/build/device operations and Windows native-file collection
+remain unavailable. A plugin declaring Windows as well as iOS/Android does not
+require a Windows backend to resolve its iOS/Android inputs.
+App/plugin `visionos.SPMPackages` and boolean `discardUncaughtJsExceptions` are
+also validated and retained in public `VisionOSConfig` declaration metadata.
+They never enter the iOS dependency graph, override iOS versions/products or
+change iOS runtime settings. Other visionOS settings reject; no visionOS
+preparation/build/device backend is enabled. For example, FontManager1.0.20's
+iOS dependency stays1.0.20 even though its visionOS declaration requests1.0.12.
 These and package versions are retained without claiming toolchain compatibility.
 A native package may have its own executable config with platform settings;
 app-only fields in package config fail. Package Android settings remain on the
@@ -93,6 +104,21 @@ Unrecognized files, unsupported metadata/settings, legacy hooks and symlinks wit
 native trees fail with remediation. Linked package roots are supported. Resolution
 describes Pods/SPM/native files without executing or validating their native tools.
 Platform preparation owns the next stage and may reject inputs it cannot consume.
+
+Native module maps are configuration contributions, including plugin-owned maps.
+Ordinary LICENSE/NOTICE files and a packaged producer's `Package.resolved` are
+read-only source identities. They are not compiled/copied as runtime resources,
+and producer Swift pins never replace this application's resolved pins or request
+another dependency graph. Changes still invalidate resolution. Distribution of
+required legal notices remains a separate release responsibility.
+
+The published `@octane-xplat/nativescript-mason-core` 1.0.0-beta.5 adapter recognizes
+its four platform-root manifest/provenance JSON files only when their SHA-256
+values match its `artifact-inventory.json`. Inventory and records are hashed
+inputs, rather than app resources or Android configuration instructions. Unknown
+versions/layouts keep normal strict classification, and inconsistent inventories
+fail before preparation. This recognizes producer provenance; it does not certify
+the producer's binary build claims or establish Mason native/runtime qualification.
 
 ## Evidence boundary
 
