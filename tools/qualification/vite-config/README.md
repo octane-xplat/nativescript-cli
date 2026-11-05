@@ -87,3 +87,21 @@ JavaScript, retains the executable/manifest and an `.inspection.json` report,
 and preserves embedding globals. It does not invent a project-emitted proof asset
 or certify native CSS application, component lifecycle or guest health. Debug and
 release each need their own actual invocation and evidence prefix.
+
+`patch-runtime.py SOURCE WORKSPACE` prepares private copies for the next runtime
+checks. It requires the staged source-projection marker and exact package
+versions, preserves original package directories/dependencies, and applies the
+pinned core, Octane, renderer, engine, flavor and CSS patches. Bun hardlinks are
+copied before modification. A patch failure stops the fixture; start a new
+workspace instead of replaying into partial state.
+
+The Vite8.0.21 diff has a malformed EOF annotation before a deleted source-map
+footer. For that diff only, the tool removes EOF annotations and uses Git's
+`--recount --inaccurate-eof` handling, with a mandatory check before applying.
+All code hunks must still match. `runtime-patches.json` records original/applied
+patch hashes, normalization and resulting package-file hashes.
+
+Patch application and public Resolve do not establish runtime compatibility.
+The patched renderer's MasonKit imports currently expose missing preset-alias
+handling in the engine vendor bundle; host/runtime qualification of that path
+remains open. The tool keeps the original renderer imports and preset aliases.
