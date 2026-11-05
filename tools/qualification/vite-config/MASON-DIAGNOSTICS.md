@@ -61,6 +61,32 @@ the requested frame before resetting/restoring a transformed layer, so a generic
 native-frame-to-cache copy is not a qualified adoption rule. The geometry fields
 require a newly staged native probe; older retained traces do not contain them.
 
+For numeric diagnostics only, the exact retained corrected debug probe can also
+receive the new JavaScript tracer without another native compilation:
+
+```sh
+node tools/qualification/vite-config/restage-mason-geometry.cjs \
+  /absolute/original-build.json /absolute/new-cache-directory \
+  /absolute/new-diagnostic-receipt.json
+```
+
+This Darwin-only tool requires the known original bundle hash, unsigned debug
+simulator artifact, verified executable/modules and absent output paths. It uses
+`clonefile` without a deep-copy fallback and checks a bounded allocation budget
+plus128MiB reserve. Only the trace module in `app/bundle.mjs` changes; native
+files and the original app must remain byte-identical. Helper-local bindings
+stay private and the old bundle source map is no longer advertised. The receipt
+explicitly records `nativeBuildPerformed:false`, source/build hashes and both
+full file inventories. It is an artifact descriptor for the retained runtime
+runner, not a newly completed public Build result. Run it under a native-build
+reservation, then use the receipt with the existing runtime runner under its
+separate device reservation. The runner's system-volume boot guard still applies.
+
+This path can measure UIKit behavior with new diagnostics on retained native
+code. It cannot qualify changed native inputs, a fresh build, an unimplemented
+repair or a gate. Original staged source inputs remain unchanged; the receipt
+identifies the diagnostic helper source independently from the old build source.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh
