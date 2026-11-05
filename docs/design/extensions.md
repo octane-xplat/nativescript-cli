@@ -142,6 +142,12 @@ evidence with boot templates, not an application build or runtime qualification.
 `OTA_CONSUMER_DIR` enables owned-helper and adapter tests; `ANDROID_HOME` also
 enables actual Android SDK identity capture in the Node adapter test.
 
+Explicitly declared local iOS Swift packages currently return OTA unavailable.
+The canonical collector does not yet prove coverage of all app-relative local
+package contents, especially workspace paths outside installed native packages.
+Ordinary local-package native builds are separate from this remaining H1 work;
+their compilation does not authorize publishing a compatibility stamp.
+
 Regenerate Go bindings with protoc plus `protoc-gen-go` 1.36.11 and
 `protoc-gen-go-grpc` 1.6.1 using source-relative output in
 `extension/transport/wire`. Node bindings use grpc-tools 1.13.1 with commonjs binary

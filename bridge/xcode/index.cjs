@@ -147,7 +147,13 @@ module.exports = async ({ resolved, directory }) => {
       catch { fail('unavailable'); }
       const ref=put('XCLocalSwiftPackageReference',c.path,{relativePath:q(path.dirname(c.path))});
       (root.packageReferences ||= []).push({value:ref,comment:'P1'});
-      for (const product of manifest.products || []) {
+      let selectedProducts=manifest.products || [];
+      if(c.spm){
+        if(!c.spm.path||!Array.isArray(c.spm.products)||!c.spm.products.length)fail('invalid_input');
+        selectedProducts=c.spm.products.map(name=>selectedProducts.find(product=>product.name===name));
+        if(selectedProducts.some(product=>!product))fail('invalid_input');
+      }
+      for (const product of selectedProducts) {
         if (!product.type?.library) fail('unavailable');
         if(productNames.has(product.name))fail('unavailable');productNames.add(product.name);
         const dependency=put('XCSwiftPackageProductDependency',`${c.path}:${product.name}`,{package:ref,productName:q(product.name)});

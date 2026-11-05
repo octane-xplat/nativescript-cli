@@ -122,7 +122,7 @@ func visionOSDeclaration(value *project.VisionOSConfig) *VisionOSConfig {
 		result.DiscardUncaughtJSExceptions = &copy
 	}
 	for _, p := range value.SPMPackages {
-		result.SPMPackages = append(result.SPMPackages, SwiftPackage{Name: p.Name, RepositoryURL: p.RepositoryURL, Version: p.Version, Products: append([]string(nil), p.Products...)})
+		result.SPMPackages = append(result.SPMPackages, SwiftPackage{Name: p.Name, Path: p.Path, RepositoryURL: p.RepositoryURL, Version: p.Version, Products: append([]string(nil), p.Products...)})
 	}
 	return result
 }
@@ -148,7 +148,7 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 	for _, v := range p.Contributions {
 		item := NativeContribution{PackageDirectory: v.PackageDirectory, Platform: v.Platform, Kind: v.Kind, Path: v.Path}
 		if v.SPM != nil {
-			item.SPM = &SwiftPackage{Name: v.SPM.Name, RepositoryURL: v.SPM.RepositoryURL, Version: v.SPM.Version, Products: append([]string(nil), v.SPM.Products...)}
+			item.SPM = &SwiftPackage{Name: v.SPM.Name, Path: v.SPM.Path, RepositoryURL: v.SPM.RepositoryURL, Version: v.SPM.Version, Products: append([]string(nil), v.SPM.Products...)}
 		}
 		result.Contributions = append(result.Contributions, item)
 	}

@@ -42,6 +42,24 @@ app `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
 dotted identifier. Paths become canonical absolute existing directories, defaulting
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
 
+App and plugin `ios.SPMPackages` also accept `{name,path,libs}` local declarations.
+Paths resolve from the application root, including plugin declarations, matching
+the producer contract. A local declaration cannot also specify a remote URL or
+version. Its ordinary `Package.swift` and package tree are hashed, excluding
+SwiftPM caches; internal symlinks reject. Linked package roots remain supported.
+The returned `spm` contribution identifies the canonical manifest and retains
+the declared path/products in `SPM`. App declarations take precedence by name;
+otherwise the first plugin declaration encountered by the deterministic
+dependency traversal wins. Losing trees retain source identities, but do not
+add package references or direct application source membership. Declarations
+for one physical manifest merge requested products; conflicting products across
+different selected roots or local/remote name collisions reject. This selects
+inputs and does not establish ABI equivalence between same-name packages.
+
+Inactive `visionos` local declarations retain path metadata without resolving
+the path or applying it to iOS. Active local package roots are watched recursively
+for membership/content changes; `.build` and `.swiftpm` remain tool caches.
+
 `cli.packageManager` records `bun`, `npm`, `pnpm` or `yarn` as public project
 metadata. It does not authorize installation: every operation still requires
 already installed dependencies. Bundler/CLI fields in plugin configs reject.

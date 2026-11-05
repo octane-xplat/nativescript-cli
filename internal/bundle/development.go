@@ -109,6 +109,11 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 	for _, source := range r.Sources {
 		q.NativeInputs = append(q.NativeInputs, source.Path)
 	}
+	for _, contribution := range r.Contributions {
+		if contribution.Platform == "ios" && contribution.Kind == "spm" && contribution.SPM != nil {
+			q.NativeInputs = append(q.NativeInputs, filepath.Dir(contribution.Path))
+		}
+	}
 	for _, pkg := range r.Packages {
 		if pkg.Native {
 			q.NativeInputs = append(q.NativeInputs, filepath.Join(pkg.Directory, "platforms"))

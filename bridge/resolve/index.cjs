@@ -113,9 +113,13 @@ async function resolve({ projectDir }) {
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
     if(cfg.ios?.SPMPackages!==undefined){
       let declared;
-      try{declared=swiftPackages.parse(cfg.ios.SPMPackages);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','SPMPackages require named HTTPS repositories, supported version/revision requirements and library products');}
+      try{declared=swiftPackages.parse(cfg.ios.SPMPackages);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','SPMPackages require named local paths or HTTPS repositories with supported requirements and library products');}
       const origin=configNames.map(name=>path.join(dir,name)).find(fs.existsSync);
-      for(const spm of declared)contributions.push({packageDirectory:owner,platform:'ios',kind:'spm-remote',path:origin,spm});
+      for(const spm of declared){
+        let manifest=origin;
+        if(spm.path){try{manifest=swiftPackages.local(root,spm,read);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','Local Swift packages require an existing ordinary Package.swift and supported source tree at the app-relative path');}}
+        contributions.push({packageDirectory:owner,platform:'ios',kind:spm.path?'spm':'spm-remote',path:manifest,spm});
+      }
     }
     if(cfg.ios?.NativeSource!==undefined){
       if(dir!==root)fail('unavailable','Plugin NativeSource declarations require a qualified canonical source contract');
@@ -295,17 +299,19 @@ async function resolve({ projectDir }) {
     }
   }
   await visit(root, app, true);
+  let selectedContributions;
+  try{selectedContributions=swiftPackages.mergeLocal(contributions,root);}catch{fail('invalid_input','Conflicting local Swift package products or local/remote declarations');}
   // Explicit NativeSource groups can select a file already owned by an installed
   // native package. Compile physical membership once, preferring that package's
   // ownership over an app declaration; otherwise choose deterministically.
   const membership=new Map();
-  for(const c of contributions){
+  for(const c of selectedContributions){
     if(c.kind==='spm-remote')continue;
     const key=JSON.stringify([c.platform,c.kind,c.path]),previous=membership.get(key);
     if(!previous||(previous.packageDirectory===root&&c.packageDirectory!==root)||(previous.packageDirectory!==root&&c.packageDirectory!==root&&c.packageDirectory<previous.packageDirectory))membership.set(key,c);
   }
   let remote;
-  try{remote=swiftPackages.merge(contributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
+  try{remote=swiftPackages.merge(selectedContributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
   for(const c of remote)membership.set(JSON.stringify(['spm-remote',c.spm.repositoryURL]),c);
   const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
   if(nativeSourceGroups.length)result.nativeSourceGroups=nativeSourceGroups;

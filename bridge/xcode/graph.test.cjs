@@ -47,6 +47,21 @@ test('Pods and local SPM membership and removal',{skip:process.platform!=='darwi
  r.contributions=[];const removed=await prepare(q);assert.equal(removed.pods,true);assert.equal(removed.spm,true);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Example"/);
 });
 
+test('declared local SPM links requested library products and removes owned references',{skip:process.platform!=='darwin'},async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 declared local '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const manifest=path.join(dir,'Package.swift');
+ fs.writeFileSync(manifest,'// swift-tools-version: 5.7\nimport PackageDescription\nlet package = Package(name: "Local", products: [.library(name: "Wanted", targets: ["Wanted"]), .library(name: "Unused", targets: ["Unused"]), .executable(name: "Tool", targets: ["Tool"])], targets: [.target(name: "Wanted"), .target(name: "Unused"), .executableTarget(name: "Tool")])');
+ const c={platform:'ios',kind:'spm',packageDirectory:dir,path:manifest,spm:{name:'Local',path:'.',products:['Wanted']}};
+ const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[c]};
+ const q={directory:path.join(dir,'out'),resolved:r};await prepare(q);
+ const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');
+ const first=fs.readFileSync(file,'utf8');assert.match(first,/productName = "Wanted"/);assert.doesNotMatch(first,/productName = "(?:Unused|Tool)"/);
+ await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),first);
+ c.spm.products=['Missing'];await assert.rejects(prepare(q),{code:'invalid_input'});assert.equal(fs.readFileSync(file,'utf8'),first);
+ c.spm.products=['Tool'];await assert.rejects(prepare(q),{code:'unavailable'});assert.equal(fs.readFileSync(file,'utf8'),first);
+ r.contributions=[];await prepare(q);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Wanted"/);
+});
+
 test('unqualified runtime versions fail before template materialization', async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1-version-'));
  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

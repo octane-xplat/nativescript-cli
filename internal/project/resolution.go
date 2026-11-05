@@ -52,6 +52,7 @@ type Contribution struct {
 }
 type SwiftPackage struct {
 	Name          string   `json:"name"`
+	Path          string   `json:"path,omitempty"`
 	RepositoryURL string   `json:"repositoryURL"`
 	Version       string   `json:"version"`
 	Products      []string `json:"products"`

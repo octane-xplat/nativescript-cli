@@ -52,6 +52,18 @@ must match pod name. CocoaPods runs `pod install`; local SPM runs
 `xcodebuild -resolvePackageDependencies`. Missing/failed tools fail Prepare.
 Tool output is not forwarded to application callbacks under the lease.
 
+An explicit local `ios.SPMPackages` declaration links only its requested `libs`
+products after the real Swift manifest tool validates them. Missing products and
+requested executable products reject; unrequested products are not linked.
+Selected source-package references use their resolved local directories, like
+automatically discovered local packages. Package implementations remain owned
+by SwiftPM and do not also compile as application sources. App override and
+dependency removal regenerate the owned product/reference membership.
+
+Declared local-package canonical OTA coverage remains unfinished. OTA startup
+returns explicit unavailable for this iOS combination before invoking its
+canonical producer; ordinary non-OTA native preparation/build remains available.
+
 `.p1.json` records graph ownership. Stable IDs permit byte-identical repetition
 and deterministic removal, while unrelated graph objects and resolution pins
 survive. Once a workspace has used Pods/SPM, subsequent preparation also invokes those

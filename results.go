@@ -93,14 +93,19 @@ type NativeContribution struct {
 	Platform         string
 	Kind             string
 	Path             string
-	// SPM is present for spm-remote; Path identifies its declaring config file.
+	// SPM is present for explicit declarations. Path identifies Package.swift
+	// for local spm, or the declaring config file for spm-remote.
 	SPM *SwiftPackage
 }
 
-// SwiftPackage describes an explicitly declared remote dependency. Resolution
-// does not fetch it; native preparation owns tool resolution and actual pins.
+// SwiftPackage describes a declared local or remote dependency. Local Path
+// retains the app-relative or absolute declaration; the contribution Path is
+// its canonical manifest. Remote dependencies use RepositoryURL and Version.
+// Resolution does not fetch dependencies; preparation owns tool resolution.
+// Inactive platform declarations retain local paths without resolving them.
 type SwiftPackage struct {
 	Name          string
+	Path          string
 	RepositoryURL string
 	Version       string
 	Products      []string

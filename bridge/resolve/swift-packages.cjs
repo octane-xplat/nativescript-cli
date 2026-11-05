@@ -1,5 +1,6 @@
 'use strict';
 const path=require('node:path');
+const fs=require('node:fs');
 const fail=code=>{throw Object.assign(new Error('Invalid Swift package declaration'),{code});};
 const version='(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?';
 exports.key=url=>url.replace(/\/$/,'').replace(/\.git$/,'');
@@ -16,14 +17,61 @@ exports.parse=declarations=>{
  if(!Array.isArray(declarations))fail('invalid_input');
  const names=new Set();
  return declarations.map(p=>{
-  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!['name','repositoryURL','version','libs'].includes(k))||typeof p.name!=='string'||!p.name||names.has(p.name)||typeof p.repositoryURL!=='string'||!Array.isArray(p.libs)||!p.libs.length||p.libs.some(n=>typeof n!=='string'||!n||!/^[-A-Za-z0-9_.]+$/.test(n)))fail('invalid_input');
+  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!['name','repositoryURL','version','libs','path'].includes(k))||typeof p.name!=='string'||!p.name||names.has(p.name)||!Array.isArray(p.libs)||!p.libs.length||p.libs.some(n=>typeof n!=='string'||!n||!/^[-A-Za-z0-9_.]+$/.test(n)))fail('invalid_input');
   names.add(p.name);
+  const products=[...new Set(p.libs)].sort();
+  if(p.path!==undefined){
+   if(typeof p.path!=='string'||!p.path.trim()||/[\r\n\0]/.test(p.path)||p.repositoryURL!==undefined||p.version!==undefined)fail('invalid_input');
+   return {name:p.name,path:p.path,products};
+  }
+  if(typeof p.repositoryURL!=='string')fail('invalid_input');
   let url;try{url=new URL(p.repositoryURL);}catch{fail('invalid_input');}
   if(url.protocol!=='https:')fail('unavailable');
   if(url.username||url.password||url.search||url.hash||!path.posix.basename(url.pathname))fail('invalid_input');
   exports.requirement(p.version);
-  return {name:p.name,repositoryURL:url.href.replace(/\/$/,''),version:p.version,products:[...new Set(p.libs)].sort()};
+  return {name:p.name,repositoryURL:url.href.replace(/\/$/,''),version:p.version,products};
  });
+};
+
+exports.local=(projectDir,declaration,read)=>{
+ let directory;
+ try{directory=fs.realpathSync(path.resolve(projectDir,declaration.path));}catch{fail('invalid_input');}
+ const manifest=path.join(directory,'Package.swift');
+ if(!fs.statSync(directory).isDirectory()||!fs.existsSync(manifest)||!fs.lstatSync(manifest).isFile())fail('invalid_input');
+ const hash=folder=>{for(const entry of fs.readdirSync(folder,{withFileTypes:true})){
+  if(entry.isDirectory()&&['.build','.swiftpm'].includes(entry.name))continue;
+  const file=path.join(folder,entry.name);
+  if(entry.isSymbolicLink())fail('unavailable');
+  if(entry.isDirectory())hash(file);else if(entry.isFile())read(file);else fail('unavailable');
+ }};
+ hash(directory);
+ return manifest;
+};
+
+// Local declarations use the producer's app-first, then first-plugin rule by
+// declared name. All trees retain source identities even when not selected.
+// Remove automatic membership for declared roots so it cannot re-add a losing
+// shim or compile its sources directly into the application.
+exports.mergeLocal=(contributions,app)=>{
+ const declared=contributions.filter(c=>c.kind==='spm'&&c.spm?.path);
+ const roots=declared.map(c=>path.dirname(c.path));
+ const inside=(root,file)=>{const relative=path.relative(root,file);return relative===''||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
+ const names=new Map();
+ for(const c of declared){
+  const previous=names.get(c.spm.name);
+  if(!previous||c.packageDirectory===app&&previous.packageDirectory!==app)names.set(c.spm.name,c);
+ }
+ const paths=new Map(),products=new Map();
+ for(const c of names.values()){
+  const previous=paths.get(c.path);
+  paths.set(c.path,previous?{...previous,spm:{...previous.spm,products:[...new Set([...previous.spm.products,...c.spm.products])].sort()}}:c);
+ }
+ for(const c of paths.values())for(const product of c.spm.products){
+  if(products.has(product)&&products.get(product)!==c.path)fail('invalid_input');
+  products.set(product,c.path);
+ }
+ for(const c of contributions)if(c.kind==='spm-remote'&&(names.has(c.spm.name)||c.spm.products.some(p=>products.has(p))))fail('invalid_input');
+ return [...contributions.filter(c=>c.platform!=='ios'||!roots.some(root=>inside(root,c.path))),...paths.values()];
 };
 // Explicit app versions override the same repository's plugin defaults. All
 // requested products remain linked; conflicting plugin versions require an app

@@ -16,6 +16,28 @@ import (
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
+func TestDeclaredLocalSPMDoesNotStampUnqualifiedCanonicalInputs(t *testing.T) {
+	root := t.TempDir()
+	id := project.Identity{Schema: 1, Revision: "fixture", ProjectDir: root, Target: project.Target{Platform: "ios", DestinationKind: "simulator", Architecture: "arm64", Configuration: "debug"}}
+	layout, err := workspace.NewLayout(t.TempDir(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := workspace.Acquire(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	r := project.Resolved{Directory: root, Revision: id.Revision, Config: project.Config{NativeConfig: json.RawMessage(`{}`)}, Contributions: []project.Contribution{{Platform: "ios", Kind: "spm", SPM: &project.SwiftPackage{Name: "Local", Path: "Local", Products: []string{"Local"}}}}}
+	p := project.Prepared{Identity: layout.Identity, NativeDir: filepath.Join(layout.GeneratedRoot, "native")}
+	if err := (OTAStartup{}).Apply(context.Background(), r, p, lease); !errors.Is(err, ErrOTAUnavailable) {
+		t.Fatal("local package canonical inputs were not rejected before helper launch", err)
+	}
+	if _, err := os.Stat(p.NativeDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("rejected OTA operation created native outputs", err)
+	}
+}
+
 func TestCanonicalOTAOwnedHelperPublication(t *testing.T) {
 	consumer := os.Getenv("OTA_CONSUMER_DIR")
 	if consumer == "" {

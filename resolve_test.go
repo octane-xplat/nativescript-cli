@@ -532,6 +532,65 @@ func TestConfiguredSourcesDeduplicateInstalledOwnership(t *testing.T) {
 	}
 }
 
+func TestResolveDeclaredLocalSwiftPackages(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',ios:{NativeSource:[{name:'Overlap',path:'node_modules/a-plugin/platforms/ios/Local/Sources/Owned.swift'}]}}`)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"a-plugin":"1","b-plugin":"1"}}`)
+	for _, name := range []string{"a-plugin", "b-plugin"} {
+		base := "node_modules/" + name + "/"
+		resolutionFile(t, root, base+"package.json", `{"name":"`+name+`","version":"1","nativescript":{"platforms":{"ios":"8"}}}`)
+		resolutionFile(t, root, base+"nativescript.config.cjs", `module.exports={ios:{SPMPackages:[{name:'Shared',path:'`+base+`platforms/ios/Local',libs:['SharedLibrary']}]}}`)
+		resolutionFile(t, root, base+"platforms/ios/Local/Package.swift", "// fixture package "+name)
+		resolutionFile(t, root, base+"platforms/ios/Local/Sources/Owned.swift", "// owned "+name)
+	}
+	client, _ := ns.New(ns.Options{})
+	ctx := context.Background()
+	first, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Contributions) != 1 || first.Contributions[0].Kind != "spm" || first.Contributions[0].SPM == nil || !strings.Contains(first.Contributions[0].Path, "a-plugin") || first.Contributions[0].SPM.Path != "node_modules/a-plugin/platforms/ios/Local" {
+		t.Fatal("first plugin declaration was not selected once", first.Contributions)
+	}
+	for _, name := range []string{"a-plugin", "b-plugin"} {
+		found := false
+		for _, source := range first.Sources {
+			found = found || strings.Contains(source.Path, name+"/platforms/ios/Local/Sources/Owned.swift")
+		}
+		if !found {
+			t.Fatal("losing or selected package source identity missing", name)
+		}
+	}
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',ios:{SPMPackages:[{name:'Shared',path:'node_modules/b-plugin/platforms/ios/Local',libs:['SharedLibrary']}]},visionos:{SPMPackages:[{name:'Inactive',path:'missing-vision-only',libs:['VisionLibrary']}]}}`)
+	overridden, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(overridden.Contributions) != 1 || !strings.Contains(overridden.Contributions[0].Path, "b-plugin") || overridden.Config.VisionOS == nil || overridden.Config.VisionOS.SPMPackages[0].Path != "missing-vision-only" || overridden.Revision == first.Revision {
+		t.Fatal("app override or inactive declaration lost", overridden, err)
+	}
+	if overridden.Contributions[0].SPM.Name != "Shared" || overridden.Contributions[0].SPM.RepositoryURL != "" {
+		t.Fatal("inactive or remote package applied to active iOS")
+	}
+	resolutionFile(t, root, "node_modules/a-plugin/platforms/ios/Local/Sources/Owned.swift", "// losing declaration changed")
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == overridden.Revision {
+		t.Fatal("losing input mutation lost source identity", err)
+	}
+	resolutionFile(t, root, "node_modules/b-plugin/platforms/ios/Local/.build/compiler-cache.bin", "tool cache")
+	resolutionFile(t, root, "node_modules/b-plugin/platforms/ios/Local/.swiftpm/cache.bin", "tool cache")
+	withCache, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || withCache.Revision != changed.Revision {
+		t.Fatal("SwiftPM cache became an authored input", err)
+	}
+	for _, value := range []string{
+		`{name:'Bad',path:'missing',libs:['Bad']}`,
+		`{name:'Bad',path:'node_modules/a-plugin/platforms/ios/Local',repositoryURL:'https://example.com/a.git',version:'1.0.0',libs:['Bad']}`,
+	} {
+		resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.app',ios:{SPMPackages:[`+value+`]}}`)
+		if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrInvalidInput) {
+			t.Fatal("invalid local declaration accepted", err)
+		}
+	}
+}
+
 func TestResolveAppAndTransitiveSwiftPackages(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"plain":"1"}}`)

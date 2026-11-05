@@ -17702,6 +17702,7 @@ var require_swift_packages = __commonJS({
   "bridge/resolve/swift-packages.cjs"(exports2) {
     "use strict";
     var path2 = require("node:path");
+    var fs2 = require("node:fs");
     var fail = (code) => {
       throw Object.assign(new Error("Invalid Swift package declaration"), { code });
     };
@@ -17720,8 +17721,14 @@ var require_swift_packages = __commonJS({
       if (!Array.isArray(declarations)) fail("invalid_input");
       const names = /* @__PURE__ */ new Set();
       return declarations.map((p) => {
-        if (!p || typeof p !== "object" || Array.isArray(p) || Object.keys(p).some((k) => !["name", "repositoryURL", "version", "libs"].includes(k)) || typeof p.name !== "string" || !p.name || names.has(p.name) || typeof p.repositoryURL !== "string" || !Array.isArray(p.libs) || !p.libs.length || p.libs.some((n) => typeof n !== "string" || !n || !/^[-A-Za-z0-9_.]+$/.test(n))) fail("invalid_input");
+        if (!p || typeof p !== "object" || Array.isArray(p) || Object.keys(p).some((k) => !["name", "repositoryURL", "version", "libs", "path"].includes(k)) || typeof p.name !== "string" || !p.name || names.has(p.name) || !Array.isArray(p.libs) || !p.libs.length || p.libs.some((n) => typeof n !== "string" || !n || !/^[-A-Za-z0-9_.]+$/.test(n))) fail("invalid_input");
         names.add(p.name);
+        const products = [...new Set(p.libs)].sort();
+        if (p.path !== void 0) {
+          if (typeof p.path !== "string" || !p.path.trim() || /[\r\n\0]/.test(p.path) || p.repositoryURL !== void 0 || p.version !== void 0) fail("invalid_input");
+          return { name: p.name, path: p.path, products };
+        }
+        if (typeof p.repositoryURL !== "string") fail("invalid_input");
         let url;
         try {
           url = new URL(p.repositoryURL);
@@ -17731,8 +17738,54 @@ var require_swift_packages = __commonJS({
         if (url.protocol !== "https:") fail("unavailable");
         if (url.username || url.password || url.search || url.hash || !path2.posix.basename(url.pathname)) fail("invalid_input");
         exports2.requirement(p.version);
-        return { name: p.name, repositoryURL: url.href.replace(/\/$/, ""), version: p.version, products: [...new Set(p.libs)].sort() };
+        return { name: p.name, repositoryURL: url.href.replace(/\/$/, ""), version: p.version, products };
       });
+    };
+    exports2.local = (projectDir, declaration, read) => {
+      let directory;
+      try {
+        directory = fs2.realpathSync(path2.resolve(projectDir, declaration.path));
+      } catch {
+        fail("invalid_input");
+      }
+      const manifest = path2.join(directory, "Package.swift");
+      if (!fs2.statSync(directory).isDirectory() || !fs2.existsSync(manifest) || !fs2.lstatSync(manifest).isFile()) fail("invalid_input");
+      const hash = (folder) => {
+        for (const entry of fs2.readdirSync(folder, { withFileTypes: true })) {
+          if (entry.isDirectory() && [".build", ".swiftpm"].includes(entry.name)) continue;
+          const file = path2.join(folder, entry.name);
+          if (entry.isSymbolicLink()) fail("unavailable");
+          if (entry.isDirectory()) hash(file);
+          else if (entry.isFile()) read(file);
+          else fail("unavailable");
+        }
+      };
+      hash(directory);
+      return manifest;
+    };
+    exports2.mergeLocal = (contributions, app) => {
+      const declared = contributions.filter((c) => c.kind === "spm" && c.spm?.path);
+      const roots = declared.map((c) => path2.dirname(c.path));
+      const inside = (root, file) => {
+        const relative = path2.relative(root, file);
+        return relative === "" || relative !== ".." && !relative.startsWith(".." + path2.sep) && !path2.isAbsolute(relative);
+      };
+      const names = /* @__PURE__ */ new Map();
+      for (const c of declared) {
+        const previous = names.get(c.spm.name);
+        if (!previous || c.packageDirectory === app && previous.packageDirectory !== app) names.set(c.spm.name, c);
+      }
+      const paths = /* @__PURE__ */ new Map(), products = /* @__PURE__ */ new Map();
+      for (const c of names.values()) {
+        const previous = paths.get(c.path);
+        paths.set(c.path, previous ? { ...previous, spm: { ...previous.spm, products: [.../* @__PURE__ */ new Set([...previous.spm.products, ...c.spm.products])].sort() } } : c);
+      }
+      for (const c of paths.values()) for (const product of c.spm.products) {
+        if (products.has(product) && products.get(product) !== c.path) fail("invalid_input");
+        products.set(product, c.path);
+      }
+      for (const c of contributions) if (c.kind === "spm-remote" && (names.has(c.spm.name) || c.spm.products.some((p) => products.has(p)))) fail("invalid_input");
+      return [...contributions.filter((c) => c.platform !== "ios" || !roots.some((root) => inside(root, c.path))), ...paths.values()];
     };
     exports2.merge = (contributions, app) => {
       const repos = /* @__PURE__ */ new Map(), names = /* @__PURE__ */ new Map(), identities = /* @__PURE__ */ new Map(), products = /* @__PURE__ */ new Map();
@@ -17948,7 +18001,13 @@ var require_xcode2 = __commonJS({
           }
           const ref2 = put("XCLocalSwiftPackageReference", c.path, { relativePath: q(path2.dirname(c.path)) });
           (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
-          for (const product of manifest.products || []) {
+          let selectedProducts = manifest.products || [];
+          if (c.spm) {
+            if (!c.spm.path || !Array.isArray(c.spm.products) || !c.spm.products.length) fail("invalid_input");
+            selectedProducts = c.spm.products.map((name2) => selectedProducts.find((product) => product.name === name2));
+            if (selectedProducts.some((product) => !product)) fail("invalid_input");
+          }
+          for (const product of selectedProducts) {
             if (!product.type?.library) fail("unavailable");
             if (productNames.has(product.name)) fail("unavailable");
             productNames.add(product.name);
@@ -18979,10 +19038,20 @@ var require_resolve = __commonJS({
           try {
             declared = swiftPackages.parse(cfg2.ios.SPMPackages);
           } catch (e) {
-            fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "SPMPackages require named HTTPS repositories, supported version/revision requirements and library products");
+            fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "SPMPackages require named local paths or HTTPS repositories with supported requirements and library products");
           }
           const origin = configNames.map((name) => path2.join(dir, name)).find(fs2.existsSync);
-          for (const spm of declared) contributions.push({ packageDirectory: owner, platform: "ios", kind: "spm-remote", path: origin, spm });
+          for (const spm of declared) {
+            let manifest = origin;
+            if (spm.path) {
+              try {
+                manifest = swiftPackages.local(root, spm, read);
+              } catch (e) {
+                fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "Local Swift packages require an existing ordinary Package.swift and supported source tree at the app-relative path");
+              }
+            }
+            contributions.push({ packageDirectory: owner, platform: "ios", kind: spm.path ? "spm" : "spm-remote", path: manifest, spm });
+          }
         }
         if (cfg2.ios?.NativeSource !== void 0) {
           if (dir !== root) fail("unavailable", "Plugin NativeSource declarations require a qualified canonical source contract");
@@ -19194,15 +19263,21 @@ var require_resolve = __commonJS({
         }
       }
       await visit(root, app, true);
+      let selectedContributions;
+      try {
+        selectedContributions = swiftPackages.mergeLocal(contributions, root);
+      } catch {
+        fail("invalid_input", "Conflicting local Swift package products or local/remote declarations");
+      }
       const membership = /* @__PURE__ */ new Map();
-      for (const c of contributions) {
+      for (const c of selectedContributions) {
         if (c.kind === "spm-remote") continue;
         const key2 = JSON.stringify([c.platform, c.kind, c.path]), previous = membership.get(key2);
         if (!previous || previous.packageDirectory === root && c.packageDirectory !== root || previous.packageDirectory !== root && c.packageDirectory !== root && c.packageDirectory < previous.packageDirectory) membership.set(key2, c);
       }
       let remote;
       try {
-        remote = swiftPackages.merge(contributions, root);
+        remote = swiftPackages.merge(selectedContributions, root);
       } catch {
         fail("invalid_input", "Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository");
       }
