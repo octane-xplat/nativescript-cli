@@ -88,6 +88,15 @@ Bun; the pinned filtered install occupies about 2 GiB before temporary overhead.
 This preflight is a lower bound, not a disk reservation. Complete offline cache
 inputs remain required.
 
+Host-only installation and JavaScript bundle qualification can use a caller-owned
+private cache on another volume by appending `--host-cache-root PRIVATE_ROOT`.
+The destination must be a new child of that explicit root, owned by the caller
+and inaccessible to other users. Receipts label this fixture `hostOnly: true`;
+all original-tree, lock, source, ownership and free-space checks still apply.
+The default remains the repository project cache. Do not use the alternate host
+fixture for native builds/devices: native work still requires the project cache
+and shared broker reservations.
+
 One recorded app-path symlink supplies audio-context's unchanged app-relative
 local Swift package declaration from the existing sounds dependency lookup.
 It does not add a dependency or select a different version. The proof checks

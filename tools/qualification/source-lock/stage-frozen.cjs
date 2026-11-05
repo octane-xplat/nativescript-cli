@@ -55,12 +55,21 @@ function requireSpace(available){
  // The pinned filtered install occupies about 2 GiB before temporary overhead.
  if(available<3*1024**3)throw new Error('Frozen staging requires at least 3 GiB available; existing fixtures are preserved');
 }
+function selectedCache(args,repositoryCache){
+ if(args.length!==3&&args.length!==5)throw new Error('Expected source, TypeScript and destination paths with optional --host-cache-root ROOT');
+ const hostOnly=args.length===5;
+ if(hostOnly&&args[3]!=='--host-cache-root')throw new Error('Unknown cache option');
+ const cache=fs.realpathSync(hostOnly?args[4]:repositoryCache);
+ const info=fs.statSync(cache);
+ if(!info.isDirectory()||hostOnly&&((info.mode&0o077)!==0||typeof process.getuid==='function'&&info.uid!==process.getuid()))throw new Error('Host cache root must be a caller-owned private directory');
+ return {cache,hostOnly};
+}
 function main(){
- if(process.argv.length!==5)throw new Error('usage: stage-frozen ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR NEW_PROJECT_CACHE_DIR');
+ if(process.argv.length!==5&&process.argv.length!==7)throw new Error('usage: stage-frozen ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR NEW_CACHE_DIR [--host-cache-root PRIVATE_ROOT]');
  const source=fs.realpathSync(process.argv[2]),ts=require(path.resolve(process.argv[3])),target=path.resolve(process.argv[4]);
- const cache=fs.realpathSync(path.join(__dirname,'../../../.cache'));
+ const {cache,hostOnly}=selectedCache(process.argv.slice(2),path.join(__dirname,'../../../.cache'));
  const parent=fs.realpathSync(path.dirname(target));
- if(!inside(cache,target)||(parent!==cache&&!inside(cache,parent)))throw new Error('Use a new child of this repository project cache');
+ if(!inside(cache,target)||(parent!==cache&&!inside(cache,parent)))throw new Error('Use a new child of the selected cache root');
  if(source===target||inside(source,target)||inside(target,source))throw new Error('Source and destination trees must be separate');
  try{fs.lstatSync(target);throw new Error('Destination already exists');}catch(error){if(error.code!=='ENOENT')throw error;}
  const originalLock=fs.readFileSync(path.join(source,'bun.lock'));
@@ -85,7 +94,7 @@ function main(){
  fs.cpSync(source,target,{recursive:true,verbatimSymlinks:true,mode:fs.constants.COPYFILE_FICLONE,filter:file=>!['node_modules','.git','.cache'].includes(path.basename(file))});
  fs.writeFileSync(path.join(target,'apps/mobile/package.json'),JSON.stringify(app,null,2)+'\n');
  const projectedLock=Buffer.from(JSON.stringify(lock,null,2)+'\n');fs.writeFileSync(path.join(target,'bun.lock'),projectedLock);
- writeNew(path.join(target,'stage-inputs.json'),{scope:'private frozen source fixture, not original install/layout or native acceptance',reference,sourceGitTree:parentTree,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),excluded,originalRootLockName,projectedRootLockName:root.name,...selection});
+ writeNew(path.join(target,'stage-inputs.json'),{scope:'private frozen source fixture, not original install/layout or native acceptance',reference,hostOnly,cacheRoot:cache,sourceGitTree:parentTree,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),excluded,originalRootLockName,projectedRootLockName:root.name,...selection});
  const filters=selection.folders.flatMap(folder=>['--filter',lock.workspaces[folder].name]);
  const command=['install',...filters,'--linker=isolated','--frozen-lockfile','--offline','--ignore-scripts','--no-env-file','--backend='+(process.platform==='darwin'?'clonefile':'copyfile')];
  const fd=fs.openSync(path.join(target,'install.log'),'wx',0o600);
@@ -111,9 +120,9 @@ function main(){
  }
  if(JSON.stringify(changed.sort())!==JSON.stringify(['apps/mobile/package.json','bun.lock']))throw new Error('Unexpected source byte changes '+JSON.stringify(changed));
  if(JSON.stringify(sourceRecords(source))!==JSON.stringify(records))throw new Error('Original source changed during staging');
- const proof={scope:'source bytes, link text, frozen projected lock and input placement; no full edge/compiler/integrity/patch/bundle/native acceptance',reference,sourceGitTree:parentTree,...selection,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),unchangedPackageLockRecords:Object.keys(lock.packages).length,sourceFilesCompared:records.filter(r=>r.kind==='file').length,relativeSymlinksPreserved:records.filter(r=>r.kind==='symlink').length,changed,upstreamCLIAbsent:true,producerPlacement:{lookupFrom:'packages/sounds',lookupName:audio.manifest.name,version:audio.manifest.version,directory:audio.directory,path:placement,created},records};
+ const proof={scope:'source bytes, link text, frozen projected lock and input placement; no full edge/compiler/integrity/patch/bundle/native acceptance',reference,hostOnly,cacheRoot:cache,sourceGitTree:parentTree,...selection,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),unchangedPackageLockRecords:Object.keys(lock.packages).length,sourceFilesCompared:records.filter(r=>r.kind==='file').length,relativeSymlinksPreserved:records.filter(r=>r.kind==='symlink').length,changed,upstreamCLIAbsent:true,producerPlacement:{lookupFrom:'packages/sounds',lookupName:audio.manifest.name,version:audio.manifest.version,directory:audio.directory,path:placement,created},records};
  writeNew(path.join(target,'stage-proof.json'),proof);
  console.log(JSON.stringify({scope:proof.scope,directory:target,sourceFilesCompared:proof.sourceFilesCompared,relativeSymlinksPreserved:proof.relativeSymlinksPreserved,unchangedPackageLockRecords:proof.unchangedPackageLockRecords,workspaceFilters:selection.folders.length,lockUnchanged}));
 }
-module.exports={projection,sourceRecords,inside,compilerInputs,requireSpace};
+module.exports={projection,sourceRecords,inside,compilerInputs,requireSpace,selectedCache};
 if(require.main===module)main();
