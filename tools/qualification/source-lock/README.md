@@ -66,8 +66,12 @@ check actual installation before calling them confirmed dependency drift. Do not
 change versions or waive a comparison solely to make the audit pass.
 
 `stage-frozen.cjs` stages the pinned b585679 source snapshot in a new child of
-this repository's `.cache`. It requires the exact original lock SHA and existing
-Bun cache inputs. It copies the source tree, including original relative link
+this repository's `.cache`. It requires the exact original lock SHA, complete parent Git tree identity
+(including executable modes, symlink targets and pinned gitlinks), and existing
+Bun cache inputs. A cache directory named after a commit is not proof of its
+contents. Gitlink directories must be absent or empty before staging; materialize
+their independently verified source trees separately. A failed parent check
+creates no destination and runs no installer. It copies the source tree, including original relative link
 text, and selects the production/peer workspace closure plus the app's explicit
 compiler and native-runtime prerequisites. It retains the full original
 workspace metadata because pruning it can invalidate Bun's lock parser.

@@ -2,6 +2,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),Module=require('node:module'),crypto=require('node:crypto'),{spawnSync}=require('node:child_process');
 const {lookup,expectedPackage,declarations}=require('./audit.cjs');
+const {tree,parentTree,parentGitlinks,assertUnmaterialized}=require('./source-tree.cjs');
 const reference='b58567933b22fc6ff076f366fba61926a090f8e4';
 const lockSHA256='d68b86c043e8f10732e42e96fc520ddae665c797af184624dc1ce5e979e57253';
 const compilerInputs=['@nativescript/android','@nativescript/ios','@nativescript/vite','@nativescript/types','@nativescript-community/vite-octane','@octane-xplat/bamboo','@octane-xplat/cli','@octane-xplat/jsx','@octanejs/vite-plugin','@tsrx/typescript-plugin','@tsrx/content-mapper','typescript','typescript-classic','vite'];
@@ -60,6 +61,8 @@ function main(){
  try{fs.lstatSync(target);throw new Error('Destination already exists');}catch(error){if(error.code!=='ENOENT')throw error;}
  const originalLock=fs.readFileSync(path.join(source,'bun.lock'));
  if(hash(originalLock)!==lockSHA256)throw new Error('Expected original '+reference+' Bun lock bytes');
+ assertUnmaterialized(source,parentGitlinks);
+ if(tree(source,parentGitlinks).toString('hex')!==parentTree)throw new Error('Source snapshot does not match original parent Git tree');
  const parsed=ts.parseConfigFileTextToJson('bun.lock',originalLock.toString('utf8'));
  if(parsed.error||!parsed.config?.packages)throw new Error('Installed JSONC parser did not read original lock');
  const lock=parsed.config,workspace=folder=>{
@@ -77,7 +80,7 @@ function main(){
  fs.cpSync(source,target,{recursive:true,verbatimSymlinks:true,mode:fs.constants.COPYFILE_FICLONE,filter:file=>!['node_modules','.git','.cache'].includes(path.basename(file))});
  fs.writeFileSync(path.join(target,'apps/mobile/package.json'),JSON.stringify(app,null,2)+'\n');
  const projectedLock=Buffer.from(JSON.stringify(lock,null,2)+'\n');fs.writeFileSync(path.join(target,'bun.lock'),projectedLock);
- writeNew(path.join(target,'stage-inputs.json'),{scope:'private frozen source fixture, not original install/layout or native acceptance',reference,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),excluded,originalRootLockName,projectedRootLockName:root.name,...selection});
+ writeNew(path.join(target,'stage-inputs.json'),{scope:'private frozen source fixture, not original install/layout or native acceptance',reference,sourceGitTree:parentTree,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),excluded,originalRootLockName,projectedRootLockName:root.name,...selection});
  const filters=selection.folders.flatMap(folder=>['--filter',lock.workspaces[folder].name]);
  const command=['install',...filters,'--linker=isolated','--frozen-lockfile','--offline','--ignore-scripts','--no-env-file','--backend='+(process.platform==='darwin'?'clonefile':'copyfile')];
  const fd=fs.openSync(path.join(target,'install.log'),'wx',0o600);
@@ -103,7 +106,7 @@ function main(){
  }
  if(JSON.stringify(changed.sort())!==JSON.stringify(['apps/mobile/package.json','bun.lock']))throw new Error('Unexpected source byte changes '+JSON.stringify(changed));
  if(JSON.stringify(sourceRecords(source))!==JSON.stringify(records))throw new Error('Original source changed during staging');
- const proof={scope:'source bytes, link text, frozen projected lock and input placement; no full edge/compiler/integrity/patch/bundle/native acceptance',reference,...selection,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),unchangedPackageLockRecords:Object.keys(lock.packages).length,sourceFilesCompared:records.filter(r=>r.kind==='file').length,relativeSymlinksPreserved:records.filter(r=>r.kind==='symlink').length,changed,upstreamCLIAbsent:true,producerPlacement:{lookupFrom:'packages/sounds',lookupName:audio.manifest.name,version:audio.manifest.version,directory:audio.directory,path:placement,created},records};
+ const proof={scope:'source bytes, link text, frozen projected lock and input placement; no full edge/compiler/integrity/patch/bundle/native acceptance',reference,sourceGitTree:parentTree,...selection,originalLockSHA256:lockSHA256,projectedLockSHA256:hash(projectedLock),unchangedPackageLockRecords:Object.keys(lock.packages).length,sourceFilesCompared:records.filter(r=>r.kind==='file').length,relativeSymlinksPreserved:records.filter(r=>r.kind==='symlink').length,changed,upstreamCLIAbsent:true,producerPlacement:{lookupFrom:'packages/sounds',lookupName:audio.manifest.name,version:audio.manifest.version,directory:audio.directory,path:placement,created},records};
  writeNew(path.join(target,'stage-proof.json'),proof);
  console.log(JSON.stringify({scope:proof.scope,directory:target,sourceFilesCompared:proof.sourceFilesCompared,relativeSymlinksPreserved:proof.relativeSymlinksPreserved,unchangedPackageLockRecords:proof.unchangedPackageLockRecords,workspaceFilters:selection.folders.length,lockUnchanged}));
 }
