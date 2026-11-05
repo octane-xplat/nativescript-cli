@@ -20,6 +20,9 @@ node tools/qualification/source-lock/qualify-peers.cjs \
   ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR PUBLIC_PROJECT_JSON NEW_OUTPUT_JSON
 node tools/qualification/source-lock/stage-frozen.cjs \
   ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR NEW_PROJECT_CACHE_DIR
+node tools/qualification/source-lock/compiler-inputs.cjs \
+  ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR STAGED_WORKSPACE NEW_OUTPUT_JSON \
+  --isolated-view
 ```
 
 The layout qualification installs a small private workspace using
@@ -87,3 +90,20 @@ install logs/results on failure, refuses existing destinations and never cleans
 up a prior fixture. It does not compile source CLI/Bamboo entries or perform
 the full edge/compiler/artifact-integrity/patch/bundle/native qualifications;
 run those separately against the staged inputs. No publishing or cutover occurs.
+
+`compiler-inputs.cjs` adds the stager's fourteen explicit compiler/runtime dev
+roots to a private installed-package graph. It reads package JSON and Node
+lookup locations without loading package entries or hooks. It verifies original
+workspace-manifest hashes and the staged lock against the stager proof, then
+compares the graph with original lock identities. This graph is a qualification
+dataset; it is not a public-library Resolve result or compiler API execution.
+
+An ancestor checkout's packages can satisfy otherwise absent optional peers.
+Every lookup outside the selected fixture is recorded and fails qualification,
+including optional lookups. `--isolated-view` copies the installed fixture into
+an owned temporary host-only directory outside the checkout, preserves relative
+links, and inspects that actual layout. It performs no install or native work.
+The temporary copy is retired before writing its result; its graph paths are
+historical evidence rather than live package paths. The original cached fixture
+is read-only. Without the flag, ambient dependencies remain visible and cause a
+failed result; they are never silently accepted or replaced.

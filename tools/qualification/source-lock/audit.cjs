@@ -23,9 +23,12 @@ function expectedPackage(lock,locator,workspace){
  if(!/^(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+$/.test(name)||!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?$/.test(version))return undefined;
  return {name,version,metadata:entry[2]??{}};
 }
-function declarations(metadata,root){
+function declarations(metadata,root,rootDevInputs=[]){
  const deps={...metadata.peerDependencies,...metadata.dependencies,...metadata.optionalDependencies};
- if(root)for(const name of ['@nativescript/ios','@nativescript/android'])if(metadata.devDependencies?.[name])deps[name]=metadata.devDependencies[name];
+ if(root){
+  for(const name of rootDevInputs)if(!Object.hasOwn(metadata.devDependencies??{},name))throw new Error('Selected root dev dependency missing '+name);
+  for(const name of ['@nativescript/ios','@nativescript/android',...rootDevInputs])if(metadata.devDependencies?.[name])deps[name]=metadata.devDependencies[name];
+ }
  const optional=new Set(Object.keys(metadata.optionalDependencies??{}));
  for(const name of Object.keys(metadata.peerDependencies??{}))if(metadata.peerDependenciesMeta?.[name]?.optional||(metadata.optionalPeers??[]).includes(name)){
   if(!Object.hasOwn(metadata.dependencies??{},name))optional.add(name);
@@ -53,7 +56,7 @@ function peerProviders(lock,node,parent,child,workspace){
 // This compares identities and lookup edges, not artifact integrity or native
 // behavior. A divergent parent's children remain unverified: comparing them to
 // another version's dependency graph would manufacture additional drift claims.
-function audit({lock,project,workspace}){
+function audit({lock,project,workspace,rootDevInputs=[]}){
  const packages=new Map(project.Packages.map(p=>[p.Directory,p]));
  const root=packages.get(project.Directory);
  if(!root||!lock.packages[root.Name])throw new Error('Actual app root has no original lock locator');
@@ -73,7 +76,7 @@ function audit({lock,project,workspace}){
    workspacesSeen.add(node.directory+'\0'+node.locator);
    workspaceManifests.push({directory:node.directory,locator:node.locator,workspace:expected.workspace});
   }
-  const isRoot=node.directory===root.Directory,{deps,optional}=declarations(expected.metadata,isRoot);
+  const isRoot=node.directory===root.Directory,{deps,optional}=declarations(expected.metadata,isRoot,rootDevInputs);
   const actualEdges=edges.get(node.directory)??[],byName=new Map(actualEdges.map(edge=>[edge.Name,edge]));
   for(const name of Object.keys(deps).sort()){
    const edge=byName.get(name),provider=peerOnly(expected.metadata,name)&&!(expected.workspace&&Object.hasOwn(expected.metadata.devDependencies??{},name))?node.providers[name]:undefined;

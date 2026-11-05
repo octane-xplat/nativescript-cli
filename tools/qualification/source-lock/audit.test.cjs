@@ -81,3 +81,12 @@ test('one physical peer package is checked in every consumer provision context',
  assert.equal(comparisons.length,2);assert.equal(r.counts['identity-drift'],1);
  assert.deepEqual(comparisons.map(row=>row.expectedVersion).sort(),['1.0.0','2.0.0']);
 });
+test('explicit compiler dev roots are audited without adding excluded tools',()=>{
+ const f=fixture();f.manifests.app.devDependencies={compiler:'1',nativescript:'9.1.1'};f.lock.packages.compiler=['compiler@1.0.0'];
+ f.project.Packages.push({Name:'compiler',Version:'1.0.0',Directory:'/host-compiler'});f.project.Dependencies.push({From:'/app',Name:'compiler',Directory:'/host-compiler'});
+ assert.equal(audit(f).stagingRootInjections.length,1);
+ const r=audit({...f,rootDevInputs:['compiler']});assert.equal(r.stagingRootInjections.length,0);assert.equal(r.counts['identity-match'],4);
+ assert.equal(r.records.some(row=>row.lookupName==='nativescript'),false);
+ f.project.Dependencies.pop();assert.equal(audit({...f,rootDevInputs:['compiler']}).counts['missing-actual-edge'],1);
+ assert.throws(()=>audit({...f,rootDevInputs:['unknown']}),/Selected root dev dependency missing/);
+});

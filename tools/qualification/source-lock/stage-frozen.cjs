@@ -107,5 +107,5 @@ function main(){
  writeNew(path.join(target,'stage-proof.json'),proof);
  console.log(JSON.stringify({scope:proof.scope,directory:target,sourceFilesCompared:proof.sourceFilesCompared,relativeSymlinksPreserved:proof.relativeSymlinksPreserved,unchangedPackageLockRecords:proof.unchangedPackageLockRecords,workspaceFilters:selection.folders.length,lockUnchanged}));
 }
-module.exports={projection,sourceRecords,inside};
+module.exports={projection,sourceRecords,inside,compilerInputs};
 if(require.main===module)main();
