@@ -74,6 +74,55 @@ func readAndroid(t *testing.T, root, name string) string {
 	return string(b)
 }
 
+func TestAndroidLegacyLibraryManifestNamespace(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	flat := "node_modules/native-plugin/platforms/android/AndroidManifest.xml"
+	nested := "node_modules/native-plugin/platforms/android/src/main/AndroidManifest.xml"
+	source := `<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" package="com.example.flat"><application><activity android:name=".Activity" tools:node="merge"/></application></manifest>`
+	resolutionFile(t, root, flat, source)
+	ctx := context.Background()
+	check := func(namespace, relative, body string) ns.PreparedProject {
+		t.Helper()
+		prepared, err := client.Prepare(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifests, err := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/platforms/android", relative))
+		if err != nil || len(manifests) != 1 {
+			t.Fatal("generated library manifest missing", manifests, err)
+		}
+		if got := readAndroid(t, filepath.Dir(manifests[0]), filepath.Base(manifests[0])); got != body {
+			t.Fatalf("generated manifest changed: %s", got)
+		}
+		scripts, _ := filepath.Glob(filepath.Join(prepared.NativeDir, "contributions/*/build.gradle"))
+		if len(scripts) != 1 || !strings.Contains(readAndroid(t, filepath.Dir(scripts[0]), "build.gradle"), "namespace '"+namespace+"'") {
+			t.Fatal("library namespace missing", scripts)
+		}
+		if readAndroid(t, root, flat) != source {
+			t.Fatal("caller source manifest changed")
+		}
+		return prepared
+	}
+	first := check("com.example.flat", "AndroidManifest.xml", strings.Replace(source, ` package="com.example.flat"`, "", 1))
+	nestedBody := `<manifest package="com.example.nested"><application/></manifest>`
+	resolutionFile(t, root, nested, nestedBody)
+	second := check("com.example.nested", "src/main/AndroidManifest.xml", `<manifest><application/></manifest>`)
+	if first.Identity.Revision == second.Identity.Revision || readAndroid(t, root, nested) != nestedBody {
+		t.Fatal("manifest addition did not invalidate or changed caller source")
+	}
+	resolutionFile(t, root, nested, `<manifest package="broken..namespace"/>`)
+	if _, err := client.Prepare(ctx, request); !errors.Is(err, ns.ErrInvalidInput) {
+		t.Fatal("invalid library namespace accepted", err)
+	}
+	if _, err := os.Stat(second.NativeDir); err != nil {
+		t.Fatal("failed preparation destroyed the previous generation", err)
+	}
+	if err := os.Remove(filepath.Join(root, nested)); err != nil {
+		t.Fatal(err)
+	}
+	check("com.example.flat", "AndroidManifest.xml", strings.Replace(source, ` package="com.example.flat"`, "", 1))
+}
+
 func TestAndroidAppGoogleServicesConfiguration(t *testing.T) {
 	root, client, request := androidApp(t, false)
 	file := "App_Resources/Android/google-services.json"

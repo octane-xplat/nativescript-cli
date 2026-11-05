@@ -25,7 +25,13 @@ filtering remains explicitly unavailable rather than being copied as resources.
 
 Native package inputs are snapshotted beneath `contributions/`. Library modules
 provide Java/Kotlin, resources, assets, JNI inputs and manifests. Gradle owns
-manifest and resource merging. Runtime scripts consume plugin AAR/JAR files and
+manifest and resource merging. A legacy library manifest's root `package`
+becomes its generated Gradle namespace; only that attribute is removed from the
+generated copy. Relative component names and other XML bytes are preserved.
+`src/main/AndroidManifest.xml` takes precedence over the flat manifest when both
+exist. A package-free library uses its deterministic generated namespace.
+Caller manifests remain unchanged; malformed manifests/namespaces reject before
+publishing a generation. Runtime scripts consume plugin AAR/JAR files and
 `include.gradle`, `buildscript.gradle` and `rootbuildscript.gradle`. App resources
 support both flat and `src/main` layouts, plus the runtime's app/settings/build
 scripts and `gradle.properties`. Nested AAR directories get explicit repositories.

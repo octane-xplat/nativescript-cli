@@ -230,6 +230,36 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 	}
 	contributions := append([]project.Contribution(nil), r.Contributions...)
 	sort.Slice(contributions, func(i, j int) bool { return contributions[i].Path < contributions[j].Path })
+	manifests := map[string][]byte{}
+	namespaces := map[string]string{}
+	for _, c := range contributions {
+		if c.Platform != "android" {
+			continue
+		}
+		rel, e := filepath.Rel(filepath.Join(c.PackageDirectory, "platforms/android"), c.Path)
+		if e != nil {
+			return e
+		}
+		if rel != "AndroidManifest.xml" && rel != filepath.FromSlash("src/main/AndroidManifest.xml") {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b, e := os.ReadFile(c.Path)
+		if e != nil {
+			return e
+		}
+		b, namespace, e := libraryManifest(b)
+		if e != nil {
+			return fmt.Errorf("Android library manifest: %w", e)
+		}
+		manifests[c.Path] = b
+		// Match the source-set selection below when both layouts are present.
+		if _, exists := namespaces[c.PackageDirectory]; !exists || rel != "AndroidManifest.xml" {
+			namespaces[c.PackageDirectory] = namespace
+		}
+	}
 	type dependency struct {
 		Name      string `json:"name"`
 		Directory string `json:"directory"`
@@ -304,7 +334,11 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 				deps = append(deps, dependency{Name: key, Directory: root})
 				settings += "include ':native" + key + "'\nproject(':native" + key + "').projectDir = file(" + groovy(root) + ")\n"
 				app += "dependencies { implementation project(':native" + key + "') }\n"
-				script := "apply plugin: 'com.android.library'\napply plugin: 'kotlin-android'\nandroid { namespace 'org.nativescript.contrib.p" + key + "'; compileSdk rootProject.ext.NS_DEFAULT_COMPILE_SDK_VERSION.toInteger(); defaultConfig { minSdk rootProject.ext.NS_DEFAULT_MIN_SDK_VERSION.toInteger() }; sourceSets.main { java.srcDirs = ['platforms/android']; res.srcDirs = ['platforms/android/res', 'platforms/android/src/main/res']; assets.srcDirs = ['platforms/android/assets', 'platforms/android/src/main/assets']; jniLibs.srcDirs = ['platforms/android/libs', 'platforms/android/src/main/jniLibs']; manifest.srcFile file('platforms/android/src/main/AndroidManifest.xml').exists() ? 'platforms/android/src/main/AndroidManifest.xml' : 'platforms/android/AndroidManifest.xml' }; compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }; kotlinOptions { jvmTarget = '17' } }\ndependencies { compileOnly fileTree(dir: 'platforms/android', include: ['**/*.jar']); compileOnly files(rootProject.file('app/libs/runtime-libs/nativescript-regular.aar')) }\n"
+				namespace := namespaces[c.PackageDirectory]
+				if namespace == "" {
+					namespace = "org.nativescript.contrib.p" + key
+				}
+				script := "apply plugin: 'com.android.library'\napply plugin: 'kotlin-android'\nandroid { namespace " + groovy(namespace) + "; compileSdk rootProject.ext.NS_DEFAULT_COMPILE_SDK_VERSION.toInteger(); defaultConfig { minSdk rootProject.ext.NS_DEFAULT_MIN_SDK_VERSION.toInteger() }; sourceSets.main { java.srcDirs = ['platforms/android']; res.srcDirs = ['platforms/android/res', 'platforms/android/src/main/res']; assets.srcDirs = ['platforms/android/assets', 'platforms/android/src/main/assets']; jniLibs.srcDirs = ['platforms/android/libs', 'platforms/android/src/main/jniLibs']; manifest.srcFile file('platforms/android/src/main/AndroidManifest.xml').exists() ? 'platforms/android/src/main/AndroidManifest.xml' : 'platforms/android/AndroidManifest.xml' }; compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }; kotlinOptions { jvmTarget = '17' } }\ndependencies { compileOnly fileTree(dir: 'platforms/android', include: ['**/*.jar']); compileOnly files(rootProject.file('app/libs/runtime-libs/nativescript-regular.aar')) }\n"
 				if e = write(dir, root+"/build.gradle", []byte(script)); e != nil {
 					return e
 				}
@@ -319,6 +353,9 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 		b, e := os.ReadFile(c.Path)
 		if e != nil {
 			return e
+		}
+		if manifest, ok := manifests[c.Path]; ok {
+			b = manifest
 		}
 		if e = write(dir, filepath.Join(dst, rel), b); e != nil {
 			return e
