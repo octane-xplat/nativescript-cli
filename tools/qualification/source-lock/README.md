@@ -16,6 +16,8 @@ node tools/qualification/source-lock/audit.cjs \
   ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR PUBLIC_PROJECT_JSON NEW_OUTPUT_JSON
 node tools/qualification/source-lock/qualify-layout.cjs \
   NEW_CACHE_DIR INSTALLED_TYPESCRIPT_DIR
+node tools/qualification/source-lock/qualify-peers.cjs \
+  ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR PUBLIC_PROJECT_JSON NEW_OUTPUT_JSON
 ```
 
 The layout qualification installs a small private workspace using
@@ -39,7 +41,21 @@ installation, native compilation or device behavior. It never changes a native
 acceptance gate.
 
 Bun can bind peer dependencies from a caller's provisioning context rather than
-lexical lock ancestry. This first audit does not reconstruct those contexts.
-A peer-only version difference remains a failed comparison; independently check
-its actual installation before calling it confirmed dependency drift. Do not
-change versions or waive that comparison solely to make the audit pass.
+lexical lock ancestry. The audit derives direct consumer dependency, self and
+declared consumer-peer bindings from expected lock/workspace declarations.
+Workspace peers retain their own explicit dev bindings. An npm alias provides
+its lookup name, not its manifest name. Package-owned dependencies win over
+consumer peer bindings. Distinct contexts remain separate comparisons even when
+they reach the same physical package; cycles are deduplicated by context.
+
+`qualify-peers.cjs` independently checks live Node lookups in the existing frozen
+fixture for the original TSRX/Acorn sibling provider and Browserslist self
+provider. It compares those live identities/edges with the public snapshot and
+the explicit original lock records. It installs nothing and runs no package
+code except the explicitly selected JSONC parser. This is qualification of those
+two installed cases, not a new frozen install or a universal Bun layout proof.
+
+The audit does not solve arbitrary ancestor provisioning or validate peer semver
+compatibility. Unsupported peer contexts remain failed comparisons; independently
+check actual installation before calling them confirmed dependency drift. Do not
+change versions or waive a comparison solely to make the audit pass.

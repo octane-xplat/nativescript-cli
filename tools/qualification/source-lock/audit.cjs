@@ -32,6 +32,23 @@ function declarations(metadata,root){
  }
  return {deps,optional};
 }
+function peerOnly(metadata,name){
+ return Object.hasOwn(metadata.peerDependencies??{},name)&&!Object.hasOwn(metadata.dependencies??{},name)&&!Object.hasOwn(metadata.optionalDependencies??{},name);
+}
+function peerProviders(lock,node,parent,child,workspace){
+ const target=expectedPackage(lock,child,workspace),providers={};
+ if(!target)return providers;
+ const owned={...parent.metadata.dependencies,...parent.metadata.optionalDependencies,...(parent.workspace?parent.metadata.devDependencies:{})};
+ for(const name of Object.keys(target.metadata.peerDependencies??{}).sort()){
+  if(!peerOnly(target.metadata,name))continue;
+  let locator,kind;
+  if(Object.hasOwn(owned,name)){locator=lookup(lock.packages,node.locator,name);kind='consumer-dependency';}
+  else if(name===node.lookupName){locator=node.locator;kind='consumer-self';}
+  else if(peerOnly(parent.metadata,name)){locator=node.providers[name]?.locator??lookup(lock.packages,node.locator,name);kind='consumer-peer';}
+  if(locator)providers[name]={locator,fromLocator:node.locator,kind};
+ }
+ return providers;
+}
 
 // This compares identities and lookup edges, not artifact integrity or native
 // behavior. A divergent parent's children remain unverified: comparing them to
@@ -42,28 +59,33 @@ function audit({lock,project,workspace}){
  if(!root||!lock.packages[root.Name])throw new Error('Actual app root has no original lock locator');
  const edges=new Map();
  for(const edge of project.Dependencies){const list=edges.get(edge.From)??[];list.push(edge);edges.set(edge.From,list);}
- const queue=[{directory:root.Directory,locator:root.Name}],seen=new Set(),records=[],rootInjections=[],unverifiedParents=[],workspaceManifests=[];
- const reached=new Set();
+ const queue=[{directory:root.Directory,locator:root.Name,lookupName:root.Name,providers:{}}],seen=new Set(),records=[],rootInjections=[],unverifiedParents=[],workspaceManifests=[];
+ const reached=new Set(),workspacesSeen=new Set();
  while(queue.length){
-  const node=queue.shift(),pair=JSON.stringify([node.directory,node.locator]);
+  const node=queue.shift(),pair=JSON.stringify([node.directory,node.locator,node.lookupName,Object.entries(node.providers).map(([name,p])=>[name,p.locator])]);
   if(seen.has(pair))continue;seen.add(pair);reached.add(node.directory);
   const actual=packages.get(node.directory),expected=expectedPackage(lock,node.locator,workspace);
   if(!actual||!expected){unverifiedParents.push({...node,reason:'unsupported-parent-descriptor'});continue;}
   if(actual.Name!==expected.name||actual.Version!==expected.version){
    unverifiedParents.push({...node,actualName:actual.Name,actualVersion:actual.Version,expectedName:expected.name,expectedVersion:expected.version,reason:'parent-identity-differs'});continue;
   }
-  if(expected.workspace)workspaceManifests.push({directory:node.directory,locator:node.locator,workspace:expected.workspace});
+  if(expected.workspace&&!workspacesSeen.has(node.directory+'\0'+node.locator)){
+   workspacesSeen.add(node.directory+'\0'+node.locator);
+   workspaceManifests.push({directory:node.directory,locator:node.locator,workspace:expected.workspace});
+  }
   const isRoot=node.directory===root.Directory,{deps,optional}=declarations(expected.metadata,isRoot);
   const actualEdges=edges.get(node.directory)??[],byName=new Map(actualEdges.map(edge=>[edge.Name,edge]));
   for(const name of Object.keys(deps).sort()){
-   const edge=byName.get(name),targetLocator=lookup(lock.packages,node.locator,name);
+   const edge=byName.get(name),provider=peerOnly(expected.metadata,name)&&!(expected.workspace&&Object.hasOwn(expected.metadata.devDependencies??{},name))?node.providers[name]:undefined;
+   const targetLocator=provider?.locator??lookup(lock.packages,node.locator,name);
    const base={fromLocator:node.locator,fromDirectory:node.directory,lookupName:name,expectedLocator:targetLocator??null};
+   if(provider)base.peerProvider=provider;
    if(!edge){records.push({...base,status:optional.has(name)?'absent-optional-edge':'missing-actual-edge'});continue;}
    const target=targetLocator&&expectedPackage(lock,targetLocator,workspace),installed=packages.get(edge.Directory);
    if(!target||!installed){records.push({...base,actualDirectory:edge.Directory,status:'unverified-target'});continue;}
    const matches=target.name===installed.Name&&target.version===installed.Version;
    records.push({...base,actualDirectory:edge.Directory,expectedName:target.name,expectedVersion:target.version,actualName:installed.Name,actualVersion:installed.Version,status:matches?'identity-match':'identity-drift'});
-   queue.push({directory:edge.Directory,locator:targetLocator});
+   queue.push({directory:edge.Directory,locator:targetLocator,lookupName:name,providers:peerProviders(lock,node,expected,targetLocator,workspace)});
   }
   for(const edge of actualEdges)if(!Object.hasOwn(deps,edge.Name)){
    const record={fromLocator:node.locator,fromDirectory:node.directory,lookupName:edge.Name,actualDirectory:edge.Directory,status:isRoot?'staging-root-injection':'unexpected-actual-edge'};
@@ -97,5 +119,5 @@ function main(){
  console.log(JSON.stringify({scope:report.scope,counts:report.counts,stagingRootInjections:report.stagingRootInjections.length,unverifiedParents:report.unverifiedParents.length,unreachedActualPackages:report.unreachedActualPackages.length,output}));
  if(Object.entries(report.counts).some(([key,count])=>count&&!['identity-match','absent-optional-edge'].includes(key))||report.unverifiedParents.length)process.exitCode=1;
 }
-module.exports={ancestors,lookup,expectedPackage,declarations,audit};
+module.exports={ancestors,lookup,expectedPackage,declarations,peerOnly,peerProviders,audit};
 if(require.main===module)main();
