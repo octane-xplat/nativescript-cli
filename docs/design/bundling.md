@@ -149,9 +149,24 @@ NS_NATIVE_VITE_DIR=/absolute/path/to/installed/app node --test bridge/vite/nativ
 
 It checks concurrent configs, alias/custom resolution, early factory work,
 late config validation, vendor callback context and native-realm rejection.
-The patched pinned-preset host qualifier separately exercises the original
-renderer MasonKit imports, original Vite/Bamboo configs and all six canonical
-runtime patches. These are host/compiler checks, not native CSS or app execution.
+The selected config's `resolve.preserveSymlinks` policy applies to ordinary Vite
+resolution and the three adapted vendor passes, including file paths returned by
+custom resolvers. With false, aliases and direct imports of one physical module
+share its identity; with true, explicit symlink identities remain distinct.
+Virtual namespaces, external imports, query suffixes and resolver result fields
+are retained. The Vite hook captures its config's state because Rolldown invokes
+hooks outside Node's originating async context. A policy change after vendor
+work starts rejects rather than mixing two module identities.
+
+The pinned-preset host qualifier exercises the recorded renderer/config and
+installed-byte inputs. Historical cache labels and patch receipts do not certify
+the complete original Git tree or canonical patch application; qualify those
+at their actual source hashes. These are host/compiler checks, not native CSS
+or app execution. The maintained numeric Mason probe and
+`tools/qualification/vite-config/audit-mason-module-identity.cjs` can compare
+byte-verified module definitions in retained native/host bundles, including
+minified release output, without executing SDK modules in Node. One definition
+does not itself prove startup, resize behavior or native ABI compatibility.
 
 The opt-in `TestInstalledNativeProjectConfiguration` uses a real `.mts` config,
 relative config import and installed TypeScript native preset. It proves build/

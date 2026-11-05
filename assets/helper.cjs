@@ -18412,6 +18412,14 @@ var require_native_aliases = __commonJS({
     var { AsyncLocalStorage } = require("node:async_hooks");
     var fail = (code) => Object.assign(new Error(), { code });
     var passes = /* @__PURE__ */ new Set(["ns-vendor-entry.ts", "ns-deps-bundle-discovery.ts", "ns-deps-bundle-entry.ts"]);
+    var physical = (file) => {
+      try {
+        return fs2.realpathSync(file);
+      } catch (error) {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") return file;
+        throw error;
+      }
+    };
     module2.exports = function installAliases(projectRequire) {
       const req = createRequire2(projectRequire.resolve("@nativescript/vite"));
       const file = req.resolve("esbuild");
@@ -18440,6 +18448,7 @@ var require_native_aliases = __commonJS({
         if (!passes.has(options?.stdin?.sourcefile)) return original.build(options);
         if (!state) throw fail("unavailable");
         await state.ready;
+        state.vendorBuilt = true;
         const plugin = { name: "xplat-native-vite-aliases", setup(builder) {
           builder.onResolve({ filter: /.*/ }, async (args) => {
             if (/^(?:@nativescript\/(?:core|vite)(?:\/|$)|\.|\/|[A-Za-z]:)/.test(args.path)) return;
@@ -18455,7 +18464,16 @@ var require_native_aliases = __commonJS({
             return { path: resolved };
           });
         } };
-        return original.build({ ...options, plugins: [plugin, ...options.plugins ?? []] });
+        const plugins = [plugin, ...options.plugins ?? []].map((plugin2) => state.preserveSymlinks ? plugin2 : { ...plugin2, setup(builder) {
+          return plugin2.setup({ ...builder, onResolve(options2, resolve) {
+            builder.onResolve(options2, async (args) => {
+              const result = await resolve(args);
+              if (!result?.path || result.external || result.namespace && result.namespace !== "file" || !path2.isAbsolute(result.path)) return result;
+              return { ...result, path: physical(result.path) };
+            });
+          } });
+        } });
+        return original.build({ ...options, preserveSymlinks: state.preserveSymlinks, plugins });
       };
       sdk.exports = new Proxy(original, { get(target, key2, receiver) {
         return key2 === "build" ? build : Reflect.get(target, key2, receiver);
@@ -18483,6 +18501,8 @@ var require_native_aliases = __commonJS({
         prepare(config) {
           const state = context.getStore();
           if (!state) throw fail("invalid_input");
+          if (state.vendorBuilt && state.preserveSymlinks !== config.resolve.preserveSymlinks) throw fail("unavailable");
+          state.preserveSymlinks = config.resolve.preserveSymlinks;
           state.aliases = config.resolve.alias;
           state.resolve = config.createResolver();
           state.accept();
@@ -18501,20 +18521,36 @@ var require_native_aliases = __commonJS({
           }
           return result;
         },
+        // Rolldown hooks can run outside Node's async context. Retain this config's
+        // state explicitly, never fall back to another build's active context.
         plugin() {
-          return { name: "xplat-native-vendor-alias-context", enforce: "pre", async configResolved(config) {
-            const state = context.getStore();
-            if (!state) throw fail("invalid_input");
-            const resolve = config.createResolver();
-            for (const use of state.used) {
-              const late = config.resolve.alias.find((alias) => matches(alias.find, use.id));
-              if (!use.alias && !late) continue;
-              if (!use.alias || !late || await use.resolution !== await resolve(use.id, use.importer)) throw fail("unavailable");
+          const state = context.getStore();
+          if (!state) throw fail("invalid_input");
+          return {
+            name: "xplat-native-vendor-alias-context",
+            enforce: "pre",
+            async resolveId(id, importer, options) {
+              if (state.preserveSymlinks !== false || id.startsWith("\0")) return;
+              const resolved = await this.resolve(id, importer, { ...options, skipSelf: true });
+              if (!resolved?.id || resolved.external || resolved.id.startsWith("\0")) return resolved;
+              const query = resolved.id.indexOf("?"), file2 = query < 0 ? resolved.id : resolved.id.slice(0, query), suffix = query < 0 ? "" : resolved.id.slice(query);
+              if (!path2.isAbsolute(file2)) return resolved;
+              return { ...resolved, id: physical(file2) + suffix };
+            },
+            async configResolved(config) {
+              if (state.vendorBuilt && state.preserveSymlinks !== config.resolve.preserveSymlinks) throw fail("unavailable");
+              const resolve = config.createResolver();
+              for (const use of state.used) {
+                const late = config.resolve.alias.find((alias) => matches(alias.find, use.id));
+                if (!use.alias && !late) continue;
+                if (!use.alias || !late || await use.resolution !== await resolve(use.id, use.importer)) throw fail("unavailable");
+              }
+              state.preserveSymlinks = config.resolve.preserveSymlinks;
+              state.aliases = config.resolve.alias;
+              state.resolve = resolve;
+              state.accept();
             }
-            state.aliases = config.resolve.alias;
-            state.resolve = resolve;
-            state.accept();
-          } };
+          };
         },
         close() {
           context.disable();

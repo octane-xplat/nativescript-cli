@@ -5,6 +5,7 @@ const {Module,createRequire}=require('node:module');
 const {AsyncLocalStorage}=require('node:async_hooks');
 const fail=code=>Object.assign(new Error(),{code});
 const passes=new Set(['ns-vendor-entry.ts','ns-deps-bundle-discovery.ts','ns-deps-bundle-entry.ts']);
+const physical=file=>{try{return fs.realpathSync(file);}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')return file;throw error;}};
 
 // The qualified engine invokes esbuild separately from Vite. Load that exact
 // installed CJS SDK once, before ESM consumers snapshot its exports, and adapt
@@ -33,6 +34,7 @@ module.exports=function installAliases(projectRequire){
     if(!passes.has(options?.stdin?.sourcefile))return original.build(options);
     if(!state)throw fail('unavailable');
     await state.ready;
+    state.vendorBuilt=true;
     const plugin={name:'xplat-native-vite-aliases',setup(builder){
       builder.onResolve({filter:/.*/},async args=>{
         // Core/engine imports belong to the engine's single native realm.
@@ -48,7 +50,20 @@ module.exports=function installAliases(projectRequire){
         return {path:resolved};
       });
     }};
-    return original.build({...options,plugins:[plugin,...(options.plugins??[])]});
+    // The engine's separate esbuild pass must share Vite's module identity.
+    // Otherwise aliases can use real paths while direct imports retain a
+    // symlink path, evaluating native class registration twice.
+    const plugins=[plugin,...(options.plugins??[])].map(plugin=>state.preserveSymlinks?plugin:{...plugin,setup(builder){
+      // esbuild treats custom resolver paths as module identities as supplied;
+      // preserveSymlinks:false alone canonicalizes only its built-in resolver.
+      // Keep virtual namespaces, external imports and all other result fields.
+      return plugin.setup({...builder,onResolve(options,resolve){builder.onResolve(options,async args=>{
+        const result=await resolve(args);
+        if(!result?.path||result.external||result.namespace&&result.namespace!=='file'||!path.isAbsolute(result.path))return result;
+        return {...result,path:physical(result.path)};
+      });}});
+    }});
+    return original.build({...options,preserveSymlinks:state.preserveSymlinks,plugins});
   };
   sdk.exports=new Proxy(original,{get(target,key,receiver){return key==='build'?build:Reflect.get(target,key,receiver);}});
   sdk.loaded=true;req.cache[file]=sdk;
@@ -57,7 +72,7 @@ module.exports=function installAliases(projectRequire){
       const state={used:[]};state.ready=new Promise((resolve,reject)=>{state.accept=resolve;state.reject=reject;});state.ready.catch(()=>{});
       return context.run(state,async()=>{try{return await work();}catch(error){state.reject(error);throw error;}});
     },
-    prepare(config){const state=context.getStore();if(!state)throw fail('invalid_input');state.aliases=config.resolve.alias;state.resolve=config.createResolver();state.accept();},
+    prepare(config){const state=context.getStore();if(!state)throw fail('invalid_input');if(state.vendorBuilt&&state.preserveSymlinks!==config.resolve.preserveSymlinks)throw fail('unavailable');state.preserveSymlinks=config.resolve.preserveSymlinks;state.aliases=config.resolve.alias;state.resolve=config.createResolver();state.accept();},
     bindVendor(plugin){
       if(plugin.name!=='nativescript-vendor-manifest')return plugin;
       const state=context.getStore();if(!state)throw fail('invalid_input');
@@ -69,15 +84,26 @@ module.exports=function installAliases(projectRequire){
       }
       return result;
     },
-    plugin(){return {name:'xplat-native-vendor-alias-context',enforce:'pre',async configResolved(config){
-      const state=context.getStore();if(!state)throw fail('invalid_input');
+    // Rolldown hooks can run outside Node's async context. Retain this config's
+    // state explicitly, never fall back to another build's active context.
+    plugin(){const state=context.getStore();if(!state)throw fail('invalid_input');return {name:'xplat-native-vendor-alias-context',enforce:'pre',
+    async resolveId(id,importer,options){
+      if(state.preserveSymlinks!==false||id.startsWith('\0'))return;
+      const resolved=await this.resolve(id,importer,{...options,skipSelf:true});
+      if(!resolved?.id||resolved.external||resolved.id.startsWith('\0'))return resolved;
+      const query=resolved.id.indexOf('?'),file=query<0?resolved.id:resolved.id.slice(0,query),suffix=query<0?'':resolved.id.slice(query);
+      if(!path.isAbsolute(file))return resolved;
+      return {...resolved,id:physical(file)+suffix};
+    },
+    async configResolved(config){
+      if(state.vendorBuilt&&state.preserveSymlinks!==config.resolve.preserveSymlinks)throw fail('unavailable');
       const resolve=config.createResolver();
       for(const use of state.used){
         const late=config.resolve.alias.find(alias=>matches(alias.find,use.id));
         if(!use.alias&&!late)continue;
         if(!use.alias||!late||await use.resolution!==await resolve(use.id,use.importer))throw fail('unavailable');
       }
-      state.aliases=config.resolve.alias;state.resolve=resolve;
+      state.preserveSymlinks=config.resolve.preserveSymlinks;state.aliases=config.resolve.alias;state.resolve=resolve;
       state.accept();
     }};},
     close(){context.disable();original.stop();if(req.cache[file]===sdk)delete req.cache[file];},
