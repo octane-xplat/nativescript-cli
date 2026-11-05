@@ -108,3 +108,11 @@ Component tests use internal stage fakes with actual F2 locks; they do not prove
 native preparation, compilation, installation or launch. Real helper tests use
 independent concurrent clients, a shared extraction cache and actual Node parser
 execution. Session cleanup/idempotence tests remain component lifetime evidence.
+
+`TestTwoEmbeddedDevelopmentCallers` adds real selected Vite configs and helper
+processes through two public development clients. It checks cloned caller
+environment overrides in emitted proof assets and live HTTP responses, cancels
+one caller, rebuilds the survivor, and verifies port/lifetime retirement plus
+unchanged process cwd/environment/logger. Native preparation, compilation,
+device discovery and launched app lifetimes are explicit fixtures. This host
+check does not establish simultaneous-device execution or native HMR.

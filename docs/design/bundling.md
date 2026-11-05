@@ -212,6 +212,11 @@ port rejection, retirement, repeated close and embedding globals. They do not
 establish actual native HMR application, simulator startup or full G5 acceptance;
 those require separate real platform runs. CI labels the same boundary explicitly.
 
+With an existing installed fixture, run the independent embedding-owner case:
+`NS_NATIVE_VITE_DIR=/absolute/installed/app go test -race . -run '^TestTwoEmbeddedDevelopmentCallers$' -count=1`.
+It keeps two real Vite/helper environments live, cancels one, rebuilds the other,
+and checks owned endpoint retirement. Its native adapters remain fixtures.
+
 The version-qualified native adapter compares filesystem notifications with R1's
 content identities, ignoring metadata-only changes and Swift package cache paths
 that R1 excludes. It uses the engine's exported transform-cache invalidator before
