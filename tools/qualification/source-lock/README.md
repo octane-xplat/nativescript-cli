@@ -178,3 +178,20 @@ are included in the tree calculation and reported without fetching them. The
 inactive parent macOS libwebp gitlink is not materialized. This checks vendor
 source provenance only; it does not establish compiler, bundle or native
 compatibility. Source archives and reports remain outside Git.
+
+Run the production host resolver/bundler against an explicitly prepared source
+fixture after generating its required local package exports:
+
+```sh
+go run ./tools/qualification/source-lock/bundle \
+  ABSOLUTE_APP_DIR ABSOLUTE_REPOSITORY_DIR ABSOLUTE_NEW_CACHE ABSOLUTE_NEW_REPORT
+```
+
+This harness uses the actual embedded helper and selected project's installed
+Vite configuration. It supplies a labeled prepared-project fixture; it does not
+run native preparation, compilers or devices and is not a public Build check.
+The source fixture's provenance and installed payloads require their separate
+receipts. A successful bundle records emitted file hashes and preserved embedding
+globals. Failures retain typed error text and a private request for diagnostics,
+without logging environment values or emitted application code. Reports and
+cache destinations must be new; existing fixtures are never removed.
