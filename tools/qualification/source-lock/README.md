@@ -229,3 +229,16 @@ additional close/cleanup failures remain failures. No app modules execute on a
 guest, and the harness does not establish runtime HMR or public Run acceptance.
 Only response hashes are saved; application code and environment values are not
 printed. Existing fixtures/reports are never removed.
+
+`development ... --edits` enables an opt-in edit scenario only for a private,
+host-only staged fixture. It appends a unique export to the complete selected app
+entry, opens both actual native HMR sockets, fetches that full entry, and checks
+changed/identical/later saves without replacing the app with a smaller fixture.
+Only module-response hashes and transaction metadata are recorded. After both
+owned sessions retire, it restores the original entry; an unexpected concurrent
+edit is preserved and fails restoration rather than being overwritten. Escaping
+source symlinks are rejected. The later native-resource addition scenario runs
+only after the entry-wire checks pass, and requires isolated restart outcomes
+with owned cleanup. A failure in an earlier phase does not qualify later phases.
+The strict wire check reports repeated transaction frames; it does not execute
+native callbacks or prove that repeated packets caused repeated application.

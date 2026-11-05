@@ -43,20 +43,22 @@ func (c captureExecutor) Start(ctx context.Context, command process.Command) (pr
 }
 
 // Explicit cancellation is expected; any additional failure remains failed.
-func closeError(err error) error {
+func closeError(err error) error { return terminalError(err, context.Canceled) }
+
+func terminalError(err error, terminal error) error {
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, context.Canceled) {
+	if !errors.Is(err, terminal) {
 		return err
 	}
 	var expected func(error) bool
 	expected = func(cause error) bool {
-		if cause == nil || cause == context.Canceled {
+		if cause == nil || cause == terminal {
 			return true
 		}
 		if failure, ok := cause.(*process.Error); ok {
-			return failure.Kind == process.ErrExit
+			return terminal == context.Canceled && failure.Kind == process.ErrExit
 		}
 		if joined, ok := cause.(interface{ Unwrap() []error }); ok {
 			for _, child := range joined.Unwrap() {
@@ -78,18 +80,23 @@ func closeError(err error) error {
 }
 
 type live struct {
-	platform string
-	dev      *bundle.Development
+	platform  string
+	dev       *bundle.Development
+	resources string
 }
 
 func main() {
-	if len(os.Args) != 5 {
-		panic("usage: development ABSOLUTE_APP ABSOLUTE_REPOSITORY NEW_ABSOLUTE_CACHE NEW_ABSOLUTE_REPORT")
+	if len(os.Args) != 5 && len(os.Args) != 6 {
+		panic("usage: development ABSOLUTE_APP ABSOLUTE_REPOSITORY NEW_ABSOLUTE_CACHE NEW_ABSOLUTE_REPORT [--edits]")
 	}
-	for _, arg := range os.Args[1:] {
+	for _, arg := range os.Args[1:5] {
 		if !filepath.IsAbs(arg) {
 			panic("all paths must be absolute")
 		}
+	}
+	edits := len(os.Args) == 6
+	if edits && os.Args[5] != "--edits" {
+		panic("unknown option")
 	}
 	app, repo, cache, report := os.Args[1], os.Args[2], os.Args[3], os.Args[4]
 	if _, err := os.Lstat(report); !os.IsNotExist(err) {
@@ -102,7 +109,7 @@ func main() {
 	environment := os.Environ()
 	result := map[string]any{"scope": "actual selected full-source host Vite sessions, initial bundle/module delivery and independent ownership; no native tools, guest execution, runtime HMR or public Run acceptance", "projectDirectory": app, "passed": false}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	err := run(ctx, app, repo, cache, result)
+	err := run(ctx, app, repo, cache, result, edits)
 	cancel()
 	now, _ := os.Getwd()
 	globals := now == cwd && reflect.DeepEqual(environment, os.Environ())
@@ -153,13 +160,27 @@ func get(ctx context.Context, url string) (string, error) {
 	return string(body), nil
 }
 
-func run(ctx context.Context, app, repo, cache string, result map[string]any) (outcome error) {
+func run(ctx context.Context, app, repo, cache string, result map[string]any, edits bool) (outcome error) {
+	var instrument *instrumentation
+	if edits {
+		var err error
+		instrument, err = instrumentEntry(app)
+		if err != nil {
+			return err
+		}
+		result["entryInstrumentation"] = instrument.receipt()
+		defer func() { outcome = errors.Join(outcome, instrument.restore()) }()
+	}
 	var sessions []live
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
 		for _, session := range sessions {
-			outcome = errors.Join(outcome, closeError(session.dev.Session.Close(cleanup)))
+			err := closeError(session.dev.Session.Close(cleanup))
+			if edits {
+				err = terminalError(err, bundle.ErrRestart)
+			}
+			outcome = errors.Join(outcome, err)
 		}
 	}()
 	rows := []map[string]any{}
@@ -175,7 +196,7 @@ func run(ctx context.Context, app, repo, cache string, result map[string]any) (o
 		if err != nil {
 			return fmt.Errorf("%s start: %w", platform, err)
 		}
-		sessions = append(sessions, live{platform, dev})
+		sessions = append(sessions, live{platform: platform, dev: dev, resources: resolved.Config.AppResourcesPath})
 		body, err := get(ctx, dev.Ready.Endpoint.URL+"/ns/entry")
 		if err != nil {
 			return err
@@ -200,6 +221,9 @@ func run(ctx context.Context, app, repo, cache string, result map[string]any) (o
 		return errors.New("target endpoints collide")
 	}
 	result["independentEndpoints"] = true
+	if edits {
+		return qualifyEdits(ctx, repo, app, sessions, rows, result, instrument)
+	}
 	for index, session := range sessions {
 		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		err := closeError(session.dev.Session.Close(cleanup))
