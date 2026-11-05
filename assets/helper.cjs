@@ -18964,7 +18964,7 @@ var require_resolve = __commonJS({
           const text = read(file);
           if (file.endsWith(".json")) value = JSON.parse(text);
           else if (file.endsWith(".ts")) {
-            let compiler;
+            let compiler, incompatibleCompiler = false;
             for (const base of [.../* @__PURE__ */ new Set([dir, root])]) {
               const req = createRequire2(path2.join(base, "package.json"));
               for (const name of ["typescript-classic", "typescript"]) {
@@ -18975,12 +18975,17 @@ var require_resolve = __commonJS({
                   if (e.code === "MODULE_NOT_FOUND") continue;
                   throw e;
                 }
-                compiler = req(installed);
-                if (typeof compiler.transpileModule !== "function" || !compiler.ModuleKind) fail("unavailable", "Installed TypeScript config compiler is incompatible");
+                const candidate = req(installed);
+                if (typeof candidate.transpileModule !== "function" || !candidate.ModuleKind) {
+                  incompatibleCompiler = true;
+                  continue;
+                }
+                compiler = candidate;
                 break;
               }
               if (compiler) break;
             }
+            if (!compiler && incompatibleCompiler) fail("unavailable", "Installed TypeScript config compiler is incompatible");
             if (!compiler && !stripTypeScriptTypes) fail("unavailable", "TypeScript config needs a project-installed TypeScript compiler or Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node");
             const code = compiler ? compiler.transpileModule(text, { fileName: file, compilerOptions: { module: compiler.ModuleKind.CommonJS } }).outputText : stripTypeScriptTypes(text, { mode: "strip" });
             const module3 = new (require("node:module")).Module(file);

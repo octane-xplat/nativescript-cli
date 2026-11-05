@@ -519,9 +519,17 @@ func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	resolutionFile(t, root, "nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {id:process.env.R1_APP_ID,android:{markingMode:'none'}} as NativeScriptConfig;`)
 	resolutionFile(t, root, "nativescript.config.js", `throw new Error('INACTIVE_COMPILED_APP');`)
 	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"native-plugin":"1"}}`)
-	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
-	resolutionFile(t, root, "node_modules/native-plugin/nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {android:{v8Flags:'--compiled-plugin'}} as NativeScriptConfig;`)
-	resolutionFile(t, root, "node_modules/native-plugin/nativescript.config.js", `throw new Error('INACTIVE_COMPILED_PLUGIN');`)
+	// An isolated workspace's plugin cannot look up the app's compiler through
+	// its parent directories. Its own TypeScript checker has no transpiler API.
+	plugin := filepath.Join(t.TempDir(), "native-plugin")
+	resolutionFile(t, plugin, "package.json", `{"name":"native-plugin","version":"1","nativescript":{"platforms":{"android":"9"}}}`)
+	resolutionFile(t, plugin, "nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {android:{v8Flags:'--compiled-plugin'}} as NativeScriptConfig;`)
+	resolutionFile(t, plugin, "nativescript.config.js", `throw new Error('INACTIVE_COMPILED_PLUGIN');`)
+	resolutionFile(t, plugin, "node_modules/typescript/package.json", `{"name":"typescript","version":"7.1.0-beta","main":"version.cjs"}`)
+	resolutionFile(t, plugin, "node_modules/typescript/version.cjs", `module.exports={version:'7.1.0-beta'};`)
+	if err := os.Symlink(plugin, filepath.Join(root, "node_modules/native-plugin")); err != nil {
+		t.Fatal(err)
+	}
 	client, _ := ns.New(ns.Options{Environment: map[string]string{"R1_APP_ID": "org.example.compiled"}})
 	p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
 	if err != nil || p.ApplicationID != "org.example.compiled" || p.Config.Android.MarkingMode != "none" {
@@ -538,6 +546,16 @@ func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	p, err = client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
 	if err != nil || p.ApplicationID != "org.example.relative" {
 		t.Fatal("relative config import", p, err)
+	}
+	if err := os.Remove(filepath.Join(root, "node_modules/typescript-classic")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "nativescript.config.ts")); err != nil {
+		t.Fatal(err)
+	}
+	resolutionFile(t, root, "nativescript.config.js", `module.exports={id:'org.example.unavailable'}`)
+	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("incompatible-only compiler must remain unavailable", err)
 	}
 }
 

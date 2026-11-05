@@ -54,18 +54,23 @@ async function resolve({ projectDir }) {
         // as types. Node's eraser preserves those imports; a project-installed
         // TypeScript compiler removes them with the same CommonJS contract used
         // by the canonical config evaluator. Never install or find a global one.
-        let compiler;
+        let compiler, incompatibleCompiler = false;
         for (const base of [...new Set([dir, root])]) {
           const req = createRequire(path.join(base, 'package.json'));
           for (const name of ['typescript-classic', 'typescript']) {
             let installed;
             try { installed = req.resolve(name); } catch (e) { if(e.code==='MODULE_NOT_FOUND')continue; throw e; }
-            compiler = req(installed);
-            if(typeof compiler.transpileModule!=='function'||!compiler.ModuleKind)fail('unavailable','Installed TypeScript config compiler is incompatible');
+            const candidate = req(installed);
+            // An isolated workspace may install the native TypeScript checker,
+            // whose entry only exports a version. Try the app's installed
+            // classic compiler before rejecting that unsupported API shape.
+            if(typeof candidate.transpileModule!=='function'||!candidate.ModuleKind){incompatibleCompiler=true;continue;}
+            compiler = candidate;
             break;
           }
           if(compiler)break;
         }
+        if (!compiler && incompatibleCompiler) fail('unavailable','Installed TypeScript config compiler is incompatible');
         if (!compiler && !stripTypeScriptTypes) fail('unavailable', 'TypeScript config needs a project-installed TypeScript compiler or Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node');
         const code = compiler ? compiler.transpileModule(text, {fileName:file,compilerOptions:{module:compiler.ModuleKind.CommonJS}}).outputText : stripTypeScriptTypes(text, { mode: 'strip' });
         const module = new (require('node:module').Module)(file);
