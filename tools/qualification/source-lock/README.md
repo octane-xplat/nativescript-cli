@@ -107,3 +107,45 @@ The temporary copy is retired before writing its result; its graph paths are
 historical evidence rather than live package paths. The original cached fixture
 is read-only. Without the flag, ambient dependencies remain visible and cause a
 failed result; they are never silently accepted or replaced.
+
+Verify artifact bytes after the isolated compiler identity audit:
+
+```sh
+python3 -B -m unittest discover -s tools/qualification/source-lock \
+  -p test_verify_artifacts.py
+python3 tools/qualification/source-lock/verify-artifacts.py \
+  ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR COMPILER_REPORT_JSON \
+  PROJECT_ARTIFACT_CACHE NEW_OUTPUT_JSON --allow-fetch
+```
+
+The verifier binds the original lock, frozen stage receipt and qualified compiler
+report, verifies package manifest freshness, and groups registry identities by
+their original SHA512 integrity. It first reads verified project/npm cached
+tarballs. Explicit `--allow-fetch` enables bounded HTTPS GETs only from the public
+npm registry; it never installs packages or runs hooks. Cache ownership, byte
+budgets, TLS verification and same-registry HTTPS redirects remain enforced.
+Without the flag, missing tarballs fail. Existing cached corruption fails and
+is never overwritten. No upload or hosting authority is involved.
+
+Each payload is unpacked into a disposable directory with path/link checks and
+byte limits. Uniform named roots used by `@types` archives are recorded.
+Repeated normalized regular-file entries are accepted only when their contents
+are identical, and are recorded; conflicting duplicates fail. Original patches
+are replayed there with Git's context checks. The Vite8.0.20 diff needs one
+precise EOF annotation repair: express a context closing brace as equal
+delete/add lines so old/new EOF annotations apply to their respective sides.
+No code or unrelated line break changes. The raw/applied patch hashes and
+diagnostics are retained. Broad `--inaccurate-eof` handling is not used here.
+
+Every installed payload file/link is compared with that expected tree. Empty
+root `.bun-tag-<hex>` patch sentinels are recorded separately; nonempty,
+symlink, nested or payload-declared lookalikes are not suppressed. Installer
+`node_modules` is excluded only when the tarball has no bundled module payload.
+Package modes, compiler APIs, bundling and native behavior are separate gates.
+Installed packages, original source and shared caches remain read-only.
+
+`--patches-only` selects only patched artifacts. `--retry-failed PRIOR_REPORT`
+selects exactly its failed identities after requiring identical compiler/lock
+inputs; the result explicitly labels its subset and binds the prior report hash.
+It never converts a subset pass into a full-scope claim. An empty selection or
+existing output fails. Keep full and retry receipts when composing evidence.
