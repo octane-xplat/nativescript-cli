@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { stripTypeScriptTypes } = require('node:module');
+const { stripTypeScriptTypes, createRequire } = require('node:module');
 const coreAdapter=require('./core.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
@@ -41,14 +41,29 @@ async function resolve({ projectDir }) {
       const text = read(file);
       if (file.endsWith('.json')) value = JSON.parse(text);
       else if (file.endsWith('.ts')) {
-        if (!stripTypeScriptTypes) fail('unavailable', 'TypeScript config needs Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node');
-        // Transform types only; relative runtime imports retain the project base URL.
-        const code = stripTypeScriptTypes(text, { mode: 'strip' });
+        // NativeScript configs commonly use regular imports for names used only
+        // as types. Node's eraser preserves those imports; a project-installed
+        // TypeScript compiler removes them with the same CommonJS contract used
+        // by the canonical config evaluator. Never install or find a global one.
+        let compiler;
+        for (const base of [...new Set([dir, root])]) {
+          const req = createRequire(path.join(base, 'package.json'));
+          for (const name of ['typescript-classic', 'typescript']) {
+            let installed;
+            try { installed = req.resolve(name); } catch (e) { if(e.code==='MODULE_NOT_FOUND')continue; throw e; }
+            compiler = req(installed);
+            if(typeof compiler.transpileModule!=='function'||!compiler.ModuleKind)fail('unavailable','Installed TypeScript config compiler is incompatible');
+            break;
+          }
+          if(compiler)break;
+        }
+        if (!compiler && !stripTypeScriptTypes) fail('unavailable', 'TypeScript config needs a project-installed TypeScript compiler or Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node');
+        const code = compiler ? compiler.transpileModule(text, {fileName:file,compilerOptions:{module:compiler.ModuleKind.CommonJS}}).outputText : stripTypeScriptTypes(text, { mode: 'strip' });
         const module = new (require('node:module').Module)(file);
         module.filename = file;
         module.paths = require('node:module').Module._nodeModulePaths(dir);
         // Native Node ESM loading supports type-only config imports without a compiler install.
-        if (/\b(?:import|export)\b/.test(code)) value = await import(pathToFileURL(file).href);
+        if (!compiler && /\b(?:import|export)\b/.test(code)) value = await import(pathToFileURL(file).href);
         else { module._compile(code, file); value = module.exports; }
       } else value = await import(pathToFileURL(file).href);
       value = value.default ?? value;

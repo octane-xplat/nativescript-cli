@@ -18344,7 +18344,7 @@ var require_resolve = __commonJS({
     var fs2 = require("node:fs");
     var path2 = require("node:path");
     var crypto = require("node:crypto");
-    var { stripTypeScriptTypes } = require("node:module");
+    var { stripTypeScriptTypes, createRequire: createRequire2 } = require("node:module");
     var coreAdapter = require_core();
     var { pathToFileURL } = require("node:url");
     var configNames = ["nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"];
@@ -18387,12 +18387,29 @@ var require_resolve = __commonJS({
           const text = read(file);
           if (file.endsWith(".json")) value = JSON.parse(text);
           else if (file.endsWith(".ts")) {
-            if (!stripTypeScriptTypes) fail("unavailable", "TypeScript config needs Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node");
-            const code = stripTypeScriptTypes(text, { mode: "strip" });
+            let compiler;
+            for (const base of [.../* @__PURE__ */ new Set([dir, root])]) {
+              const req = createRequire2(path2.join(base, "package.json"));
+              for (const name of ["typescript-classic", "typescript"]) {
+                let installed;
+                try {
+                  installed = req.resolve(name);
+                } catch (e) {
+                  if (e.code === "MODULE_NOT_FOUND") continue;
+                  throw e;
+                }
+                compiler = req(installed);
+                if (typeof compiler.transpileModule !== "function" || !compiler.ModuleKind) fail("unavailable", "Installed TypeScript config compiler is incompatible");
+                break;
+              }
+              if (compiler) break;
+            }
+            if (!compiler && !stripTypeScriptTypes) fail("unavailable", "TypeScript config needs a project-installed TypeScript compiler or Node with stripTypeScriptTypes support (22.13 or newer); use JavaScript config on older Node");
+            const code = compiler ? compiler.transpileModule(text, { fileName: file, compilerOptions: { module: compiler.ModuleKind.CommonJS } }).outputText : stripTypeScriptTypes(text, { mode: "strip" });
             const module3 = new (require("node:module")).Module(file);
             module3.filename = file;
             module3.paths = require("node:module").Module._nodeModulePaths(dir);
-            if (/\b(?:import|export)\b/.test(code)) value = await import(pathToFileURL(file).href);
+            if (!compiler && /\b(?:import|export)\b/.test(code)) value = await import(pathToFileURL(file).href);
             else {
               module3._compile(code, file);
               value = module3.exports;

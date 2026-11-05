@@ -18,10 +18,15 @@ redacted; resolver-authored remediation appears in `OperationError.Advice`.
 
 Exactly one `nativescript.config.{ts,js,cjs,mjs,json}` selects app config. JavaScript
 follows Node's normal module rules. Objects, default exports and async functions
-are accepted; functions receive a copy of the helper environment. TypeScript
-requires Node's built-in type stripping and supports erasable types. Older Node
-returns an actionable unavailable error. Config runtime imports must already be
-installed. No TypeScript compiler or upstream CLI is invoked.
+are accepted; functions receive a copy of the helper environment. TypeScript uses
+an already installed `typescript-classic` or `typescript` compiler when available
+from the config package or app. CommonJS transpilation preserves relative runtime
+imports and removes imports used only as types, including the original app's
+regular `NativeScriptConfig` import. Without an installed compiler, Node's built-in
+type stripping still supports erasable types and explicit `import type`; older
+Node returns an actionable unavailable error. Config runtime imports must already
+be installed. No compiler is installed, no global compiler is selected, and no
+upstream CLI is invoked.
 
 The supported config fields are `id`, `appPath`, `appResourcesPath`, empty `ios`,
 and `android.v8Flags`/`android.markingMode`. The application identifier must be a

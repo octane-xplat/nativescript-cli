@@ -168,6 +168,42 @@ func TestResolveTypeScriptAndOptionalDependencies(t *testing.T) {
 	}
 }
 
+func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
+	compiler := os.Getenv("NS_CONFIG_COMPILER_DIR")
+	if compiler == "" {
+		t.Skip("requires an independently installed TypeScript compiler")
+	}
+	compiler, err := filepath.Abs(compiler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := resolutionApp(t)
+	if err := os.Remove(filepath.Join(root, "nativescript.config.cjs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "node_modules"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(compiler, filepath.Join(root, "node_modules/typescript-classic")); err != nil {
+		t.Fatal(err)
+	}
+	// This is the import shape used by the original app. Neither the type package
+	// nor its runtime is installed: the real compiler must erase the type-only use.
+	resolutionFile(t, root, "nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; export default {id:process.env.R1_APP_ID,android:{markingMode:'none'}} as NativeScriptConfig;`)
+	client, _ := ns.New(ns.Options{Environment: map[string]string{"R1_APP_ID": "org.example.compiled"}})
+	p, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || p.ApplicationID != "org.example.compiled" || p.Config.Android.MarkingMode != "none" {
+		t.Fatal("installed compiler config", p, err)
+	}
+	// CJS emission must preserve runtime imports relative to the config file.
+	resolutionFile(t, root, "local.cjs", `module.exports={id:'org.example.relative'}`)
+	resolutionFile(t, root, "nativescript.config.ts", `import { NativeScriptConfig } from '@nativescript/core'; import value = require('./local.cjs'); export default value as NativeScriptConfig;`)
+	p, err = client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || p.ApplicationID != "org.example.relative" {
+		t.Fatal("relative config import", p, err)
+	}
+}
+
 func TestResolveCancellationAndRemoval(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "nativescript.config.cjs", `module.exports = async () => { await new Promise(() => setInterval(()=>{},100)); }`)
