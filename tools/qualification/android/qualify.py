@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -13,66 +14,102 @@ import time
 import uuid
 import zipfile
 
+import existing_avd
+
 
 def run(argv, **kwargs):
     return subprocess.run([str(x) for x in argv], check=True, **kwargs)
 
 
-def device_phase(work, avd, port):
+def fixture_package(work):
+    """ApplicationID of the single fixture artifact in a public Build result."""
+    built = json.loads((work / 'build.json').read_text())
+    artifacts = built.get('Artifacts')
+    package = artifacts[0].get('ApplicationID') if artifacts else built.get('ApplicationID')
+    if not package:
+        raise RuntimeError('fixture build result carries no ApplicationID')
+    return package
+
+
+def device_phase(work, port):
     serial = f'emulator-{port}'
-    adb = Path(os.environ['ANDROID_HOME']) / 'platform-tools/adb'
-    emulator = Path(os.environ['ANDROID_HOME']) / 'emulator/emulator'
-    # This AVD was created solely for this invocation; never touch another serial.
+    sdk = Path(os.environ['ANDROID_HOME'])
+    adb_bin = sdk / 'platform-tools/adb'
+    emulator = sdk / 'emulator/emulator'
+    avd_home = existing_avd.existing_avd_home(Path.home(), sdk)
+    existing_avd.ensure_no_android_emulator(sdk)
+
+    def adb(*args):
+        return subprocess.check_output([str(adb_bin), '-s', serial, *args], text=True, timeout=30)
+
+    for occupied in (port, port + 1):
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', occupied))
+    # The caller owns the AVD; this phase owns only the boot and, once proven
+    # absent, the fixture installation it is about to create.
+    package = fixture_package(work)
+    installation_owned = False
+    # This AVD belongs to the caller; never touch another serial.
     with (work / 'emulator.log').open('w') as log:
-        process = subprocess.Popen([str(emulator), '-avd', avd, '-port', port,
+        process = subprocess.Popen([str(emulator), '-avd', existing_avd.AVD, '-port', str(port),
                                     '-no-window', '-no-audio', '-no-snapshot', '-no-boot-anim'],
-                                   stdout=log, stderr=log)
+                                   stdout=log, stderr=log, env=existing_avd.emulator_env(avd_home))
         try:
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 if process.poll() is not None:
                     raise RuntimeError('owned emulator exited before boot')
-                boot = subprocess.run([str(adb), '-s', serial, 'shell', 'getprop', 'sys.boot_completed'],
+                boot = subprocess.run([str(adb_bin), '-s', serial, 'shell', 'getprop', 'sys.boot_completed'],
                                       capture_output=True, text=True, timeout=10)
                 if boot.returncode == 0 and boot.stdout.strip() == '1':
                     break
                 time.sleep(1)
             else:
                 raise RuntimeError('owned emulator boot timed out')
-            name = subprocess.check_output([str(adb), '-s', serial, 'emu', 'avd', 'name'], text=True, timeout=10)
-            if name.splitlines()[0] != avd:
+            name = subprocess.check_output([str(adb_bin), '-s', serial, 'emu', 'avd', 'name'], text=True, timeout=10)
+            if name.splitlines()[0] != existing_avd.AVD:
                 raise RuntimeError('serial belongs to another AVD')
+            if existing_avd.package_present(adb('shell', 'pm', 'list', 'packages', package), package):
+                raise RuntimeError('refusing an existing fixture installation')
+            installation_owned = True
             run([work / 'device-bin', work / 'build.json', serial, (work / 'app/nonce').read_text()])
+            existing_avd.retire_owned_package(adb, package)
+            installation_owned = False
         finally:
-            # Terminate our exact process, even if boot failed or the port collided.
-            if process.poll() is None:
-                process.terminate()
             try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=30)
+                if installation_owned:
+                    existing_avd.retire_owned_package(adb, package)
+                    installation_owned = False
+            finally:
+                # Terminate our exact process, even if boot failed or the port collided.
+                if process.poll() is None:
+                    process.terminate()
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=30)
         print('G3 owned emulator exited before reservation release', flush=True)
+    (work / 'device-phase.json').write_text(json.dumps({'avd': existing_avd.AVD, 'serial': serial,
+                                                      'package': package, 'ownedInstallationRetired': True}) + '\n')
 
 
 def main():
-    if len(sys.argv) == 5 and sys.argv[1] == '--device-phase':
-        device_phase(Path(sys.argv[2]), sys.argv[3], sys.argv[4])
+    if len(sys.argv) == 4 and sys.argv[1] == '--device-phase':
+        device_phase(Path(sys.argv[2]), int(sys.argv[3]))
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path, help='new directory for artifact and provenance')
-    parser.add_argument('--system-image', default='system-images;android-35;google_apis;arm64-v8a')
     parser.add_argument('--port', type=int, default=5582, help='unused even emulator port')
     args = parser.parse_args()
     if args.port % 2 or not 5554 <= args.port <= 5682:
         parser.error('port must be even and between 5554 and 5682')
+    sdk = Path(os.environ['ANDROID_HOME'])
+    existing_avd.existing_avd_home(Path.home(), sdk)
     evidence = args.evidence_dir.resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     source = Path(__file__).resolve().parent
     repo = source.parents[2]
-    sdk = Path(os.environ['ANDROID_HOME'])
-    avdmanager = sdk / 'cmdline-tools/latest/bin/avdmanager'
-    avd = 'nativescript-g3-' + uuid.uuid4().hex[:12]
     module = 'github.com/octane-xplat/nativescript-cli'
     version = 'v' + json.loads((repo / 'package.json').read_text())['version']
     with tempfile.TemporaryDirectory(prefix='g3 isolated ') as tmp:
@@ -124,16 +161,15 @@ def main():
             artifact = built['Artifacts'][0]
             shutil.copy(artifact['Path'], evidence / 'app.apk')
             shutil.copy(work / 'build.json', evidence)
-            run([avdmanager, 'create', 'avd', '--name', avd, '--package', args.system_image, '--device', 'pixel_6'], input='no\n', text=True)
-            run([shutil.which('goddard-agent'), 'resource', 'run', '--json', json.dumps({'resources': {'exclusive': ['android:' + avd], 'resident_devices': 1}, 'purpose': 'G3 owned runtime health and cancellation'}), '--', sys.executable, source / 'qualify.py', '--device-phase', work, avd, str(args.port)], env=runtime_env)
-            provenance = {'sourceRevision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(), 'nonce': nonce, 'systemImage': args.system_image, 'avd': avd, 'serial': f'emulator-{args.port}', 'apkSHA256': hashlib.sha256((evidence / 'app.apk').read_bytes()).hexdigest(), 'target': artifact, 'runtime': '9.0.0', 'vite': '7.3.1', 'qualification': 'debug bundled emulator only'}
+            run([shutil.which('goddard-agent'), 'resource', 'run', '--json', json.dumps({'resources': {'exclusive': ['android:' + existing_avd.AVD], 'resident_devices': 1}, 'purpose': 'G3 owned runtime health and cancellation'}), '--', sys.executable, source / 'qualify.py', '--device-phase', work, str(args.port)], env=runtime_env)
+            phase = json.loads((work / 'device-phase.json').read_text())
+            provenance = {'sourceRevision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(), 'nonce': nonce, 'systemImage': existing_avd.IMAGE, 'avd': existing_avd.AVD, 'avdOwnership': 'caller-owned; never created, registered, rewritten or deleted', 'serial': f'emulator-{args.port}', 'apkSHA256': hashlib.sha256((evidence / 'app.apk').read_bytes()).hexdigest(), 'target': artifact, 'runtime': '9.0.0', 'vite': '7.3.1', 'qualification': 'debug bundled emulator only', 'ownedInstallationRetired': phase['ownedInstallationRetired']}
             (evidence / 'provenance.json').write_text(json.dumps(provenance, indent=2))
             print(json.dumps(provenance), flush=True)
             print('G3 PASS: fresh R1/V1/P2/B2/D2/W1 native metadata/binding/advancing health and cancellation', flush=True)
         finally:
             if (work / 'emulator.log').exists():
                 shutil.copy(work / 'emulator.log', evidence)
-            subprocess.run([str(avdmanager), 'delete', 'avd', '--name', avd], capture_output=True)
 
 
 if __name__ == '__main__':

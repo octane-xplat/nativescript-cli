@@ -8,7 +8,7 @@ No upstream CLI or generated platform tree is imported.
 | Check | Evidence boundary |
 | --- | --- |
 | iOS release simulator | Real canonical native guard; compatible next-launch activation, confirmation and rollback via canonical client state methods with native file storage; failed-boot recovery; changed-native rejection before payload JS; server-free embedded restoration |
-| Android debug emulator | Real canonical native debug mode, SDK-independent canonical client rejection of debug installation, generated binding/native contribution, advancing heartbeat, app cleanup, owned AVD cleanup; no release lifecycle claim |
+| Android debug emulator | Real canonical native debug mode, SDK-independent canonical client rejection of debug installation, generated binding/native contribution, advancing heartbeat, app cleanup, owned boot/installation cleanup; no release lifecycle claim |
 
 The iOS fixture stages its test archives from the host. Its storage adapter uses
 actual Foundation files; it deliberately has no network/installer transport.
@@ -69,10 +69,12 @@ python3 tools/qualification/ota/android/debug_guard.py /absolute/android-app /ab
 
 The iOS check refuses an unowned existing installation, preserves other apps and
 always shuts down its owned boot. It checks server-free release startup; it does
-not disable the simulator's host network. The Android check creates only
-`nativescript-p91-ready-hoodoo` from the installed API35 google_apis arm64 image,
-refuses a preexisting AVD or serial, disables network radios on its own guest,
-and retires/deletes only its owned emulator/AVD before reservation release.
+not disable the simulator's host network. The Android check reuses only the
+existing caller-owned `elegant-fir-probe` AVD (installed API35 google_apis arm64
+image; never created, registered, rewritten or deleted; at most one emulator),
+refuses a used serial or a preexisting fixture installation, captures then
+disables network radios on the guest, and restores the radios and retires only
+its owned emulator boot and installation before reservation release.
 No screenshots, new system images, host network changes or release credentials
 are used. Evidence JSON and logs belong outside Git. A passing component result
 must not promote H1 or the remaining G4–G6 acceptance gates.

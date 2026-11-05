@@ -10,11 +10,12 @@ python3 tools/qualification/android/native-usage/qualify.py .cache/native-usage-
 The output directory must be new. The harness stages the locked selected-Vite
 fixture, installs GestureHandler2.1.0 offline with scripts disabled, and uses the
 public Go Build/Devices/Run APIs. Build and device reservations do not overlap.
-The existing identity-checked emulator harness owns a fresh AVD under the project
-cache; the device consumer asserts the actual native class, nonce, stable app
+The existing identity-checked emulator harness reuses only the caller-owned
+`elegant-fir-probe` AVD — it never creates, registers, rewrites or deletes a
+device and boots at most one emulator; the device consumer asserts the actual native class, nonce, stable app
 PID/boot and advancing JSON heartbeat. It checks repeated Close/Wait, unchanged
 embedding globals, PID retirement and uninstall. The harness then retires the
-emulator and deletes the owned AVD. It does not create a signing key.
+emulator boot; the AVD is retained. It does not create a signing key.
 
 `build.json`, `build.json.runtime.json`, `evidence.json`, the APK, generated tree,
 installed lock and process logs remain in the cache. Foreign builds, the original
