@@ -35,3 +35,32 @@ dependency is changed. `--resume-staged` can recover this owned fixture only
 before any native state exists; it never reruns an ambiguous native attempt or
 overwrites phase evidence. A terminal failed staging attempt must be inspected
 before using that option.
+
+## Runtime on the prescribed simulator
+
+`qualify_runtime.py` runs the three retained apps through public `Run` on the
+existing iOS guest `91D40099-A056-497D-A572-ADDDFD6A8F23` under one exclusive
+broker reservation. It never creates, clones or erases a device. Use the
+`tools/ota/runtime` consumer (`hold` mode), not the Vite configuration consumer.
+
+The retained apps from the compile matrix predate the corrected `app_entry.ts`.
+`--restage-bundle`, `--restage-report` and `--restage-dir` clone each retained
+app with `clonefile` and replace only `app/bundle.mjs` with a production host
+bundle whose digest must match a passed release iOS bundler report. The clone
+must differ from the retained app in exactly that file, and the retained app
+must stay unchanged. This is not a fresh public Build.
+
+```sh
+go build -o .cache/plugin-source-runtime-consumer ./tools/ota/runtime
+python3 tools/qualification/plugin-native-source/qualify_runtime.py \
+  /absolute/compile-evidence-prefix "$PWD/.cache/plugin-source-runtime-consumer" \
+  /absolute/new-runtime-prefix --restage-bundle /absolute/bundle.mjs \
+  --restage-report /absolute/host-bundle-report.json --restage-dir "$PWD/.cache/NEW"
+```
+
+Each case requires the app's own health file (nonce, boot identity, stable
+PID, class presence and value), the launchd PID, the native startup fingerprint
+and release mode. Public `Run` logs are a bounded buffer, so a missing launch
+line is tolerated but a different PID fails. After uninstall and shutdown the
+guest has been observed to re-list the fixture with no bundle bytes; the next
+run retires only that byte-less fixture registration and records it.

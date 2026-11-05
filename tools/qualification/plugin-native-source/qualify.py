@@ -61,7 +61,7 @@ if json.loads((owner / 'package.json').read_text())['name'] != native_name:
 (app / 'nativescript.config.ts').write_text("export default {id:'org.example.pluginselectorota',appPath:'app',appResourcesPath:'App_Resources',cli:{packageManager:'bun'},bundler:'vite',bundlerConfigPath:'vite.config.mts'};\n")
 nonce = uuid.uuid4().hex
 (app / 'nonce').write_text(nonce)
-(app / 'app/app.ts').write_text("console.log('Plugin selector native',__PROJECT_CONFIG_VALUE__);let tick=0;setInterval(()=>{const present=typeof PluginSelectorProbe!=='undefined';console.log('PLUGIN_SELECTOR_HEALTH '+JSON.stringify({nonce:'" + nonce + "',tick:++tick,present,value:present?PluginSelectorProbe.answer():null}));},250);\n")
+(app / 'app/app.ts').write_text(Path(__file__).with_name('app_entry.ts').read_text().replace('PLUGIN_SELECTOR_NONCE', nonce))
 clone = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True).clonefile
 clone.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
 clone.restype = ctypes.c_int
