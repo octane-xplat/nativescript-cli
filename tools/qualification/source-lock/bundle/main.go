@@ -42,13 +42,27 @@ func (c captureExecutor) Start(ctx context.Context, command process.Command) (pr
 }
 
 func main() {
-	if len(os.Args) != 5 {
-		panic("usage: bundle PROJECT_DIR REPOSITORY_DIR NEW_CACHE_DIR NEW_REPORT")
+	if len(os.Args) < 5 || len(os.Args) > 7 {
+		panic("usage: bundle PROJECT_DIR REPOSITORY_DIR NEW_CACHE_DIR NEW_REPORT [debug|release] [ios|android]")
 	}
-	for _, arg := range os.Args[1:] {
+	for _, arg := range os.Args[1:5] {
 		if !filepath.IsAbs(arg) {
 			panic("all paths must be absolute")
 		}
+	}
+	configuration := "debug"
+	if len(os.Args) >= 6 {
+		configuration = os.Args[5]
+	}
+	if configuration != "debug" && configuration != "release" {
+		panic("configuration must be debug or release")
+	}
+	platform := "ios"
+	if len(os.Args) == 7 {
+		platform = os.Args[6]
+	}
+	if platform != "ios" && platform != "android" {
+		panic("platform must be ios or android")
 	}
 	app, repo, cache, report := os.Args[1], os.Args[2], os.Args[3], os.Args[4]
 	if _, err := os.Lstat(report); !os.IsNotExist(err) {
@@ -62,13 +76,13 @@ func main() {
 	cwd, _ := os.Getwd()
 	environment := os.Environ()
 	host := jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(filepath.Join(repo, "assets"))}, CacheDir: filepath.Join(cache, "helper"), Environment: map[string]string{"VISUAL_CAPTURE_URL": "", "XPLAT_DOCS_DEMOS": ""}, Executor: captureExecutor{file: filepath.Join(cache, "vite-request.json")}}
-	result := map[string]any{"scope": "actual selected source host bundle through internal production resolver/bundler and fixture prepared handoff; no native Prepare/compiler, device or public Build acceptance", "passed": false, "projectDirectory": app}
+	result := map[string]any{"scope": "actual selected source host bundle through internal production resolver/bundler and fixture prepared handoff; no native Prepare/compiler, device or public Build acceptance", "passed": false, "projectDirectory": app, "configuration": configuration, "platform": platform}
 	resolved, err := (resolver.Resolver{Host: host}).Resolve(ctx, app)
 	if err == nil {
 		result["resolvedPackages"] = len(resolved.Packages)
 		result["resolvedSources"] = len(resolved.Sources)
 		result["revision"] = resolved.Revision
-		target := project.Target{Platform: "ios", Configuration: "debug", DestinationKind: "simulator", DestinationID: "host-fixture", Architecture: "arm64"}
+		target := project.Target{Platform: platform, Configuration: configuration, DestinationKind: "simulator", DestinationID: "host-fixture", Architecture: "arm64"}
 		var layout workspace.Layout
 		layout, err = workspace.NewLayout(filepath.Join(cache, "state"), project.Identity{Schema: 1, Revision: resolved.Revision, ProjectDir: resolved.Directory, Target: target})
 		if err == nil {

@@ -193,8 +193,15 @@ fixture after generating its required local package exports:
 
 ```sh
 go run ./tools/qualification/source-lock/bundle \
-  ABSOLUTE_APP_DIR ABSOLUTE_REPOSITORY_DIR ABSOLUTE_NEW_CACHE ABSOLUTE_NEW_REPORT
+  ABSOLUTE_APP_DIR ABSOLUTE_REPOSITORY_DIR ABSOLUTE_NEW_CACHE ABSOLUTE_NEW_REPORT \
+  release android
 ```
+
+The optional configuration (`debug` or `release`) and platform (`ios` or
+`android`) default to debug/iOS; both are recorded in new receipts. Invalid
+values fail before creating a cache directory. Distinct targets need distinct
+cache/report destinations. The fixture source and any diagnostic changes must
+be qualified and labeled separately; a successful bundle does not approve them.
 
 This harness uses the actual embedded helper and selected project's installed
 Vite configuration. It supplies a labeled prepared-project fixture; it does not
