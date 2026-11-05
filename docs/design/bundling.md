@@ -67,7 +67,7 @@ OTA archives have their own entry/package contract.
 ## Public native development sessions
 
 `RunRequest.Development = &DevelopmentOptions{Port: 0}` opts into the installed
-`@nativescript/vite` 8.0.21 engine with project-local Vite 8. This is distinct from
+`@nativescript/vite` 8.0.20 or 8.0.21 engine with project-local Vite 8. This is distinct from
 the Vite 7 IIFE bundler above: the native engine emits `bundle.mjs` and serves its
 native `/ns/*` module graph and `/ns-hmr` WebSocket. The CLI exposes `run --hmr`
 and `--hmr-port`. The root package's `main` must identify an entry inside appPath.
@@ -85,10 +85,17 @@ forwarding for the selected port. The embedding process keeps its cwd, environme
 and global logging unchanged. Without a selected project config the adapter
 selects the TypeScript/XML preset.
 
+Automatic native input watching uses the same iOS/Android platform subtrees as
+resolution. Inactive sibling platform trees do not become unrecognized additions
+merely because a package also ships macOS or Windows inputs. Explicitly selected
+source identities or native package directories inside those trees remain
+watched, including new members under an explicitly selected directory. Active
+iOS/Android additions and changes still require re-resolution.
+
 ## Project Vite configuration
 
 An app's selected `bundlerConfigPath` opts both normal Build and native
-development into installed `@nativescript/vite` 8.0.21 with Vite 8. The helper uses
+development into installed `@nativescript/vite` 8.0.20 or 8.0.21 with Vite 8. The helper uses
 Vite's public `loadConfigFromFile` API with explicit project/config paths and
 `command:'build'` or `'serve'`. Debug selects development mode; release selects
 production mode and clears the helper's inherited `DEBUG` override. Normal

@@ -59,3 +59,30 @@ test('plugin Gradle root caches do not restart while authored assets still do',t
  fs.rmSync(path.join(android,'assets'),{recursive:true});
  fs.symlinkSync(root,cache,'dir');assert.throws(()=>changed(cache),/symlink/);
 });
+
+test('automatic platform snapshots match resolver ios/android ownership without dropping active edits',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'platform-inputs-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const platforms=path.join(root,'platforms'),source=path.join(platforms,'ios','Binding.swift');
+ fs.mkdirSync(path.dirname(source),{recursive:true});fs.writeFileSync(source,'class Binding {}');
+ const inactive=path.join(platforms,'macos','Mac.swift');fs.mkdirSync(path.dirname(inactive),{recursive:true});fs.writeFileSync(inactive,'class Mac {}');
+ const changed=nativeInputs([platforms],[{Path:source,Digest:crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex')}]);
+ assert.equal(changed(),false);assert.equal(changed(platforms),false);
+ fs.writeFileSync(inactive,'class MacChanged {}');assert.equal(changed(inactive),false);assert.equal(changed(platforms),false);
+ const windows=path.join(platforms,'windows','native.dll');fs.mkdirSync(path.dirname(windows),{recursive:true});fs.writeFileSync(windows,'opaque');assert.equal(changed(windows),false);assert.equal(changed(platforms),false);
+ const active=path.join(platforms,'ios','assets','macos','authored.txt');fs.mkdirSync(path.dirname(active),{recursive:true});fs.writeFileSync(active,'authored');assert.equal(changed(active),true);assert.equal(changed(platforms),true);fs.rmSync(path.join(platforms,'ios','assets'),{recursive:true});
+ const android=path.join(platforms,'android','Binding.java');fs.mkdirSync(path.dirname(android),{recursive:true});fs.writeFileSync(android,'class Binding {}');assert.equal(changed(android),true);fs.rmSync(path.dirname(android),{recursive:true});
+ fs.writeFileSync(source,'class Changed {}');assert.equal(changed(source),true);fs.rmSync(source);assert.equal(changed(platforms),true);
+});
+
+test('explicit inputs inside inactive platform trees keep content and membership ownership',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'explicit-platform-inputs-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const platforms=path.join(root,'platforms'),selected=path.join(platforms,'macos','Selected'),source=path.join(selected,'Bridge.swift');
+ fs.mkdirSync(selected,{recursive:true});fs.writeFileSync(source,'class Bridge {}');
+ const baseline=[{Path:source,Digest:crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex')}];
+ const changed=nativeInputs([platforms,selected],baseline);
+ assert.equal(changed(),false);fs.writeFileSync(source,'class Changed {}');assert.equal(changed(source),true);fs.writeFileSync(source,'class Bridge {}');
+ const added=path.join(selected,'Added.swift');fs.writeFileSync(added,'class Added {}');assert.equal(changed(added),true);assert.equal(changed(platforms),true);fs.rmSync(added);
+ const unrelated=path.join(platforms,'macos','Unselected.swift');fs.writeFileSync(unrelated,'class Unselected {}');assert.equal(changed(unrelated),false);assert.equal(changed(platforms),false);
+ // A source identity is explicit even without a separately supplied directory.
+ assert.equal(nativeInputs([platforms],baseline)(),false);fs.writeFileSync(source,'class Changed {}');assert.equal(nativeInputs([platforms],baseline)(platforms),true);
+});

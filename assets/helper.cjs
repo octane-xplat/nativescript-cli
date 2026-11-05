@@ -18107,7 +18107,15 @@ var require_native_inputs = __commonJS({
     module2.exports = function nativeInputs(inputs, sources, groups = [], projectDir) {
       const baseline = new Map(sources.map((source) => [source.Path, source.Digest]));
       const packageRoots = sources.filter((source) => path2.basename(source.Path) === "Package.swift" || source.Path.endsWith(".podspec")).map((source) => path2.dirname(source.Path));
-      const gradleCaches = inputs.filter((input) => path2.basename(input) === "platforms").map((input) => path2.join(input, "android", ".gradle"));
+      const platformRoots = inputs.filter((input) => path2.basename(input) === "platforms");
+      const gradleCaches = platformRoots.map((input) => path2.join(input, "android", ".gradle"));
+      const within = (root, file) => file === root || file.startsWith(root + path2.sep);
+      const explicitRoots = [.../* @__PURE__ */ new Set([...inputs.filter((input) => !platformRoots.includes(input)), ...baseline.keys()])];
+      const inactivePlatform = (file) => platformRoots.some((root) => {
+        if (file === root || !within(root, file)) return false;
+        const platform = path2.relative(root, file).split(path2.sep)[0];
+        return !["ios", "android"].includes(platform) && !explicitRoots.some((input) => within(input, file) || within(file, input));
+      });
       const gradleCache = (file) => gradleCaches.some((cache) => {
         const relative = path2.relative(cache, file);
         if (relative === ".." || relative.startsWith(".." + path2.sep) || path2.isAbsolute(relative)) return false;
@@ -18118,7 +18126,7 @@ var require_native_inputs = __commonJS({
           throw error;
         }
       });
-      const ignored = (file) => !baseline.has(file) && (gradleCache(file) || packageRoots.some((root) => {
+      const ignored = (file) => !baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some((root) => {
         const relative = path2.relative(root, file);
         return relative !== ".." && !relative.startsWith(".." + path2.sep) && relative.split(path2.sep).some((part) => [".build", ".swiftpm"].includes(part));
       }));

@@ -8,13 +8,23 @@ const crypto = require('node:crypto');
 module.exports = function nativeInputs(inputs, sources, groups=[], projectDir) {
   const baseline = new Map(sources.map(source => [source.Path,source.Digest]));
   const packageRoots = sources.filter(source => path.basename(source.Path)==='Package.swift' || source.Path.endsWith('.podspec')).map(source => path.dirname(source.Path));
-  const gradleCaches = inputs.filter(input => path.basename(input)==='platforms').map(input => path.join(input,'android','.gradle'));
+  const platformRoots = inputs.filter(input => path.basename(input)==='platforms');
+  const gradleCaches = platformRoots.map(input => path.join(input,'android','.gradle'));
+  const within = (root,file) => file===root || file.startsWith(root+path.sep);
+  const explicitRoots = [...new Set([...inputs.filter(input=>!platformRoots.includes(input)),...baseline.keys()])];
+  // Match R1's automatic ios/android discovery. Other platform trees remain
+  // inactive unless a caller explicitly selects an input within that tree.
+  const inactivePlatform = file => platformRoots.some(root => {
+    if(file===root || !within(root,file))return false;
+    const platform=path.relative(root,file).split(path.sep)[0];
+    return !['ios','android'].includes(platform) && !explicitRoots.some(input=>within(input,file)||within(file,input));
+  });
   const gradleCache = file => gradleCaches.some(cache => {
     const relative=path.relative(cache,file);
     if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))return false;
     try{return fs.lstatSync(cache).isDirectory();}catch(error){if(error.code==='ENOENT')return true;throw error;}
   });
-  const ignored = file => !baseline.has(file) && (gradleCache(file) || packageRoots.some(root => {
+  const ignored = file => !baseline.has(file) && (inactivePlatform(file) || gradleCache(file) || packageRoots.some(root => {
     const relative = path.relative(root,file);
     return relative !== '..' && !relative.startsWith('..'+path.sep) && relative.split(path.sep).some(part => ['.build','.swiftpm'].includes(part));
   }));
