@@ -13,9 +13,9 @@ Vite installation. API reference: https://vite.dev/guide/api-javascript.
 
 The supported bootstrap is appPath/package.json main, falling back to app.js.
 V1 uses an explicit Vite library build producing an IIFE bundle.js and emitted
-assets without browser HTML or HMR injection. It disables Vite config discovery;
-arbitrary project Vite configuration and NativeScript-specific runtime transforms
-are not supported yet. Unsupported Vite majors fail unavailable. Native runtime
+assets without browser HTML or HMR injection. It disables Vite config discovery.
+A selected project config uses the separate native-engine path below.
+Unsupported Vite majors fail unavailable. Native runtime
 execution must be qualified by G2/G3; this JavaScript fixture does not establish it.
 
 Adapter.Bundle receives the real resolved project, prepared destination and F2
@@ -82,8 +82,45 @@ with a strict selected port. Only the completed initial output is copied into
 the native workspace under its existing writer lease; the server does not hold
 that lease while native compilation runs. Android's device session owns reverse
 forwarding for the selected port. The embedding process keeps its cwd, environment
-and global logging unchanged. Arbitrary Vite config/framework presets remain
-unavailable; the current engine adapter selects the TypeScript/XML preset.
+and global logging unchanged. Without a selected project config the adapter
+selects the TypeScript/XML preset.
+
+## Project Vite configuration
+
+An app's selected `bundlerConfigPath` opts both normal Build and native
+development into installed `@nativescript/vite` 8.0.21 with Vite 8. The helper uses
+Vite's public `loadConfigFromFile` API with explicit project/config paths and
+`command:'build'` or `'serve'`. Debug selects development mode; release selects
+production mode and clears the helper's inherited `DEBUG` override. Normal
+Build disables HMR, while Development enables it. The root package's `main` must
+remain inside appPath. A project config supplies its complete native framework
+preset; the adapter does not add another TypeScript preset. Plain browser configs
+without a native bootstrap fail rather than report a successful native bundle.
+
+Project plugins, aliases, defines and framework transforms are retained. The
+library replaces the engine's NativeScript-config-to-package plugin with its
+resolved runtime manifest, and owns root, mode, cache, output directory, completed
+disk writes and the loopback strict-port server settings. Conflicting output
+file/directory overrides reject. Configs/plugins are trusted project code, not
+sandboxed code. The framework's completed output must include `bundle.mjs`.
+The internal Vite 7 Watch/borrowed-server adapter rejects selected project configs;
+use the separately owned native Development path.
+
+Development verifies the selected config against R1's source digest before
+loading it. Changes to that file, imported config dependencies reported by Vite,
+or the selected mode's `.env` files terminate with ErrRestart, including new env
+files. Vite restart requests also return control to the Go coordinator. Separate
+config instances serve the live graph and initial disk build. Inputs must remain
+stable while loading/building; arbitrary plugin file reads are not a filesystem
+snapshot or a complete dependency-discovery contract. No dependencies or caller
+configs are installed or rewritten.
+
+The opt-in `TestInstalledNativeProjectConfiguration` uses a real `.mts` config,
+relative config import and installed TypeScript native preset. It proves build/
+serve configuration, plugin execution, emitted/served defines, debug/release mode,
+ownership settings, dependency/env restart, stale-file rejection and cleanup.
+This is host/helper evidence. It does not establish the original Xplat Octane/
+Bamboo preset, arbitrary framework HMR, native compilation or device behavior.
 
 JavaScript updates use the engine's native HMR path. Native resources,
 configuration, manifests and installed plugin platform inputs are watched

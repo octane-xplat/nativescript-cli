@@ -35,6 +35,7 @@ type Event struct {
 	Endpoint Endpoint `json:"endpoint"`
 }
 type Request struct {
+	BundlerConfigPath  string                      `json:"bundlerConfigPath,omitempty"`
 	CacheDirectory     string                      `json:"cacheDirectory,omitempty"`
 	NativeInputs       []string                    `json:"nativeInputs,omitempty"`
 	NativeSources      []project.Source            `json:"nativeSources,omitempty"`
@@ -139,6 +140,18 @@ func request(r project.Resolved, p project.Prepared, lease workspace.Lease) (Req
 		return Request{}, workflow.ErrInvalid
 	}
 	q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle", Platform: p.Identity.Target.Platform, AppPath: r.Config.AppPath, Configuration: p.Identity.Target.Configuration}
+	if r.Config.BundlerConfigPath != "" {
+		entry, err := nativeEntry(r)
+		if err != nil {
+			return Request{}, err
+		}
+		q.Entry, q.Mode = entry, "native-bundle"
+		q.ProjectDir = canonical
+		q.BundlerConfigPath = r.Config.BundlerConfigPath
+		q.NativeSources = append([]project.Source(nil), r.Sources...)
+		q.ApplicationID = r.ApplicationID
+		q.CacheDirectory = filepath.Join(lease.Layout().GeneratedRoot, "vite-cache")
+	}
 	if p.Identity.Target.Platform == "android" {
 		config, err := project.AndroidSettings(r)
 		if err != nil {
@@ -178,6 +191,9 @@ func (a Adapter) Watch(ctx context.Context, r project.Resolved, p project.Prepar
 		return nil, nil, err
 	}
 	q.Mode = "watch"
+	if q.BundlerConfigPath != "" {
+		return nil, nil, workflow.ErrUnavailable
+	}
 	q.Port = settings.Port
 	q.HMRHost = settings.HMRHost
 	q.HMRPort = settings.HMRPort

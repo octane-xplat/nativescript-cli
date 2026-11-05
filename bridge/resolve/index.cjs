@@ -87,7 +87,8 @@ async function resolve({ projectDir }) {
     return fs.realpathSync(resolved);
   }
   function collect(dir, owner, cfg, resources, core=false) {
-    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android'], 'config');
+    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
+    if(dir!==root && ['cli','bundler','bundlerConfigPath'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
     if(cfg.ios?.SPMPackages!==undefined){
       let declared;
@@ -174,6 +175,27 @@ async function resolve({ projectDir }) {
   serializable(cfg);
   if (cfg.buildPath !== undefined && (typeof cfg.buildPath !== 'string' || !cfg.buildPath)) fail('invalid_input', 'Config buildPath must be a nonempty string');
   const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, 'app'), appResourcesPath: directory(root, cfg.appResourcesPath, 'App_Resources'), android: cfg.android ?? {} };
+  if(cfg.cli!==undefined){
+    keys(cfg.cli,['packageManager'],'CLI config');
+    if(cfg.cli.packageManager!==undefined){
+      if(!['bun','npm','pnpm','yarn'].includes(cfg.cli.packageManager))fail('invalid_input','CLI packageManager must be bun, npm, pnpm or yarn');
+      normalized.packageManager=cfg.cli.packageManager;
+    }
+  }
+  if(cfg.bundler!==undefined && cfg.bundler!=='vite')fail('unavailable','Only the Vite bundler is supported');
+  if(cfg.bundlerConfigPath!==undefined && (typeof cfg.bundlerConfigPath!=='string'||!cfg.bundlerConfigPath))fail('invalid_input','bundlerConfigPath must be a nonempty path');
+  let viteConfig=cfg.bundlerConfigPath;
+  if(viteConfig===undefined && cfg.bundler==='vite'){
+    const found=['ts','js','mjs','cjs','mts','cts'].map(ext=>`vite.config.${ext}`).filter(name=>fs.existsSync(path.join(root,name)));
+    if(found.length>1)fail('invalid_input','Multiple Vite config files; select bundlerConfigPath explicitly');
+    viteConfig=found[0];
+  }
+  if(viteConfig!==undefined){
+    const file=path.resolve(root,viteConfig);
+    if(!/\.(?:[cm]?[jt]s)$/.test(file)||!fs.existsSync(file)||!fs.statSync(file).isFile())fail('invalid_input','Vite config must name an existing JavaScript or TypeScript file');
+    normalized.bundlerConfigPath=fs.realpathSync(file);
+    read(normalized.bundlerConfigPath);
+  }
   collect(root, root, cfg, normalized.appResourcesPath);
   async function visit(dir, pkg, isRoot = false) {
     if (packages.has(dir)) return;

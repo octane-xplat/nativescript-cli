@@ -18242,51 +18242,61 @@ typescriptClientStrategy.refreshAfterBatch = async function(ids,context) {
   }
 });
 
-// bridge/vite/native.cjs
-var require_native = __commonJS({
-  "bridge/vite/native.cjs"(exports2, module2) {
+// bridge/vite/native-config.cjs
+var require_native_config = __commonJS({
+  "bridge/vite/native-config.cjs"(exports2, module2) {
     "use strict";
     var fs2 = require("node:fs");
     var path2 = require("node:path");
-    var { createRequire: createRequire2 } = require("node:module");
-    var { pathToFileURL } = require("node:url");
+    var crypto = require("node:crypto");
     var fail = (code) => Object.assign(new Error(), { code });
-    module2.exports = async function native(p, emit) {
-      if (!["ios", "android"].includes(p.platform) || p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535 || !Array.isArray(p.nativeInputs) || !p.nativeInputs.every(path2.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail("invalid_input");
-      const req = createRequire2(path2.join(p.projectDir, "package.json"));
-      const sourceGroups = p.nativeSourceGroups ?? [];
-      if (!Array.isArray(sourceGroups) || !sourceGroups.every((g) => g && typeof g.name === "string" && path2.isAbsolute(g.path || "") && path2.isAbsolute(g.root || "") && Array.isArray(g.files) && g.files.every(path2.isAbsolute))) throw fail("invalid_input");
-      const nativeChanged = require_native_inputs()(p.nativeInputs, p.nativeSources, sourceGroups, p.projectDir);
-      if (sourceGroups.length) {
+    var digest = (file) => crypto.createHash("sha256").update(fs2.readFileSync(file)).digest("hex");
+    var optionalDigest = (file) => {
+      try {
+        return digest(file);
+      } catch (error) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    };
+    module2.exports = function nativeConfig(p, vite, engine, development) {
+      const mode = p.configuration === "debug" ? "development" : "production";
+      const dependencies = /* @__PURE__ */ new Map();
+      if (p.bundlerConfigPath) {
+        if (!path2.isAbsolute(p.bundlerConfigPath)) throw fail("invalid_input");
+        const expected = p.nativeSources.find((source) => source.Path === p.bundlerConfigPath)?.Digest;
+        if (!expected || digest(p.bundlerConfigPath) !== expected) throw fail("restart_required");
+        dependencies.set(p.bundlerConfigPath, expected);
+      }
+      function changed() {
         try {
-          if (nativeChanged()) throw fail("restart_required");
+          return [...dependencies].some(([file, hash]) => optionalDigest(file) !== hash);
         } catch {
-          throw fail("restart_required");
+          return true;
         }
       }
-      const pkg = JSON.parse(fs2.readFileSync(path2.join(p.projectDir, "package.json"), "utf8"));
-      if (typeof pkg.main !== "string" || fs2.realpathSync(path2.resolve(p.projectDir, pkg.main)) !== p.entry) throw fail("invalid_input");
-      process.env.NS_VITE_DIST_DIR = p.directory;
-      process.env.NS_HMR_PORT = String(p.port);
-      process.env.NS_HMR_HOST = p.hmrHost || "127.0.0.1";
-      process.env.NS_HTTPS = "false";
-      process.env.NATIVESCRIPT_BUNDLER_ENV = JSON.stringify({ [p.platform]: true, hmr: true });
-      process.argv.push("--", `--env.${p.platform}`, "--env.hmr");
-      let engine, vite;
-      try {
-        const engineFile = req.resolve("@nativescript/vite");
-        const enginePkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(engineFile), "package.json"), "utf8"));
-        if (enginePkg.version !== "8.0.21") throw fail("unavailable");
-        engine = await import(pathToFileURL(req.resolve("@nativescript/vite/typescript")).href);
-        vite = await import(pathToFileURL(req.resolve("vite")).href);
-        if (!/^8\./.test(vite.version)) throw fail("unavailable");
-        const framework = await import(pathToFileURL(req.resolve("@nativescript/vite/framework")).href);
-        require_native_update()(framework);
-      } catch (error) {
-        throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
-      }
-      function config() {
-        const result = engine.typescriptConfig({ mode: "development" }, { typeCheck: false });
+      async function config(command) {
+        if (changed()) throw fail("restart_required");
+        let result;
+        if (p.bundlerConfigPath) {
+          const loaded = await vite.loadConfigFromFile({ command, mode, isSsrBuild: false, isPreview: false }, p.bundlerConfigPath, p.projectDir, "silent");
+          if (!loaded || !loaded.config || typeof loaded.config !== "object" || Array.isArray(loaded.config)) throw fail("invalid_input");
+          result = loaded.config;
+          for (const file of loaded.dependencies) {
+            const real = fs2.realpathSync(file), hash = digest(real);
+            if (dependencies.has(real) && dependencies.get(real) !== hash) throw fail("restart_required");
+            dependencies.set(real, hash);
+          }
+          if (changed()) throw fail("restart_required");
+        } else result = engine.typescriptConfig({ mode }, { typeCheck: false });
+        if (result.envFile !== false) {
+          const envDir = path2.resolve(p.projectDir, result.envDir ?? ".");
+          for (const name of [".env", ".env.local", `.env.${mode}`, `.env.${mode}.local`]) {
+            const file = path2.join(envDir, name), hash = optionalDigest(file);
+            if (dependencies.has(file) && dependencies.get(file) !== hash) throw fail("restart_required");
+            dependencies.set(file, hash);
+          }
+        }
         const runtime = { main: "bundle.mjs", id: p.applicationID, ...p.android ? { android: p.android } : {} };
         const metadata = {
           name: "xplat-native-runtime-manifest",
@@ -18301,14 +18311,111 @@ var require_native = __commonJS({
             this.emitFile({ type: "asset", fileName: "package.json", source: JSON.stringify(runtime) });
           }
         };
-        result.plugins = [metadata, require_native_accept().plugin(), ...result.plugins.flat(Infinity).filter((plugin) => plugin?.name !== "nsvite-nsconfig-as-json")];
-        result.root = p.projectDir;
-        result.configFile = false;
-        result.cacheDir = p.cacheDirectory;
-        result.logLevel = "silent";
-        result.server = { ...result.server, host: "127.0.0.1", port: p.port, strictPort: true, open: false, https: void 0 };
-        result.build = { ...result.build, outDir: p.directory, emptyOutDir: true, watch: null };
-        return result;
+        const owned = {
+          root: p.projectDir,
+          configFile: false,
+          cacheDir: p.cacheDirectory,
+          mode,
+          logLevel: "silent",
+          build: { outDir: p.directory, emptyOutDir: true, write: true, watch: null },
+          server: { host: "127.0.0.1", port: p.port, strictPort: true, open: false, https: void 0, middlewareMode: false }
+        };
+        const ownership = {
+          name: "xplat-native-ownership",
+          enforce: "post",
+          config() {
+            return owned;
+          },
+          configResolved(config2) {
+            if (config2.root !== p.projectDir || path2.resolve(config2.cacheDir) !== p.cacheDirectory || config2.mode !== mode || path2.resolve(config2.build.outDir) !== p.directory || !config2.build.write || config2.build.watch || development && (config2.server.host !== "127.0.0.1" || config2.server.port !== p.port || !config2.server.strictPort || config2.server.https || config2.server.middlewareMode)) throw fail("invalid_input");
+            for (const options of [config2.build.rolldownOptions, config2.build.rollupOptions]) {
+              for (const output of [options?.output].flat()) if (output && (output.dir || output.file)) throw fail("invalid_input");
+            }
+          }
+        };
+        async function flatten(value) {
+          value = await value;
+          return Array.isArray(value) ? (await Promise.all(value.map(flatten))).flat() : [value];
+        }
+        const plugins = (await flatten(result.plugins ?? [])).filter((plugin) => plugin && plugin.name !== "nsvite-nsconfig-as-json");
+        return {
+          ...result,
+          ...owned,
+          build: { ...result.build, ...owned.build },
+          server: { ...result.server, ...owned.server },
+          plugins: [metadata, ...development ? [require_native_accept().plugin()] : [], ...plugins, ownership]
+        };
+      }
+      return { config, changed, dependencies };
+    };
+  }
+});
+
+// bridge/vite/native.cjs
+var require_native = __commonJS({
+  "bridge/vite/native.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var { createRequire: createRequire2 } = require("node:module");
+    var { pathToFileURL } = require("node:url");
+    var fail = (code) => Object.assign(new Error(), { code });
+    module2.exports = async function native(p, emit) {
+      const development = p.mode === "native";
+      if (!["native", "native-bundle"].includes(p.mode) || !["ios", "android"].includes(p.platform) || !["debug", "release"].includes(p.configuration) || development && p.configuration !== "debug" || ![p.projectDir, p.appPath, p.directory, p.cacheDirectory, p.entry].every(path2.isAbsolute) || development && (!Number.isInteger(p.port) || p.port < 1 || p.port > 65535) || !Array.isArray(p.nativeInputs ?? []) || !(p.nativeInputs ?? []).every(path2.isAbsolute) || !Array.isArray(p.nativeSources)) throw fail("invalid_input");
+      const req = createRequire2(path2.join(p.projectDir, "package.json"));
+      const sourceGroups = p.nativeSourceGroups ?? [];
+      if (!Array.isArray(sourceGroups) || !sourceGroups.every((g) => g && typeof g.name === "string" && path2.isAbsolute(g.path || "") && path2.isAbsolute(g.root || "") && Array.isArray(g.files) && g.files.every(path2.isAbsolute))) throw fail("invalid_input");
+      const nativeChanged = require_native_inputs()(p.nativeInputs ?? [], p.nativeSources, sourceGroups, p.projectDir);
+      if (sourceGroups.length) {
+        try {
+          if (nativeChanged()) throw fail("restart_required");
+        } catch {
+          throw fail("restart_required");
+        }
+      }
+      const pkg = JSON.parse(fs2.readFileSync(path2.join(p.projectDir, "package.json"), "utf8"));
+      if (typeof pkg.main !== "string" || fs2.realpathSync(path2.resolve(p.projectDir, pkg.main)) !== p.entry) throw fail("invalid_input");
+      process.env.NS_VITE_DIST_DIR = p.directory;
+      process.env.NS_HMR_PORT = String(p.port || 5173);
+      process.env.NS_HMR_HOST = p.hmrHost || "127.0.0.1";
+      process.env.NS_HTTPS = "false";
+      process.env.NATIVESCRIPT_BUNDLER_ENV = JSON.stringify({ [p.platform]: true, hmr: development, production: p.configuration === "release" });
+      if (p.configuration === "release") delete process.env.DEBUG;
+      process.argv.push("--", `--env.${p.platform}`, ...development ? ["--env.hmr"] : []);
+      let engine, vite;
+      try {
+        const engineFile = req.resolve("@nativescript/vite");
+        const enginePkg = JSON.parse(fs2.readFileSync(path2.join(path2.dirname(engineFile), "package.json"), "utf8"));
+        if (enginePkg.version !== "8.0.21") throw fail("unavailable");
+        engine = await import(pathToFileURL(req.resolve("@nativescript/vite/typescript")).href);
+        vite = await import(pathToFileURL(req.resolve("vite")).href);
+        if (!/^8\./.test(vite.version)) throw fail("unavailable");
+        const framework = await import(pathToFileURL(req.resolve("@nativescript/vite/framework")).href);
+        require_native_update()(framework);
+      } catch (error) {
+        throw fail(error.code === "invalid_input" ? "invalid_input" : "unavailable");
+      }
+      const configs = require_native_config()(p, vite, engine, development);
+      function manifest() {
+        const files = [];
+        function walk(dir) {
+          for (const entry2 of fs2.readdirSync(dir, { withFileTypes: true })) {
+            const file = path2.join(dir, entry2.name);
+            if (entry2.isDirectory()) walk(file);
+            else if (entry2.isFile()) files.push(file);
+            else throw fail("operation_failed");
+          }
+        }
+        walk(p.directory);
+        const entry = path2.join(p.directory, "bundle.mjs");
+        if (!files.includes(entry)) throw fail("operation_failed");
+        return { directory: p.directory, entry, files: files.sort() };
+      }
+      if (!development) {
+        await vite.build(await configs.config("build"));
+        if (configs.changed()) throw fail("restart_required");
+        return manifest();
       }
       let server;
       const nativeWatchers = [];
@@ -18323,15 +18430,10 @@ var require_native = __commonJS({
       lifetime.catch(() => {
       });
       try {
-        let walk = function(dir) {
-          for (const entry of fs2.readdirSync(dir, { withFileTypes: true })) {
-            const file = path2.join(dir, entry.name);
-            if (entry.isDirectory()) walk(file);
-            else if (entry.isFile()) files.push(file);
-            else throw fail("operation_failed");
-          }
+        server = await vite.createServer(await configs.config("serve"));
+        server.restart = async () => {
+          rejectLifetime(fail("restart_required"));
         };
-        server = await vite.createServer(config());
         server.httpServer.on("close", () => rejectLifetime(fail("server_closed")));
         server.httpServer.on("error", rejectLifetime);
         const directories = /* @__PURE__ */ new Map();
@@ -18341,12 +18443,22 @@ var require_native = __commonJS({
           directories.set(dir, recursive || directories.get(dir) || false);
         }
         for (const group of sourceGroups) directories.set(group.root, true);
+        for (const file of configs.dependencies.keys()) {
+          let dir = path2.dirname(file), recursive = false;
+          while (!fs2.existsSync(dir)) {
+            recursive = true;
+            const parent = path2.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+          }
+          directories.set(dir, recursive || directories.get(dir) || false);
+        }
         for (const [dir, recursive] of directories) {
           if (!fs2.existsSync(dir)) continue;
           const watcher = fs2.watch(dir, { recursive }, (_event, name) => {
             const file = name && path2.resolve(dir, String(name));
             try {
-              if (nativeChanged(file)) rejectLifetime(fail("restart_required"));
+              if (configs.changed() || nativeChanged(file)) rejectLifetime(fail("restart_required"));
             } catch {
               rejectLifetime(fail("restart_required"));
             }
@@ -18360,14 +18472,12 @@ var require_native = __commonJS({
           if (/^Port \d+ is already in use$/.test(error.message || "")) throw fail("EADDRINUSE");
           throw error;
         }
-        await vite.build(config());
+        await vite.build(await configs.config("build"));
         if (terminalError) throw terminalError;
-        const files = [];
-        walk(p.directory);
-        if (!files.includes(path2.join(p.directory, "bundle.mjs"))) throw fail("operation_failed");
+        if (configs.changed()) throw fail("restart_required");
         emit({
           type: "ready",
-          manifest: { directory: p.directory, entry: path2.join(p.directory, "bundle.mjs"), files: files.sort() },
+          manifest: manifest(),
           endpoint: { url: `http://127.0.0.1:${p.port}`, hmrURL: `ws://${p.hmrHost || "127.0.0.1"}:${p.port}/ns-hmr` }
         });
         await lifetime;
@@ -18389,7 +18499,7 @@ var require_vite = __commonJS({
     var { pathToFileURL } = require("node:url");
     var fail = (code) => Object.assign(new Error(), { code });
     module2.exports = async function bundle(p, emit) {
-      if (p.mode === "native") return require_native()(p, emit);
+      if (["native", "native-bundle"].includes(p.mode)) return require_native()(p, emit);
       for (const key2 of ["projectDir", "directory", "entry"]) if (!path2.isAbsolute(p[key2] || "")) throw fail("invalid_input");
       if (!["bundle", "watch"].includes(p.mode)) throw fail("invalid_input");
       const req = createRequire2(path2.join(p.projectDir, "package.json"));
@@ -18639,7 +18749,8 @@ var require_resolve = __commonJS({
         return fs2.realpathSync(resolved);
       }
       function collect(dir, owner, cfg2, resources, core = false) {
-        keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android"], "config");
+        keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android", "cli", "bundler", "bundlerConfigPath"], "config");
+        if (dir !== root && ["cli", "bundler", "bundlerConfigPath"].some((key2) => cfg2[key2] !== void 0)) fail("unavailable", "Bundler and CLI configuration belongs to the application");
         if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource", "SPMPackages"], "iOS config");
         if (cfg2.ios?.SPMPackages !== void 0) {
           let declared;
@@ -18759,6 +18870,27 @@ var require_resolve = __commonJS({
       serializable(cfg);
       if (cfg.buildPath !== void 0 && (typeof cfg.buildPath !== "string" || !cfg.buildPath)) fail("invalid_input", "Config buildPath must be a nonempty string");
       const normalized = { nativeConfig: cfg, appPath: directory(root, cfg.appPath, "app"), appResourcesPath: directory(root, cfg.appResourcesPath, "App_Resources"), android: cfg.android ?? {} };
+      if (cfg.cli !== void 0) {
+        keys(cfg.cli, ["packageManager"], "CLI config");
+        if (cfg.cli.packageManager !== void 0) {
+          if (!["bun", "npm", "pnpm", "yarn"].includes(cfg.cli.packageManager)) fail("invalid_input", "CLI packageManager must be bun, npm, pnpm or yarn");
+          normalized.packageManager = cfg.cli.packageManager;
+        }
+      }
+      if (cfg.bundler !== void 0 && cfg.bundler !== "vite") fail("unavailable", "Only the Vite bundler is supported");
+      if (cfg.bundlerConfigPath !== void 0 && (typeof cfg.bundlerConfigPath !== "string" || !cfg.bundlerConfigPath)) fail("invalid_input", "bundlerConfigPath must be a nonempty path");
+      let viteConfig = cfg.bundlerConfigPath;
+      if (viteConfig === void 0 && cfg.bundler === "vite") {
+        const found = ["ts", "js", "mjs", "cjs", "mts", "cts"].map((ext) => `vite.config.${ext}`).filter((name) => fs2.existsSync(path2.join(root, name)));
+        if (found.length > 1) fail("invalid_input", "Multiple Vite config files; select bundlerConfigPath explicitly");
+        viteConfig = found[0];
+      }
+      if (viteConfig !== void 0) {
+        const file = path2.resolve(root, viteConfig);
+        if (!/\.(?:[cm]?[jt]s)$/.test(file) || !fs2.existsSync(file) || !fs2.statSync(file).isFile()) fail("invalid_input", "Vite config must name an existing JavaScript or TypeScript file");
+        normalized.bundlerConfigPath = fs2.realpathSync(file);
+        read(normalized.bundlerConfigPath);
+      }
       collect(root, root, cfg, normalized.appResourcesPath);
       async function visit(dir, pkg, isRoot = false) {
         if (packages.has(dir)) return;

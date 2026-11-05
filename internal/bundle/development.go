@@ -28,6 +28,27 @@ type Development struct {
 	target   project.Target
 }
 
+// The installed engine reads main from the root package, not app/package.json.
+func nativeEntry(r project.Resolved) (string, error) {
+	var pkg struct{ Main string }
+	b, err := os.ReadFile(filepath.Join(r.Directory, "package.json"))
+	if err != nil {
+		return "", err
+	}
+	if json.Unmarshal(b, &pkg) != nil || pkg.Main == "" {
+		return "", workflow.ErrInvalid
+	}
+	entry, err := filepath.EvalSymlinks(filepath.Join(r.Directory, pkg.Main))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(r.Config.AppPath, entry)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", workflow.ErrInvalid
+	}
+	return entry, nil
+}
+
 func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, target project.Target, settings Request) (*Development, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -53,25 +74,13 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 			return nil, err
 		}
 	}
-	var pkg struct{ Main string }
-	b, err := os.ReadFile(filepath.Join(r.Directory, "package.json"))
-	if err != nil {
-		return nil, err
-	}
-	if json.Unmarshal(b, &pkg) != nil || pkg.Main == "" {
-		return nil, workflow.ErrInvalid
-	}
 	canonical, err := filepath.EvalSymlinks(r.Directory)
 	if err != nil {
 		return nil, err
 	}
-	entry, err := filepath.EvalSymlinks(filepath.Join(canonical, pkg.Main))
+	entry, err := nativeEntry(r)
 	if err != nil {
 		return nil, err
-	}
-	rel, err := filepath.Rel(r.Config.AppPath, entry)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, workflow.ErrInvalid
 	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
@@ -86,7 +95,8 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 		return nil, err
 	}
 	q := Request{ProjectDir: canonical, AppPath: r.Config.AppPath, Entry: entry, Platform: target.Platform,
-		Configuration: target.Configuration, ApplicationID: r.ApplicationID, Mode: "native", Port: port,
+		BundlerConfigPath: r.Config.BundlerConfigPath,
+		Configuration:     target.Configuration, ApplicationID: r.ApplicationID, Mode: "native", Port: port,
 		HMRHost: settings.HMRHost, Directory: filepath.Join(root, "bundle"), CacheDirectory: filepath.Join(root, "cache")}
 	q.NativeInputs = []string{r.Config.AppResourcesPath}
 	if target.Platform == "ios" {

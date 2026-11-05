@@ -29,9 +29,22 @@ be installed. No compiler is installed, no global compiler is selected, and no
 upstream CLI is invoked.
 
 The supported config fields are `id`, `appPath`, `appResourcesPath`, `buildPath`,
-app `ios.NativeSource`, and `android.v8Flags`/`android.markingMode`. The application identifier must be a
+app `ios.NativeSource`, app/plugin `ios.SPMPackages`, app `cli.packageManager`,
+`bundler`/`bundlerConfigPath`, and `android.v8Flags`/`android.markingMode`. The application identifier must be a
 dotted identifier. Paths become canonical absolute existing directories, defaulting
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
+
+`cli.packageManager` records `bun`, `npm`, `pnpm` or `yarn` as public project
+metadata. It does not authorize installation: every operation still requires
+already installed dependencies. Bundler/CLI fields in plugin configs reject.
+Only `bundler:'vite'` is supported. An explicit `bundlerConfigPath` must identify
+an existing JavaScript/TypeScript file; Resolve records its canonical absolute
+path and SHA-256 without executing it. With `bundler:'vite'` and no explicit path,
+exactly one conventional `vite.config.{ts,js,mjs,cjs,mts,cts}` is selected when
+present; multiple matches require an explicit choice. Without a selected file,
+the existing built-in bundlers retain their behavior. Vite config imports are
+loaded by the build/development adapter, not discovered as native contributions
+by Resolve. See [bundling](bundling.md) for the installed-engine contract.
 
 App `ios.NativeSource` is an array of unique `{name,path}` declarations. Relative
 paths resolve from the app, including workspace paths outside it. File globs or

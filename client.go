@@ -124,7 +124,7 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 		return Project{}, operationError("resolve", err)
 	}
 	result := Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID,
-		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, Android: AndroidRuntimeConfig(p.Config.Android)}}
+		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android)}}
 	for _, v := range p.Packages {
 		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, Android: AndroidRuntimeConfig(v.Android)})
 	}

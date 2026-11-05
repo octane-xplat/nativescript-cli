@@ -45,7 +45,11 @@ type Device struct {
 type ProjectConfig struct {
 	AppPath          string
 	AppResourcesPath string
-	Android          AndroidRuntimeConfig
+	// BundlerConfigPath is the selected absolute Vite configuration file, if any.
+	BundlerConfigPath string
+	// PackageManager records the app preference; operations never install packages.
+	PackageManager string
+	Android        AndroidRuntimeConfig
 }
 type AndroidRuntimeConfig struct {
 	V8Flags     string

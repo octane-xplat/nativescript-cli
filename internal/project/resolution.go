@@ -8,10 +8,12 @@ import (
 // Resolution data is read-only input to platform preparation. A successful
 // resolution describes files; it does not assert that they have been prepared.
 type Config struct {
-	NativeConfig     json.RawMessage
-	AppPath          string
-	AppResourcesPath string
-	Android          AndroidConfig
+	NativeConfig      json.RawMessage
+	AppPath           string
+	AppResourcesPath  string
+	BundlerConfigPath string
+	PackageManager    string
+	Android           AndroidConfig
 }
 type AndroidConfig struct {
 	V8Flags     string `json:"v8Flags,omitempty"`

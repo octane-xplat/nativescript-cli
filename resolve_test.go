@@ -169,6 +169,52 @@ func TestResolveTypeScriptAndOptionalDependencies(t *testing.T) {
 	}
 }
 
+func TestResolveViteConfiguration(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.viteconfig',cli:{packageManager:'bun'},bundler:'vite',bundlerConfigPath:'vite.config.mts'}`)
+	// Resolve records the file without evaluating trusted Vite/plugin code.
+	resolutionFile(t, root, "vite.config.mts", `throw new Error('CONFIG_WAS_EXECUTED'); export default {};`)
+	c, _ := ns.New(ns.Options{})
+	p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || p.Config.PackageManager != "bun" || p.Config.BundlerConfigPath == "" {
+		t.Fatal(p, err)
+	}
+	var found bool
+	for _, source := range p.Sources {
+		if source.Path == p.Config.BundlerConfigPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Vite config missing from source identity")
+	}
+	resolutionFile(t, root, "vite.config.mts", `export default {};`)
+	changed, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == p.Revision {
+		t.Fatal("stale Vite configuration identity", err)
+	}
+	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.viteconfig',bundler:'vite'}`)
+	p, err = c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || p.Config.BundlerConfigPath != changed.Config.BundlerConfigPath {
+		t.Fatal("default Vite config selection", p, err)
+	}
+	for _, tc := range []struct {
+		config string
+		kind   error
+	}{
+		{`{bundler:'webpack'}`, ns.ErrUnavailable},
+		{`{bundlerConfigPath:'missing.mts'}`, ns.ErrInvalidInput},
+		{`{bundlerConfigPath:''}`, ns.ErrInvalidInput},
+		{`{cli:{packageManager:'arbitrary-command'}}`, ns.ErrInvalidInput},
+		{`{cli:{other:true}}`, ns.ErrUnavailable},
+	} {
+		resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.example.viteconfig',...`+tc.config+`}`)
+		if _, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, tc.kind) {
+			t.Fatal(tc.config, err)
+		}
+	}
+}
+
 func TestResolveInstalledTypeScriptCompiler(t *testing.T) {
 	compiler := os.Getenv("NS_CONFIG_COMPILER_DIR")
 	if compiler == "" {
