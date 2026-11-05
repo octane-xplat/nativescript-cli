@@ -211,3 +211,21 @@ receipts. A successful bundle records emitted file hashes and preserved embeddin
 globals. Failures retain typed error text and a private request for diagnostics,
 without logging environment values or emitted application code. Reports and
 cache destinations must be new; existing fixtures are never removed.
+
+Qualify overlapping full-source iOS/Android Vite sessions without native tools:
+
+```sh
+go run ./tools/qualification/source-lock/development \
+  ABSOLUTE_APP_DIR ABSOLUTE_REPOSITORY_DIR ABSOLUTE_NEW_CACHE ABSOLUTE_NEW_REPORT
+```
+
+The selected source fixture and any diagnostic source corrections need their
+own explicit provenance. This harness checks cold readiness, initial bundle
+files, actual SDK module routes, independent listening endpoints and repeated
+owned shutdown. Closing iOS must leave Android serving; both outputs/endpoints
+must retire. Captured private requests allow input-identity failures to be
+traced. Expected explicit cancellation is recorded through successful cleanup;
+additional close/cleanup failures remain failures. No app modules execute on a
+guest, and the harness does not establish runtime HMR or public Run acceptance.
+Only response hashes are saved; application code and environment values are not
+printed. Existing fixtures/reports are never removed.
