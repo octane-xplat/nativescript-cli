@@ -24,7 +24,7 @@ import (
 func TestInstalledNativeDevelopmentServer(t *testing.T) {
 	installed := os.Getenv("NS_NATIVE_VITE_DIR")
 	if installed == "" {
-		t.Skip("set NS_NATIVE_VITE_DIR to an installed @nativescript/vite8.0.21/Vite8/core9.1.3 consumer")
+		t.Skip("set NS_NATIVE_VITE_DIR to an installed @nativescript/vite8.0.20 or 8.0.21/Vite8/core9.1.3 consumer")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

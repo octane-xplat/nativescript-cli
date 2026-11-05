@@ -31,7 +31,7 @@ func TestInstalledNativeProjectConfiguration(t *testing.T) {
 	}()
 	installed := os.Getenv("NS_NATIVE_VITE_DIR")
 	if installed == "" {
-		t.Skip("requires installed @nativescript/vite8.0.21/Vite8/core9.1.3")
+		t.Skip("requires installed @nativescript/vite8.0.20 or 8.0.21/Vite8/core9.1.3")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

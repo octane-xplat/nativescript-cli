@@ -1,6 +1,6 @@
 'use strict';
 
-// Version-scoped adapter for the 8.0.21 TypeScript strategy. Its common prologue
+// Version-scoped adapter for the 8.0.20/8.0.21 TypeScript strategy. Its common prologue
 // publishes transformed source; its fallback tail must not replace that source
 // with an empty placeholder and manufacture a second transaction on re-fetch.
 module.exports = framework => {

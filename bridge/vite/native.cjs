@@ -37,7 +37,7 @@ module.exports = async function native(p, emit) {
     const engineFile = req.resolve('@nativescript/vite');
     const enginePkg = JSON.parse(fs.readFileSync(path.join(path.dirname(engineFile),'package.json'),'utf8'));
     // Version-qualified engine and matching Vite major; never invoke upstream CLI.
-    if (enginePkg.version !== '8.0.21') throw fail('unavailable');
+    if (!['8.0.20','8.0.21'].includes(enginePkg.version)) throw fail('unavailable');
     engine = await import(pathToFileURL(req.resolve('@nativescript/vite/typescript')).href);
     vite = await import(pathToFileURL(req.resolve('vite')).href);
     if (!/^8\./.test(vite.version)) throw fail('unavailable');
