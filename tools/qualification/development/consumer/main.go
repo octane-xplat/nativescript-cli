@@ -50,6 +50,17 @@ func (r *reservation) release() error {
 	r.id = ""
 	return nil
 }
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (r *reservation) fixtureState() (iosFixtureState, string, error) {
+	out, query := exec.Command("xcrun", "simctl", "get_app_container", r.device, developmentAppID, "app").Output()
+	state, err := classifyIOSFixture(out, query, pathExists)
+	return state, strings.TrimSpace(string(out)), err
+}
+
 func (r *reservation) acquire(ctx context.Context, device bool) error {
 	if err := r.release(); err != nil {
 		return err
@@ -82,8 +93,24 @@ func (r *reservation) acquire(ctx context.Context, device bool) error {
 			return fmt.Errorf("owned boot readiness failed: %w: %s", err, out)
 		}
 		if !r.installationOwned {
-			if _, err := exec.Command("xcrun", "simctl", "get_app_container", r.device, "org.example.godevelopment", "app").Output(); err == nil {
+			state, path, err := r.fixtureState()
+			if err != nil {
+				return err
+			}
+			switch state {
+			case iosFixturePresent:
 				return errors.New("refusing an existing fixture app installation")
+			case iosFixtureStale:
+				if out, err := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput(); err != nil {
+					return fmt.Errorf("stale fixture registration uninstall failed: %w: %s", err, out)
+				}
+				if state, _, err = r.fixtureState(); err != nil {
+					return err
+				}
+				if state != iosFixtureAbsent {
+					return errors.New("stale fixture registration survived uninstall")
+				}
+				r.phases = append(r.phases, map[string]string{"action": "stale-registration-retired", "app": developmentAppID, "path": path})
 			}
 			r.installationOwned = true
 		}
@@ -102,14 +129,31 @@ func (r *reservation) cleanup() error {
 		}
 	}
 	if r.booted && r.installationOwned {
-		if _, present := exec.Command("xcrun", "simctl", "get_app_container", r.device, "org.example.godevelopment", "app").Output(); present == nil {
-			out, uninstall := exec.Command("xcrun", "simctl", "uninstall", r.device, "org.example.godevelopment").CombinedOutput()
-			if uninstall != nil {
-				err = fmt.Errorf("owned app uninstall failed: %w: %s", uninstall, out)
-			} else {
-				r.phases = append(r.phases, map[string]string{"action": "uninstall", "app": "org.example.godevelopment"})
+		var failure error
+		state, _, stateErr := r.fixtureState()
+		if stateErr != nil {
+			failure = stateErr
+		} else {
+			if state != iosFixtureAbsent {
+				out, uninstallErr := exec.Command("xcrun", "simctl", "uninstall", r.device, developmentAppID).CombinedOutput()
+				if uninstallErr != nil {
+					failure = fmt.Errorf("owned app uninstall failed: %w: %s", uninstallErr, out)
+				} else {
+					r.phases = append(r.phases, map[string]string{"action": "uninstall", "app": developmentAppID})
+					switch state, _, stateErr = r.fixtureState(); {
+					case stateErr != nil:
+						failure = stateErr
+					case state != iosFixtureAbsent:
+						failure = errors.New("owned app survived uninstall")
+					}
+				}
+			}
+			if failure == nil {
+				r.installationOwned = false
+				r.phases = append(r.phases, map[string]string{"action": "uninstall-absence-verified", "app": developmentAppID})
 			}
 		}
+		err = errors.Join(err, failure)
 	}
 	return errors.Join(err, r.release())
 }
@@ -168,6 +212,7 @@ func run() (result error) {
 		evidence["embeddingGlobalsPreserved"] = now == cwd && reflect.DeepEqual(env, os.Environ()) && log.Writer() == writer && log.Flags() == flags && log.Prefix() == prefix
 		evidence["reservations"] = reservation.phases
 		evidence["ownedBootRetired"] = !reservation.booted
+		evidence["ownedInstallationRetired"] = !reservation.installationOwned
 		evidence["passed"] = result == nil
 		if result != nil {
 			evidence["failure"] = result.Error()
@@ -178,7 +223,7 @@ func run() (result error) {
 	client, err := ns.New(ns.Options{Sink: func(ctx context.Context, event ns.Event) error {
 		fmt.Printf("EVENT %s %s\n", event.Stage, event.Kind)
 		if event.Stage == "launch" && event.Kind == ns.StageCompleted {
-			container, err := exec.CommandContext(ctx, "xcrun", "simctl", "get_app_container", id, "org.example.godevelopment", "data").Output()
+			container, err := exec.CommandContext(ctx, "xcrun", "simctl", "get_app_container", id, developmentAppID, "data").Output()
 			if err != nil {
 				return err
 			}
@@ -246,7 +291,7 @@ func run() (result error) {
 			return bindErr
 		}
 		listener.Close()
-		if _, err := exec.Command("xcrun", "simctl", "get_app_container", id, "org.example.godevelopment", "app").Output(); err == nil {
+		if state, _, err := reservation.fixtureState(); err != nil || state != iosFixtureAbsent {
 			return errors.New("rejected operation installed an app")
 		}
 		evidence["observerErrorPreserved"] = true

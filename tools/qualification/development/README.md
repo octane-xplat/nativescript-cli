@@ -31,7 +31,12 @@ events. Do not wrap it in a build or device reservation: it releases compilation
 capacity before acquiring the simulator, and shuts down its owned boot before
 the next compilation phase. It refuses an existing app installation, retains
 ownership across reinstallation, follows the current data container after each
-launch, and uninstalls its app before final shutdown/release. Signals cancel its
+launch, and uninstalls its app before final shutdown/release, verifying absence
+before ownership retires (`ownedInstallationRetired`). After an uninstall and
+shutdown the simulator has been observed to re-list the fixture with a container
+path that no longer exists. Such a byte-less fixture registration is retired and
+recorded as `stale-registration-retired`; a registration with real bytes is
+still refused. Signals cancel its
 owned session and still run cleanup.
 
 Assertions cover a fresh native build, advancing application heartbeat, a real

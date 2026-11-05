@@ -93,6 +93,31 @@ func noAndroidEmulator(ctx context.Context, sdk string, run qualificationCommand
 	return errors.New("an Android emulator process is already running or starting; coordinate or wait")
 }
 
+type iosFixtureState int
+
+const (
+	iosFixtureAbsent iosFixtureState = iota
+	iosFixturePresent
+	iosFixtureStale
+)
+
+// simctl exits non-zero when the fixture is not installed. A zero exit naming a
+// container path that no longer exists is a stale launch-services registration:
+// the owned files are gone yet the record would still refuse the next run.
+func classifyIOSFixture(output []byte, err error, exists func(string) bool) (iosFixtureState, error) {
+	if err != nil {
+		return iosFixtureAbsent, nil
+	}
+	path := strings.TrimSpace(string(output))
+	if path == "" || !filepath.IsAbs(path) {
+		return iosFixtureAbsent, errors.New("invalid fixture container response")
+	}
+	if exists(path) {
+		return iosFixturePresent, nil
+	}
+	return iosFixtureStale, nil
+}
+
 func packagePresence(output []byte, err error) (bool, error) {
 	text := strings.TrimSpace(string(output))
 	if err != nil {

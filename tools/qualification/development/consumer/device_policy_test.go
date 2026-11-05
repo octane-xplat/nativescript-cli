@@ -117,6 +117,30 @@ func TestBusyOrUnknownAndroidHostCannotStartAnotherEmulator(t *testing.T) {
 	}
 }
 
+func TestStaleSimulatorRegistrationsAreNotInstallations(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		output  string
+		err     error
+		exists  bool
+		want    iosFixtureState
+		wantErr bool
+	}{
+		{"absent", "", policyExit(1), false, iosFixtureAbsent, false},
+		{"present", "/devices/UDID/data/Containers/Bundle/Application/FIXTURE/NativeScriptApp.app\n", nil, true, iosFixturePresent, false},
+		{"stale", "/devices/UDID/data/Containers/Bundle/Application/FIXTURE/NativeScriptApp.app\n", nil, false, iosFixtureStale, false},
+		{"empty", "\n", nil, false, iosFixtureAbsent, true},
+		{"relative", "NativeScriptApp.app\n", nil, true, iosFixtureAbsent, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			state, err := classifyIOSFixture([]byte(scenario.output), scenario.err, func(string) bool { return scenario.exists })
+			if state != scenario.want || (err != nil) != scenario.wantErr {
+				t.Fatalf("state=%v err=%v", state, err)
+			}
+		})
+	}
+}
+
 func TestInstallationRetirementRequiresOwnershipAndVerifiedAbsence(t *testing.T) {
 	for _, scenario := range []struct {
 		name      string
