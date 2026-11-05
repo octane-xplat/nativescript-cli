@@ -51,3 +51,30 @@ It contains emitted module/bootstrap hashes and structural assertions, never raw
 transformed source or dev-tool authentication defines. Internal session Close
 reports expected cancellation/process-exit signals; the test rejects additional
 failures and verifies output/server retirement and repeated Close.
+
+## Pinned source and original Bamboo config
+
+`project-pinned.py SOURCE WORKSPACE` consumes a read-only b585679 source snapshot
+and an already staged task-owned `WORKSPACE/apps/mobile`. Install the exact
+published Bamboo prerequisites there with scripts disabled first:
+
+```sh
+bun add --cwd .cache/pinned-workspace/apps/mobile --dev --offline --ignore-scripts @octane-xplat/bamboo@0.19.0 @bamboocss/dev@1.60.1
+python3 tools/qualification/vite-config/project-pinned.py /path/to/pinned-source .cache/pinned-workspace
+NS_XPLAT_VITE_PROFILE=pinned NS_XPLAT_VITE_DIR="$PWD/.cache/pinned-workspace/apps/mobile" go test -race ./internal/bundle -run TestInstalledXplatProjectConfiguration -count=1 -v
+```
+
+The projector copies CLI/Bamboo sources and bundles local preset entries with
+Bun while leaving package dependencies external. It preserves the published
+packages as backup directories and resolves their installed dependencies. This
+is an explicit source projection, not the consumer's release packaging procedure.
+The original mobile Vite config and shared Bamboo config remain byte-identical;
+`source-projection.json` records source and generated-entry hashes. The CLI entry
+source must match the pinned SHA. The workspace must be new to this projector.
+
+The host check preserves the workspace-relative Bamboo root, transforms an
+Octane component and checks an emitted probe CSS asset. Visual-capture and docs
+demo branches are disabled explicitly. Native HMR deliberately leaves CSS as an
+asset; the test does not infer actual native CSS application, component lifecycle
+or full app behavior. The broader consumer patches and native/runtime acceptance
+remain separate requirements.

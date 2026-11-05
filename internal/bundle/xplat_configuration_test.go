@@ -27,6 +27,7 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 	if installed == "" {
 		t.Skip("requires independent installed Xplat preset fixture")
 	}
+	pinned := os.Getenv("NS_XPLAT_VITE_PROFILE") == "pinned"
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	root, err := filepath.Abs("../..")
@@ -34,6 +35,23 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
+	if pinned {
+		workspace := dir
+		dir = filepath.Join(workspace, "apps/mobile")
+		if err := os.MkdirAll(filepath.Join(workspace, "packages/app/src"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"bamboo.config.ts", "src/probe.tsx"} {
+			bytes, err := os.ReadFile(filepath.Join(installed, "../../packages/app", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(workspace, "packages/app", name), string(bytes))
+		}
+		if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(workspace, "node_modules")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, name := range []string{"src", "App_Resources"} {
 		if err := os.MkdirAll(filepath.Join(dir, name), 0700); err != nil {
 			t.Fatal(err)
@@ -50,6 +68,9 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(filepath.Join(root, "assets"))}, CacheDir: t.TempDir()}}
+	if pinned {
+		a.Host.Environment = map[string]string{"VISUAL_CAPTURE_URL": "", "XPLAT_DOCS_DEMOS": ""}
+	}
 	r, err := (resolver.Resolver{Host: a.Host}).Resolve(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -69,12 +90,35 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("Octane module: %d %v", response.StatusCode, err)
 	}
-	if !strings.Contains(string(body), "XPLAT_PRESET_20261105") || strings.Contains(string(body), "<label") || !strings.Contains(string(body), "octane") {
+	marker := "XPLAT_PRESET_20261105"
+	if pinned {
+		marker = "PINNED_PRESET_20261105"
+	}
+	if !strings.Contains(string(body), marker) || strings.Contains(string(body), "<label") || !strings.Contains(string(body), "octane") {
 		t.Fatal("preset define/Octane JSX transform missing")
 	}
 	bootstrap, err := os.ReadFile(dev.Ready.Manifest.Entry)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var cssHashes = map[string]string{}
+	if pinned {
+		// The engine deliberately skips CSS AST inlining under HMR. Prove the
+		// emitted asset here; actual native CSS application is a separate gate.
+		for _, file := range dev.Ready.Manifest.Files {
+			if strings.HasSuffix(file, ".css") {
+				data, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(data), "--color-primary") && strings.Contains(string(data), "--space-4") {
+					cssHashes[filepath.Base(file)] = fmt.Sprintf("%x", sha256.Sum256(data))
+				}
+			}
+		}
+		if len(cssHashes) == 0 {
+			t.Fatal("Bamboo probe CSS asset missing")
+		}
 	}
 	// Persist hashes and structural assertions only: dev tooling can inject
 	// authentication defines, so never log/store arbitrary transformed source.
@@ -83,6 +127,11 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 			t.Fatal("evidence path must be absolute")
 		}
 		proof := map[string]any{"moduleSHA256": fmt.Sprintf("%x", sha256.Sum256(body)), "moduleBytes": len(body), "bootstrapSHA256": fmt.Sprintf("%x", sha256.Sum256(bootstrap)), "entry": filepath.Base(dev.Ready.Manifest.Entry), "configuredDefinePresent": true, "jsxRemoved": true, "octaneReferencesPresent": true, "scope": "actual published Xplat preset/Octane host helper; no native/device/pinned-source/Bamboo claim"}
+		if pinned {
+			proof["scope"] = "pinned source projection, original Vite/Bamboo configs, Octane module and emitted Bamboo CSS asset; host only, no native CSS application/full app claim"
+			proof["bambooCSSAssets"] = cssHashes
+			delete(proof, "configuredDefinePresent")
+		}
 		bytes, err := json.MarshalIndent(proof, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -96,7 +145,7 @@ func TestInstalledXplatProjectConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Logf("actual published Xplat preset served compiled Octane module (%d bytes), native bootstrap=%s", len(body), filepath.Base(dev.Ready.Manifest.Entry))
+	t.Logf("Xplat preset served compiled Octane module (%d bytes), native bootstrap=%s, pinned profile=%t", len(body), filepath.Base(dev.Ready.Manifest.Entry), pinned)
 	// Internal sessions report cancellation and its terminated process exit.
 	// Accept only those signals; any additional output/cleanup failure still fails.
 	err = dev.Session.Close(context.Background())
