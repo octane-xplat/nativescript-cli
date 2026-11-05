@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {projection,sourceRecords,inside}=require('./stage-frozen.cjs');
+const {projection,sourceRecords,inside,requireSpace}=require('./stage-frozen.cjs');
 function fixture(){
  const app={name:'app',version:'1.0.0',dependencies:{'source-plugin':'workspace:*'},devDependencies:{compiler:'1',nativescript:'9.1.1'}};
  const lock={packages:{app:['app@workspace:apps/mobile'],'source-plugin':['source-plugin@workspace:packages/plugin'],compiler:['compiler@1.0.0'],peer:['peer@1.0.0']}};
@@ -29,4 +29,9 @@ test('source inventory preserves internal link text and detects source identity 
 });
 test('cache containment excludes the cache root and similarly prefixed siblings',()=>{
  assert.equal(inside('/cache','/cache/fresh'),true);assert.equal(inside('/cache','/cache'),false);assert.equal(inside('/cache','/cache-other/fresh'),false);assert.equal(inside('/cache','/outside'),false);
+});
+
+test('frozen install refuses insufficient space before staging',()=>{
+ assert.throws(()=>requireSpace(3*1024**3-1),/at least 3 GiB/);
+ assert.doesNotThrow(()=>requireSpace(3*1024**3));
 });

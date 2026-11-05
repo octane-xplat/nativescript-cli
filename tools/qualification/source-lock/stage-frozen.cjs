@@ -51,6 +51,10 @@ function installed(from,name){
  }
  return undefined;
 }
+function requireSpace(available){
+ // The pinned filtered install occupies about 2 GiB before temporary overhead.
+ if(available<3*1024**3)throw new Error('Frozen staging requires at least 3 GiB available; existing fixtures are preserved');
+}
 function main(){
  if(process.argv.length!==5)throw new Error('usage: stage-frozen ORIGINAL_SOURCE INSTALLED_TYPESCRIPT_DIR NEW_PROJECT_CACHE_DIR');
  const source=fs.realpathSync(process.argv[2]),ts=require(path.resolve(process.argv[3])),target=path.resolve(process.argv[4]);
@@ -63,6 +67,7 @@ function main(){
  if(hash(originalLock)!==lockSHA256)throw new Error('Expected original '+reference+' Bun lock bytes');
  assertUnmaterialized(source,parentGitlinks);
  if(tree(source,parentGitlinks).toString('hex')!==parentTree)throw new Error('Source snapshot does not match original parent Git tree');
+ const space=fs.statfsSync(parent);requireSpace(space.bavail*space.bsize);
  const parsed=ts.parseConfigFileTextToJson('bun.lock',originalLock.toString('utf8'));
  if(parsed.error||!parsed.config?.packages)throw new Error('Installed JSONC parser did not read original lock');
  const lock=parsed.config,workspace=folder=>{
@@ -110,5 +115,5 @@ function main(){
  writeNew(path.join(target,'stage-proof.json'),proof);
  console.log(JSON.stringify({scope:proof.scope,directory:target,sourceFilesCompared:proof.sourceFilesCompared,relativeSymlinksPreserved:proof.relativeSymlinksPreserved,unchangedPackageLockRecords:proof.unchangedPackageLockRecords,workspaceFilters:selection.folders.length,lockUnchanged}));
 }
-module.exports={projection,sourceRecords,inside,compilerInputs};
+module.exports={projection,sourceRecords,inside,compilerInputs,requireSpace};
 if(require.main===module)main();

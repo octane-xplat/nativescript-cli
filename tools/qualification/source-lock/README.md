@@ -83,7 +83,10 @@ retains original package records, overrides, catalogs and patch declarations.
 The install uses isolated linking, the projected frozen lock, offline cache,
 disabled lifecycle scripts and disabled env-file loading. Darwin uses APFS
 clonefile; other hosts have only a copyfile implementation, without host-runtime
-qualification. Installation still requires disk space and complete cache inputs.
+qualification. Staging requires at least 3 GiB free before creating a destination or running
+Bun; the pinned filtered install occupies about 2 GiB before temporary overhead.
+This preflight is a lower bound, not a disk reservation. Complete offline cache
+inputs remain required.
 
 One recorded app-path symlink supplies audio-context's unchanged app-relative
 local Swift package declaration from the existing sounds dependency lookup.
