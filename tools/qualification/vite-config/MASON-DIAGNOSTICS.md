@@ -130,6 +130,29 @@ four lifecycle snapshots and owned cleanup/PID absence. Assertions are specific
 to the exact retained iPhone probe, including density3. Production source
 integration, other native views and the full original application remain separate.
 
+Prepare a reviewable maintained-source repair from the package-specific tag
+`core-v1.0.0-beta.5`, not a generic cache directory labeled beta.5. Supply a
+receipt whose source file SHA-256 and Git blob identities were checked against
+the upstream tagged tree:
+
+```sh
+python3 tools/qualification/vite-config/prepare-mason-source-repair.py \
+  /absolute/verified-source-inputs.json /absolute/project/.cache/new-copy \
+  /absolute/new-review.patch
+node tools/qualification/vite-config/verify-mason-source-repair.cjs \
+  /absolute/project/.cache/new-copy /absolute/typescript-5.9.3-package \
+  /absolute/retained-native-build.json /absolute/new-verification.json
+```
+
+The preparer checks the five reviewed source/packaging identities, produces a
+two-file patch and verifies application only to new project-cache copies. It
+never edits the source checkout. The patch selects the candidate only for iOS;
+the original Apple non-iOS branch and non-Apple early return remain. The verifier
+checks helper identity, executes the actual upstream helper-source projection,
+compares the tagged/native method after explicit alias/define normalization and
+exercises platform dispatch with fixtures. This is source/producer correspondence,
+not a full package build or authorization to change another repository.
+
 To stage a fresh numeric trace while preserving an old fixture:
 
 ```sh
