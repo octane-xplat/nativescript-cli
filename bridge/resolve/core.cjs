@@ -12,6 +12,6 @@ exports.supported=(pkg,dir,read)=>{
  let source;try{source=read(path.join(dir,h.script));}catch{return false;}
  return crypto.createHash('sha256').update(source).digest('hex')==='97baeb497a77db8909e7fd39f58dd5f3390516aadf9cb85bd30db58009c7bdd7';
 };
-// These are metadata-use inventories/types, not runtime resources. The current
-// backend generates full metadata and does not implement pruning from these lists.
-exports.inventory=(relative)=>relative==='platforms/ios/native-api-usage.json'||relative==='platforms/android/native-api-usage.json'||relative.startsWith('platforms/ios/typings/')&&relative.endsWith('.d.ts');
+// Usage declarations share the validated plugin contract in the resolver.
+// Core's generated ambient types remain read-only source identities.
+exports.inventory=(relative)=>relative.startsWith('platforms/ios/typings/')&&relative.endsWith('.d.ts');

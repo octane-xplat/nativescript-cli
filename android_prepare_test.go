@@ -121,6 +121,37 @@ func TestAndroidAppGoogleServicesConfiguration(t *testing.T) {
 	}
 }
 
+func TestAndroidPluginUsageDoesNotActivateFiltering(t *testing.T) {
+	root, client, request := androidApp(t, false)
+	if err := os.Remove(filepath.Join(root, "node_modules/native-plugin/platforms/android/whitelist.mdg")); err != nil {
+		t.Fatal(err)
+	}
+	usage := "node_modules/native-plugin/platforms/android/native-api-usage.json"
+	resolutionFile(t, root, usage, `{"uses":["example.used:*"],"blacklist":["example.hidden:*"]}`)
+	prepared, err := client.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"whitelist.mdg", "blacklist.mdg"} {
+		if _, err := os.Stat(filepath.Join(prepared.NativeDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("plugin hint activated metadata filtering", err)
+		}
+	}
+	if err := filepath.WalkDir(prepared.NativeDir, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.Name() == "native-api-usage.json" {
+			t.Fatal("plugin hint was copied as an instruction or app resource")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolutionFile(t, root, usage, `{"uses":["example.changed:*"]}`)
+	changed, err := client.Prepare(context.Background(), request)
+	if err != nil || changed.Identity.Revision == prepared.Identity.Revision {
+		t.Fatal("native preparation did not invalidate on hint changes", err)
+	}
+}
+
 func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
 	root, c, q := androidApp(t, false)
 	p, e := c.Prepare(context.Background(), q)

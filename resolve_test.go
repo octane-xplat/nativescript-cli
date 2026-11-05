@@ -529,6 +529,110 @@ func TestResolveAppResourceIdentity(t *testing.T) {
 	}
 }
 
+func TestResolvePluginNativeUsageInventory(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"usage-plugin":"1"}}`)
+	plugin := "node_modules/usage-plugin"
+	resolutionFile(t, root, plugin+"/package.json", `{"name":"usage-plugin","version":"1","nativescript":{"platforms":{"ios":"9","android":"9"}}}`)
+	valid := `{"uses":["example.*:*"],"blacklist":["example.internal.*:*"]}`
+	for _, platform := range []string{"ios", "android"} {
+		resolutionFile(t, root, plugin+"/platforms/"+platform+"/native-api-usage.json", valid)
+	}
+	client, _ := ns.New(ns.Options{})
+	ctx := context.Background()
+	resolved, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(resolved.Contributions) != 0 {
+		t.Fatal("plugin hints became native/resource contributions", err)
+	}
+	for _, platform := range []string{"ios", "android"} {
+		file, err := filepath.EvalSymlinks(filepath.Join(root, plugin, "platforms", platform, "native-api-usage.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, source := range resolved.Sources {
+			if source.Path == file && source.Digest == fmt.Sprintf("%x", sha256.Sum256([]byte(valid))) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("plugin hint identity missing")
+		}
+	}
+	android := plugin + "/platforms/android/native-api-usage.json"
+	resolutionFile(t, root, android, `{"uses":["example.changed.*:*"]}`)
+	changed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || changed.Revision == resolved.Revision {
+		t.Fatal("usage declaration changes did not invalidate resolution", err)
+	}
+	if err := os.Remove(filepath.Join(root, android)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+	if err != nil || removed.Revision == changed.Revision {
+		t.Fatal("usage declaration removal did not invalidate resolution", err)
+	}
+	// Validation also applies before package-owned Sources bypass app compilation.
+	resolutionFile(t, root, plugin+"/platforms/ios/Package.swift", "// swift-tools-version:5.9")
+	for _, invalid := range []string{`{"uses":"PRIVATE_USAGE_MARKER"}`, `{"uses":[null]}`, `{"blacklist":["PRIVATE_USAGE_MARKER\nother"]}`, `{"uses":[""]}`} {
+		resolutionFile(t, root, plugin+"/platforms/ios/native-api-usage.json", invalid)
+		_, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root})
+		if !errors.Is(err, ns.ErrInvalidInput) || strings.Contains(err.Error(), "PRIVATE_USAGE_MARKER") {
+			t.Fatal("invalid hint schema accepted or leaked", err)
+		}
+	}
+	resolutionFile(t, root, plugin+"/platforms/ios/native-api-usage.json", `{"whitelist":["example:*"]}`)
+	if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("app schema accepted as plugin hint", err)
+	}
+	resolutionFile(t, root, plugin+"/platforms/ios/native-api-usage.json", valid)
+	for _, platform := range []string{"iOS", "Android"} {
+		file := "App_Resources/" + platform + "/native-api-usage.json"
+		resolutionFile(t, root, file, `{"whitelist-plugins-usages":true,"whitelist":["example:*"]}`)
+		if _, err := client.Resolve(ctx, ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+			t.Fatal("unimplemented app filtering was silently accepted", err)
+		}
+		if err := os.Remove(filepath.Join(root, file)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestResolveGestureProducerMarker(t *testing.T) {
+	root := resolutionApp(t)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"@nativescript-community/gesturehandler":"2.1.0"}}`)
+	plugin := "node_modules/@nativescript-community/gesturehandler"
+	manifest := `{"name":"@nativescript-community/gesturehandler","version":"2.1.0","nativescript":{"platforms":{"android":"9"}}}`
+	resolutionFile(t, root, plugin+"/package.json", manifest)
+	marker := plugin + "/platforms/android/sync"
+	resolutionFile(t, root, marker, "force livesync\n")
+	client, _ := ns.New(ns.Options{})
+	resolved, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+	if err != nil || len(resolved.Contributions) != 0 {
+		t.Fatal("qualified inert marker became an input or instruction", err)
+	}
+	canonical, err := filepath.EvalSymlinks(filepath.Join(root, marker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked := false
+	for _, source := range resolved.Sources {
+		tracked = tracked || source.Path == canonical
+	}
+	if !tracked {
+		t.Fatal("producer marker identity missing")
+	}
+	resolutionFile(t, root, marker, "changed marker")
+	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("changed producer marker accepted", err)
+	}
+	resolutionFile(t, root, marker, "force livesync\n")
+	resolutionFile(t, root, plugin+"/package.json", strings.Replace(manifest, "2.1.0", "2.1.1", 1))
+	if _, err := client.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, ns.ErrUnavailable) {
+		t.Fatal("unqualified marker version accepted", err)
+	}
+}
+
 func TestResolveRejectsLossyCanonicalConfig(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "nativescript.config.cjs", `module.exports={id:'org.test.ota',appPath:'app',ios:undefined}`)

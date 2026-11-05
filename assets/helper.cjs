@@ -18783,7 +18783,7 @@ var require_core = __commonJS({
       }
       return crypto.createHash("sha256").update(source).digest("hex") === "97baeb497a77db8909e7fd39f58dd5f3390516aadf9cb85bd30db58009c7bdd7";
     };
-    exports2.inventory = (relative) => relative === "platforms/ios/native-api-usage.json" || relative === "platforms/android/native-api-usage.json" || relative.startsWith("platforms/ios/typings/") && relative.endsWith(".d.ts");
+    exports2.inventory = (relative) => relative.startsWith("platforms/ios/typings/") && relative.endsWith(".d.ts");
   }
 });
 
@@ -18820,6 +18820,25 @@ var require_mason = __commonJS({
   }
 });
 
+// bridge/resolve/gesturehandler.cjs
+var require_gesturehandler = __commonJS({
+  "bridge/resolve/gesturehandler.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    module2.exports = function marker(pkg, dir, read) {
+      if (pkg.name !== "@nativescript-community/gesturehandler" || pkg.version !== "2.1.0") return [];
+      const file = path2.join(dir, "platforms/android/sync");
+      if (!fs2.existsSync(file)) return [];
+      if (!fs2.lstatSync(file).isFile() || crypto.createHash("sha256").update(read(file)).digest("hex") !== "0d943433d4a07b21b932a01fdbe81c66c2cecd977d79cd22601e97a9d34076b2") {
+        throw Object.assign(new Error(), { code: "unavailable" });
+      }
+      return [fs2.realpathSync(file)];
+    };
+  }
+});
+
 // bridge/resolve/index.cjs
 var require_resolve = __commonJS({
   "bridge/resolve/index.cjs"(exports2, module2) {
@@ -18832,6 +18851,7 @@ var require_resolve = __commonJS({
     var expandNativeSources = require_native_sources();
     var swiftPackages = require_swift_packages();
     var masonMetadata = require_mason();
+    var gestureMetadata = require_gesturehandler();
     var { pathToFileURL } = require("node:url");
     var configNames = ["nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"];
     var safeFailures = /* @__PURE__ */ new WeakSet();
@@ -18971,6 +18991,22 @@ var require_resolve = __commonJS({
         if (fs2.existsSync(path2.join(dir, "hooks"))) fail("unavailable", "Legacy package hooks are unsupported; migrate to the extension SDK before preparing");
         function walk(folder, platform) {
           if (!fs2.existsSync(folder)) return;
+          const usageFile = path2.join(folder, "native-api-usage.json");
+          const platformRoot = path2.join(dir, "platforms", platform);
+          const resourceRoot = resources && path2.join(resources, platform === "ios" ? "iOS" : "Android");
+          let usageInventory;
+          if ((folder === platformRoot || folder === resourceRoot) && fs2.existsSync(usageFile)) {
+            if (resources) fail("unavailable", "Application native API filtering requires a qualified filtering producer; this backend does not apply that configuration");
+            if (!fs2.lstatSync(usageFile).isFile()) fail("unavailable", "Plugin native API usage must be an ordinary file");
+            const usage = json(usageFile);
+            keys(usage, ["uses", "blacklist"], "plugin native API usage");
+            for (const name of ["uses", "blacklist"]) {
+              if (usage[name] !== void 0 && (!Array.isArray(usage[name]) || usage[name].some((item) => typeof item !== "string" || !item.trim() || /[\r\n\0]/.test(item)))) {
+                fail("invalid_input", "Plugin native API usage requires arrays of nonempty one-line patterns");
+              }
+            }
+            usageInventory = usageFile;
+          }
           if (platform === "ios") {
             const manifests = fs2.readdirSync(folder).filter((n) => n === "Package.swift" || n.endsWith(".podspec"));
             if (manifests.length) {
@@ -18992,6 +19028,7 @@ var require_resolve = __commonJS({
           for (const entry of fs2.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
             const file = path2.join(folder, entry.name);
             if (entry.isSymbolicLink()) fail("unavailable", "Symlinks inside native contribution trees are unsupported; use a linked package root instead");
+            if (file === usageInventory) continue;
             if (entry.isFile() && metadata.has(fs2.realpathSync(file))) {
               read(file);
               continue;
@@ -19111,6 +19148,11 @@ var require_resolve = __commonJS({
             metadata = masonMetadata(pkg, dir, read);
           } catch {
             fail("invalid_input", "Packaged Mason provenance must match its artifact inventory");
+          }
+          try {
+            for (const file of gestureMetadata(pkg, dir, read)) metadata.add(file);
+          } catch {
+            fail("unavailable", "GestureHandler producer marker differs from the qualified 2.1.0 package");
           }
           collect(dir, dir, pluginConfig, void 0, core, metadata);
           item.android = pluginConfig.android ?? {};

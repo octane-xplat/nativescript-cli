@@ -117,6 +117,21 @@ and producer Swift pins never replace this application's resolved pins or reques
 another dependency graph. Changes still invalidate resolution. Distribution of
 required legal notices remains a separate release responsibility.
 
+An installed native plugin's exact `platforms/ios/native-api-usage.json` or
+`platforms/android/native-api-usage.json` is a hashed inventory. Its optional
+`uses`/`blacklist` fields must be arrays of nonempty one-line patterns. The
+NativeScript9.1.1 filtering producer activates these recommendations only with
+an application filtering declaration. This backend retains default metadata
+generation and does not activate pruning from plugin hints. Application-level
+`native-api-usage.json` requests reject explicitly on both platforms, including
+iOS where ordinary JSON would otherwise be a resource. Explicit Android `.mdg`
+filters retain their separate existing contract.
+
+The published GestureHandler2.1.0 `platforms/android/sync` producer marker is
+read-only inventory only at its reviewed SHA-256. It is not executed, copied as
+an app asset or interpreted as a development command. Other versions or changed
+marker bytes retain strict rejection.
+
 The published `@octane-xplat/nativescript-mason-core` 1.0.0-beta.5 adapter recognizes
 its four platform-root manifest/provenance JSON files only when their SHA-256
 values match its `artifact-inventory.json`. Inventory and records are hashed

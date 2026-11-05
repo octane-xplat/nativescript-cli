@@ -18,6 +18,11 @@ The prepared native directory contains the wrapper, Gradle project and
 tasks generate static bindings and metadata from compiled dependencies and the
 bundle. `whitelist.mdg` and `blacklist.mdg` are concatenated in source-path order.
 
+Plugin `native-api-usage.json` recommendations do not create either filter file
+without a supported application filtering producer. They are validated, hashed
+source identities; changes invalidate preparation. App-driven JSON metadata
+filtering remains explicitly unavailable rather than being copied as resources.
+
 Native package inputs are snapshotted beneath `contributions/`. Library modules
 provide Java/Kotlin, resources, assets, JNI inputs and manifests. Gradle owns
 manifest and resource merging. Runtime scripts consume plugin AAR/JAR files and

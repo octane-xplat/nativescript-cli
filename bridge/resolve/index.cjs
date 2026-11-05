@@ -7,6 +7,7 @@ const coreAdapter=require('./core.cjs');
 const expandNativeSources=require('./native-sources.cjs');
 const swiftPackages=require('./swift-packages.cjs');
 const masonMetadata=require('./mason.cjs');
+const gestureMetadata=require('./gesturehandler.cjs');
 const { pathToFileURL } = require('node:url');
 const configNames = ['nativescript.config.ts', 'nativescript.config.js', 'nativescript.config.cjs', 'nativescript.config.mjs', 'nativescript.config.json'];
 const safeFailures = new WeakSet();
@@ -124,6 +125,25 @@ async function resolve({ projectDir }) {
     if (fs.existsSync(path.join(dir, 'hooks'))) fail('unavailable', 'Legacy package hooks are unsupported; migrate to the extension SDK before preparing');
     function walk(folder, platform) {
       if (!fs.existsSync(folder)) return;
+      const usageFile = path.join(folder, 'native-api-usage.json');
+      const platformRoot = path.join(dir, 'platforms', platform);
+      const resourceRoot = resources && path.join(resources, platform === 'ios' ? 'iOS' : 'Android');
+      let usageInventory;
+      if ((folder === platformRoot || folder === resourceRoot) && fs.existsSync(usageFile)) {
+        if (resources) fail('unavailable', 'Application native API filtering requires a qualified filtering producer; this backend does not apply that configuration');
+        if (!fs.lstatSync(usageFile).isFile()) fail('unavailable', 'Plugin native API usage must be an ordinary file');
+        const usage = json(usageFile);
+        keys(usage, ['uses', 'blacklist'], 'plugin native API usage');
+        for (const name of ['uses', 'blacklist']) {
+          if (usage[name] !== undefined && (!Array.isArray(usage[name]) || usage[name].some(item => typeof item !== 'string' || !item.trim() || /[\r\n\0]/.test(item)))) {
+            fail('invalid_input', 'Plugin native API usage requires arrays of nonempty one-line patterns');
+          }
+        }
+        // Upstream activates these plugin recommendations only with an app
+        // filtering declaration. Keep their identity without inventing filters
+        // or applying blacklists to this backend's default metadata generation.
+        usageInventory = usageFile;
+      }
       // A native package owns its implementation subtree; do not also compile its
       // Sources through the application target. Hash inputs without tool caches.
       if (platform === 'ios') {
@@ -139,6 +159,7 @@ async function resolve({ projectDir }) {
       for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name, 'en'))) {
         const file = path.join(folder, entry.name);
         if (entry.isSymbolicLink()) fail('unavailable', 'Symlinks inside native contribution trees are unsupported; use a linked package root instead');
+        if (file === usageInventory) continue;
         if(entry.isFile()&&metadata.has(fs.realpathSync(file))){read(file);continue;}
         // Packaged static libraries can retain their producer's Swift pins and
         // legal notices beside the actual inputs. Preserve their source identity
@@ -238,6 +259,7 @@ async function resolve({ projectDir }) {
       for (const key of ['id', 'appPath', 'appResourcesPath']) if (pluginConfig[key] !== undefined) fail('unavailable', 'App-only fields in plugin config are unsupported; move them to the application config');
       let metadata;
       try{metadata=masonMetadata(pkg,dir,read);}catch{fail('invalid_input','Packaged Mason provenance must match its artifact inventory');}
+      try{for(const file of gestureMetadata(pkg,dir,read))metadata.add(file);}catch{fail('unavailable','GestureHandler producer marker differs from the qualified 2.1.0 package');}
       collect(dir, dir, pluginConfig, undefined, core, metadata);
       item.android = pluginConfig.android ?? {};
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';
