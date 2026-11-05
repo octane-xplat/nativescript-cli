@@ -1,11 +1,11 @@
 # Native development qualification
 
-`development-consumer reject-ios APP EXACT_SHUTDOWN_UDID EVIDENCE_JSON` qualifies
+`development-consumer reject-ios APP 91D40099-A056-497D-A572-ADDDFD6A8F23 EVIDENCE_JSON` qualifies
 the native-completed observer-rejection boundary. It performs a real debug build,
 hands the reservation to an owned simulator boot, then rejects before app install
 or launch. It requires ErrSink plus the observer cause, no ErrCleanup, a retired
 server port and no app installation; the harness retires its boot and grants.
-Use a fresh task-owned simulator and delete it only after verified shutdown.
+Reuse only existing iPhone18Pro simulator `91D40099-A056-497D-A572-ADDDFD6A8F23`. Never create, clone, erase or delete a simulator.
 This is native build/failure cleanup evidence, not application startup evidence.
 
 The root dependency fixture supplies core9.1.3, NativeScript Vite8.0.21,
@@ -18,12 +18,12 @@ already populated Bun cache, refuses an existing destination and replaces its
 health nonce. It never imports an upstream platform tree or NativeScript CLI.
 
 On macOS with the platform tools, runtime dependencies and Goddard broker already
-available, select an exact shutdown arm64 simulator and a new app directory:
+available, require that exact simulator to be shutdown and use a new app directory:
 
 ```sh
 python3 -B tools/qualification/development/stage-native.py "$PWD/.cache/native-dev-ios"
 go build -o .cache/development-consumer ./tools/qualification/development/consumer
-.cache/development-consumer "$PWD/.cache/native-dev-ios" EXACT_SHUTDOWN_UDID "$HOME/dev/reports/nativescript-cli/ios-development.json"
+.cache/development-consumer "$PWD/.cache/native-dev-ios" 91D40099-A056-497D-A572-ADDDFD6A8F23 "$HOME/dev/reports/nativescript-cli/ios-development.json"
 ```
 
 The public-library consumer acquires its own broker reservations from stage
@@ -53,7 +53,7 @@ attachment begins after launch acknowledgement, so earlier unified startup logs
 are not replayed. Standard stdout/stderr capture remains separate.
 
 For Android, supply an installed SDK, JDK21 and an unused even emulator port.
-The API35 google_apis arm64 image must already be installed. Stage a separate
+Existing AVD `elegant-fir-probe` must be registered in `~/.android/avd`, with its Pixel6/API35/google_apis/arm64 image already installed. No registration, creation, clone, image download or replacement is allowed. If it is missing or incompatible, stop that native case. Stage a separate
 fresh app so the source edits from the iOS run do not become Android inputs:
 
 ```sh
@@ -62,13 +62,12 @@ JAVA_HOME=/absolute/jdk21 ANDROID_HOME=/absolute/android-sdk \
   .cache/development-consumer android "$PWD/.cache/native-dev-android" 5584 "$HOME/dev/reports/nativescript-cli/android-development.json"
 ```
 
-The Android caller creates a unique task-owned headless AVD with a bounded 2 GiB
-data partition, verifies its exact serial/AVD identity, and deletes it at cleanup.
+The Android caller reuses only `elegant-fir-probe` and preserves its registry, config and persistent device. Before each owned boot it checks ADB and emulator processes, rejecting an already running or starting emulator instead of launching another. It verifies the exact serial/AVD identity. An unavailable/busy device requires coordination or waiting, never substitution. The caller does not resize the data partition or delete the AVD.
 It boots once for discovery, shuts down before compilation, and reboots under
 separate device reservations for each launch. It checks the same nonce-specific
 health and hot callback, reads a newly packaged Android string resource after a
 native rebuild, and checks both automatic ADB reverse ownership and retirement.
-Heartbeat files are read using the debug app's `run-as`; no guest root is used.
+Heartbeat files are read using the debug app's `run-as`; no guest root is used. An existing fixture application is rejected before ownership is claimed. On failure as well as success, only an installation proven absent before the run may be uninstalled; its absence is verified before ownership retires. Boots and broker grants retire separately. The child emulator receives the prescribed AVD home without changing the embedding process environment.
 The fixture's Android cleartext permission is for Vite's ordinary debug
 transport. It supplies no OTA HTTPS trust evidence.
 

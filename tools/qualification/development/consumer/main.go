@@ -145,6 +145,9 @@ func run() (result error) {
 		return errors.New("usage: development-consumer APP EXACT_SHUTDOWN_SIMULATOR EVIDENCE_JSON")
 	}
 	app, id, saved := args[0], args[1], args[2]
+	if id != qualificationIOSUDID {
+		return fmt.Errorf("qualification requires existing simulator %s; no substitution or creation", qualificationIOSUDID)
+	}
 	rejected := errors.New("qualification observer rejected native completion")
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()

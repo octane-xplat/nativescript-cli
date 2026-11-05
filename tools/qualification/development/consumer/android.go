@@ -27,20 +27,27 @@ func ownedAVDName(output []byte, name string) bool {
 	return strings.TrimSpace(strings.SplitN(string(output), "\n", 2)[0]) == name
 }
 
-// The harness owns a new AVD and every emulator boot, while the public session
-// owns the installed app process and ADB reverse. Build and device grants never
-// overlap. The AVD survives our intermediate boots, then is deleted at cleanup.
+// The caller owns the prescribed persistent AVD. The harness owns only its boots
+// and an installation proven absent before this run. Build/device grants never
+// overlap; configuration, AVD registration and device data are never deleted.
 type androidReservation struct {
 	id, avd, serial, sdk string
+	avdHome, logPath     string
 	port                 int
 	phases               []map[string]string
 	emulator             *exec.Cmd
 	emulatorDone         chan error
 	emulatorLog          *os.File
+	installationOwned    bool
+	execute              qualificationCommand
 }
 
 func (r *androidReservation) adb(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, filepath.Join(r.sdk, "platform-tools/adb"), append([]string{"-s", r.serial}, args...)...).CombinedOutput()
+	run := r.execute
+	if run == nil {
+		run = executeQualification
+	}
+	return run(ctx, filepath.Join(r.sdk, "platform-tools/adb"), append([]string{"-s", r.serial}, args...)...)
 }
 
 func (r *androidReservation) release() error {
@@ -103,6 +110,9 @@ func (r *androidReservation) acquire(ctx context.Context, device bool, logPath s
 	if !device {
 		return nil
 	}
+	if err := noAndroidEmulator(ctx, r.sdk, executeQualification); err != nil {
+		return err
+	}
 	for _, port := range []int{r.port, r.port + 1} {
 		listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
@@ -115,6 +125,12 @@ func (r *androidReservation) acquire(ctx context.Context, device bool, logPath s
 		return err
 	}
 	command := exec.Command(filepath.Join(r.sdk, "emulator/emulator"), "-avd", r.avd, "-port", strconv.Itoa(r.port), "-no-window", "-no-audio", "-no-snapshot", "-no-boot-anim")
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "ANDROID_AVD_HOME=") {
+			command.Env = append(command.Env, value)
+		}
+	}
+	command.Env = append(command.Env, "ANDROID_AVD_HOME="+r.avdHome)
 	command.Stdout, command.Stderr = r.emulatorLog, r.emulatorLog
 	if err := command.Start(); err != nil {
 		_ = r.emulatorLog.Close()
@@ -147,6 +163,43 @@ func (r *androidReservation) acquire(ctx context.Context, device bool, logPath s
 	}
 }
 
+func (r *androidReservation) cleanup() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	if r.installationOwned && r.emulator == nil {
+		if err := r.acquire(ctx, true, r.logPath); err != nil {
+			return errors.Join(err, r.release())
+		}
+	}
+	return errors.Join(r.retireInstallation(ctx), r.release())
+}
+
+func (r *androidReservation) retireInstallation(ctx context.Context) error {
+	var cleanup error
+	if r.installationOwned {
+		out, err := r.adb(ctx, "shell", "pm", "list", "packages", developmentAppID)
+		present, inspect := packagePresence(out, err)
+		cleanup = inspect
+		if inspect == nil && present {
+			out, err = r.adb(ctx, "uninstall", developmentAppID)
+			if err != nil || strings.TrimSpace(string(out)) != "Success" {
+				cleanup = fmt.Errorf("owned Android app uninstall failed: %v", err)
+			} else {
+				out, err = r.adb(ctx, "shell", "pm", "list", "packages", developmentAppID)
+				present, cleanup = packagePresence(out, err)
+				if cleanup == nil && present {
+					cleanup = errors.New("owned Android app survived uninstall")
+				}
+			}
+		}
+		if cleanup == nil {
+			r.installationOwned = false
+			r.phases = append(r.phases, map[string]string{"action": "uninstall-absence-verified", "app": developmentAppID})
+		}
+	}
+	return cleanup
+}
+
 func runAndroid(args []string) (result error) {
 	if len(args) != 3 {
 		return errors.New("usage: development-consumer android APP UNUSED_EVEN_PORT EVIDENCE_JSON")
@@ -167,26 +220,19 @@ func runAndroid(args []string) (result error) {
 	cwd, _ := os.Getwd()
 	env := os.Environ()
 	writer, flags, prefix := log.Writer(), log.Flags(), log.Prefix()
-	r := &androidReservation{sdk: sdk, port: port, serial: fmt.Sprintf("emulator-%d", port), avd: fmt.Sprintf("nativescript-g5-%d-%d", os.Getpid(), time.Now().UnixNano())}
-	avdmanager := filepath.Join(sdk, "cmdline-tools/latest/bin/avdmanager")
-	image := "system-images;android-35;google_apis;arm64-v8a"
-	avdPath := filepath.Join(filepath.Dir(app), r.avd+".avd")
-	create := exec.CommandContext(ctx, avdmanager, "create", "avd", "--name", r.avd, "--path", avdPath, "--package", image, "--device", "pixel_6")
-	create.Stdin = strings.NewReader("no\n")
-	if out, err := create.CombinedOutput(); err != nil {
-		return fmt.Errorf("create owned AVD: %w: %s", err, out)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
 	}
-	evidence := map[string]any{"boundary": "real public-library Android debug development startup/HMR/native resource; no OTA/release/physical claim", "avd": r.avd, "serial": r.serial, "systemImage": image}
+	avdHome, err := existingQualificationAVD(home, sdk)
+	if err != nil {
+		return err
+	}
+	r := &androidReservation{sdk: sdk, port: port, serial: fmt.Sprintf("emulator-%d", port), avd: qualificationAndroidAVD, avdHome: avdHome, logPath: saved + ".emulator.log"}
+	evidence := map[string]any{"boundary": "real public-library Android debug development startup/HMR/native resource; no OTA/release/physical claim", "avd": r.avd, "serial": r.serial, "systemImage": qualificationAndroidImage, "avdOwnership": "caller-owned; never created, registered, rewritten or deleted"}
 	defer func() {
-		result = errors.Join(result, r.release())
-		if r.emulator == nil {
-			out, err := exec.Command(avdmanager, "delete", "avd", "--name", r.avd).CombinedOutput()
-			if err != nil {
-				result = errors.Join(result, fmt.Errorf("delete owned AVD: %w: %s", err, out))
-			} else {
-				evidence["ownedAVDDeleted"] = true
-			}
-		}
+		result = errors.Join(result, r.cleanup())
+		evidence["ownedInstallationRetired"] = !r.installationOwned
 		now, _ := os.Getwd()
 		globals := now == cwd && reflect.DeepEqual(env, os.Environ()) && log.Writer() == writer && log.Flags() == flags && log.Prefix() == prefix
 		evidence["embeddingGlobalsPreserved"] = globals
@@ -201,30 +247,22 @@ func runAndroid(args []string) (result error) {
 		}
 		data, _ := json.MarshalIndent(evidence, "", "  ")
 		result = errors.Join(result, os.WriteFile(saved, append(data, '\n'), 0600))
-	}()
-	// Bound the owned fixture's data partition. The stock Pixel profile requests
-	// 12 GiB despite this app needing only a small debug installation.
-	configPath := filepath.Join(avdPath, "config.ini")
-	config, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(config), "\n")
-	filtered := lines[:0]
-	for _, line := range lines {
-		if !strings.HasPrefix(line, "disk.dataPartition.size=") {
-			filtered = append(filtered, line)
+		if result == nil {
+			fmt.Println("PASS real public Android native development, same-process HMR, resource rebuild and owned cleanup; existing AVD retained")
 		}
-	}
-	if err := os.WriteFile(configPath, []byte(strings.Join(filtered, "\n")+"\ndisk.dataPartition.size=2G\n"), 0600); err != nil {
-		return err
-	}
+	}()
 	if err := r.acquire(ctx, true, saved+".emulator.log"); err != nil {
 		return err
 	}
-	if out, _ := r.adb(ctx, "shell", "pm", "path", developmentAppID); strings.Contains(string(out), "package:") {
+	out, inspectErr := r.adb(ctx, "shell", "pm", "list", "packages", developmentAppID)
+	present, err := packagePresence(out, inspectErr)
+	if err != nil {
+		return err
+	}
+	if present {
 		return errors.New("refusing an existing fixture app installation")
 	}
+	r.installationOwned = true
 	client, err := ns.New(ns.Options{Sink: func(ctx context.Context, event ns.Event) error {
 		fmt.Printf("EVENT %s %s\n", event.Stage, event.Kind)
 		if event.Stage == "native" && event.Kind == ns.StageStarted {
@@ -359,10 +397,5 @@ func runAndroid(args []string) (result error) {
 	}
 	evidence["ownedPIDRetired"] = true
 	evidence["ownedReverseRetired"] = true
-	out, err := r.adb(ctx, "uninstall", developmentAppID)
-	if err != nil || !strings.Contains(string(out), "Success") {
-		return fmt.Errorf("owned Android app uninstall: %v: %s", err, out)
-	}
-	fmt.Println("PASS real public Android native development, same-process HMR, resource rebuild and owned cleanup")
 	return nil
 }
