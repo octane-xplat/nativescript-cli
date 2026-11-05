@@ -142,11 +142,17 @@ evidence with boot templates, not an application build or runtime qualification.
 `OTA_CONSUMER_DIR` enables owned-helper and adapter tests; `ANDROID_HOME` also
 enables actual Android SDK identity capture in the Node adapter test.
 
-Explicitly declared local iOS Swift packages currently return OTA unavailable.
-The canonical collector does not yet prove coverage of all app-relative local
-package contents, especially workspace paths outside installed native packages.
-Ordinary local-package native builds are separate from this remaining H1 work;
-their compilation does not authorize publishing a compatibility stamp.
+Explicitly declared local iOS Swift packages use the canonical data-only source
+`xplat-ns/local-spm/v1`. Selected preparation evaluations must match resolved
+manifest hashes, names/paths and products. The helper copies verified selected
+bytes into owned roots, including workspace-relative and installed-link packages,
+and rechecks original/copied membership and hashes before native publication.
+The descriptor includes portable file and evaluated-manifest hashes; it does not
+replace the canonical fingerprint algorithm. Missing/stale receipts reject.
+Transitive package dependencies, build plugins, unsupported targets, internal
+symlinks, unsafe flags and evaluated external paths remain OTA unavailable.
+Native compilation, compiled stamps and installer/runtime behavior require their
+own evidence; snapshot qualification alone does not certify those stages.
 
 Regenerate Go bindings with protoc plus `protoc-gen-go` 1.36.11 and
 `protoc-gen-go-grpc` 1.6.1 using source-relative output in
