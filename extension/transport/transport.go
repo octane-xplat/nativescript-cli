@@ -136,6 +136,8 @@ func Serve(impl extension.Extension) {
 
 // Open starts an explicitly selected executable. Close must be called; no discovery,
 // downloading or compilation occurs. Logs are separate from handshake stdout.
+// Log writes are serialized. After Close returns the destination is no longer
+// called; any trailing transport output is discarded. Writers must return promptly.
 // Windows execution is unavailable pending process ownership qualification.
 func Open(ctx context.Context, executable string, args []string, dir string, env []string, logs io.Writer) (extension.Extension, func(), error) {
 	if runtime.GOOS == "windows" {
@@ -147,14 +149,15 @@ func Open(ctx context.Context, executable string, args []string, dir string, env
 	if logs == nil {
 		logs = io.Discard
 	}
+	output := &logOutput{writer: logs}
 	cmd := exec.CommandContext(ctx, executable, args...)
 	configure(cmd)
 	cmd.Dir = dir
 	cmd.Env = env
-	c := plugin.NewClient(&plugin.ClientConfig{HandshakeConfig: handshake, Plugins: map[string]plugin.Plugin{"extension": &adapter{}}, Cmd: cmd, AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC}, StartTimeout: 10 * time.Second, SyncStdout: logs, SyncStderr: logs, Stderr: logs, Logger: hclog.NewNullLogger(), SkipHostEnv: true})
+	c := plugin.NewClient(&plugin.ClientConfig{HandshakeConfig: handshake, Plugins: map[string]plugin.Plugin{"extension": &adapter{}}, Cmd: cmd, AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC}, StartTimeout: 10 * time.Second, SyncStdout: output, SyncStderr: output, Stderr: output, Logger: hclog.NewNullLogger(), SkipHostEnv: true})
 	var once sync.Once
 	done := make(chan struct{})
-	close := func() { once.Do(func() { retire(cmd); c.Kill(); closeDone(done) }) }
+	close := func() { once.Do(func() { retire(cmd); c.Kill(); output.close(); closeDone(done) }) }
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -176,3 +179,25 @@ func Open(ctx context.Context, executable string, args []string, dir string, env
 }
 
 func closeDone(done chan struct{}) { close(done) }
+
+// go-plugin does not join the gRPC stdio delivery loop when Kill returns. Own
+// access to the caller's writer independently of those trailing RPC messages.
+type logOutput struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (l *logOutput) Write(data []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.writer == nil {
+		return len(data), nil
+	}
+	return l.writer.Write(data)
+}
+
+func (l *logOutput) close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.writer = nil
+}
