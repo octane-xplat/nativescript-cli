@@ -60,7 +60,7 @@ func (Adapter) Validate(r project.Resolved, t project.Target) error {
 	}
 	for _, p := range r.Packages {
 		if p.AndroidRequirement != "" && !project.RuntimeSatisfies(installed, p.AndroidRequirement) {
-			return workflow.ErrUnavailable
+			return &workflow.PackageRequirement{Package: p.Name, Platform: "android", Requirement: p.AndroidRequirement, Installed: installed}
 		}
 	}
 

@@ -16,8 +16,13 @@ func RuntimeSupported(platform, version string) bool {
 	return false
 }
 
-// RuntimeSatisfies accepts the numeric minimum contract used by native packages.
-func RuntimeSatisfies(installed, minimum string) bool {
+// RuntimeSatisfies accepts the minimum contract used by native packages: a
+// one-to-three-part numeric version, optionally preceded by "v" and one of the
+// "~", "^", ">=", ">" or "=" prefixes. "~", "^", ">=" and "=" declare the
+// numeric floor (installed >= version); ">" requires a strictly newer runtime
+// (installed > version). Compound ranges, wildcards, whitespace and
+// prerelease/build suffixes remain rejected.
+func RuntimeSatisfies(installed, declared string) bool {
 	parse := func(s string) ([3]int, bool) {
 		var v [3]int
 		parts := strings.Split(s, ".")
@@ -40,7 +45,16 @@ func RuntimeSatisfies(installed, minimum string) bool {
 	if !ok {
 		return false
 	}
-	b, ok := parse(minimum)
+	requirement := strings.TrimPrefix(declared, "v")
+	strict := false
+	for _, prefix := range []string{"~", "^", ">=", ">", "="} {
+		if strings.HasPrefix(requirement, prefix) {
+			strict = prefix == ">"
+			requirement = strings.TrimPrefix(requirement, prefix)
+			break
+		}
+	}
+	b, ok := parse(requirement)
 	if !ok {
 		return false
 	}
@@ -49,5 +63,5 @@ func RuntimeSatisfies(installed, minimum string) bool {
 			return a[i] > b[i]
 		}
 	}
-	return true
+	return !strict
 }

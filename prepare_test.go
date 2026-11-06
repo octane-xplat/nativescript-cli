@@ -117,6 +117,20 @@ func TestPublicPrepareUnsupportedAndFailure(t *testing.T) {
 	}
 }
 
+func TestPublicPreparePackageRequirementAdvice(t *testing.T) {
+	root, client, q := prepareApp(t, false)
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1.0.0","nativescript":{"platforms":{"ios":"~8"}}}`)
+	if _, err := client.Prepare(context.Background(), q); err != nil {
+		t.Fatal("range floor below the installed runtime rejected", err)
+	}
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1.0.0","nativescript":{"platforms":{"ios":">8.9"}}}`)
+	_, err := client.Prepare(context.Background(), q)
+	var op *ns.OperationError
+	if !errors.Is(err, ns.ErrUnavailable) || !errors.As(err, &op) || op.Advice != "package native-plugin requires ios >8.9 but the project has 8.9.0" {
+		t.Fatalf("named requirement advice lost: %v", err)
+	}
+}
+
 func TestPublicPrepareActualLocalDependencies(t *testing.T) {
 	if os.Getenv("P1_NATIVE_DEPS") != "1" {
 		t.Skip("explicit local dependency-tool qualification only")

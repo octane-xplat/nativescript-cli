@@ -80,7 +80,9 @@ stamp and fingerprint outputs. No synthetic lockfile substitutes for resolution.
 9.1.1 retains its published Gradle 8.14.3 wrapper, Android Gradle plugin 8.12.1,
 SDK/build tools 35/35.0.0, Java17 bytecode and template Kotlin 2.4.10 settings.
 Use the actual template settings, not the stale Kotlin 2.0.0 package version_info.
-Plugin numeric minimums compare with the installed supported runtime; 9.1
-requirements remain unavailable on 9.0.0. Other exact runtimes, including the
+Plugin minimums use the same numeric floor and `~`/`^`/`>=`/`>`/`=` prefix
+contract as iOS; they compare with the installed supported runtime, so 9.1
+floors remain unavailable on 9.0.0 and a failed check names the package in
+`OperationError.Advice`. Other exact runtimes, including the
 unqualified 9.1.0 Android package, remain unavailable. Native build success
 and device/offline OTA acceptance require their own evidence.

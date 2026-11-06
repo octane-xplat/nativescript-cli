@@ -5,8 +5,11 @@ published `@nativescript/ios` **8.9.0** and **9.1.0** runtime templates.
 The 9.1.0 template owns an exact NativeScript SwiftPM dependency; preparation
 resolves it with Xcode, retains Package.resolved, and preserves its product link.
 The 8.9.0 template retains its bundled XCFramework contract. Other runtime
-versions return unavailable until qualified. Plugin iOS minimums accept plain
-one-to-three-part numeric versions; newer or unrecognized requirements fail. The runtime is an explicit installed
+versions return unavailable until qualified. Plugin iOS minimums accept a
+one-to-three-part numeric version, optionally `v`-prefixed and carrying one of
+the `~`, `^`, `>=`, `>` or `=` range prefixes; `~`/`^`/`>=`/`=` declare a floor
+and `>` requires a strictly newer runtime. Compound ranges, wildcards and
+unrecognized requirements fail. The runtime is an explicit installed
 app dependency or devDependency; nothing downloads or invokes an upstream CLI.
 The template's XCFramework archive is expanded using `/usr/bin/unzip` lazily.
 
@@ -95,9 +98,10 @@ An empty native dependency graph does not create a Podfile. Explicit Prepare
 creates the runtime entry package.json when no bundle has supplied one. With
 OTAStartup enabled, the canonical installed producer runs after real runtime
 SwiftPM and contributed Pod/SPM resolution under the same project lease.
-The numeric plugin minimum is compared with the installed supported runtime;
-9.1 requirements remain unavailable on 8.9.0. Exact versions outside the matrix
-remain unavailable. The app must set a deployment target supported by its Xcode
+The declared plugin minimum is compared with the installed supported runtime;
+9.1 floors remain unavailable on 8.9.0. A failed check names the package, its
+requirement and the installed version in `OperationError.Advice`. Exact runtime
+versions outside the matrix remain unavailable. The app must set a deployment target supported by its Xcode
 SDK (the current iOS27 host requires at least 15.0 via build.xcconfig).
 
 Contributed module maps admitted by resolution feed Clang and Swift compiler

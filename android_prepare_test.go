@@ -576,6 +576,7 @@ func TestAndroidRuntimeMinimumMatrix(t *testing.T) {
 	}{
 		{"9.0.0", "9", true}, {"9.0.0", "9.1.0", false}, {"9.1.1", "9.1.0", true},
 		{"9.1.1", "9.1.2", false}, {"9.1.0", "9.1.0", false}, {"9.2.0", "9", false},
+		{"9.0.0", "~9", true}, {"9.0.0", "^9.1.0", false}, {"9.0.0", ">9", false},
 	} {
 		t.Run(tc.version+"_"+tc.minimum, func(t *testing.T) {
 			root, c, q := androidApp(t, false)
@@ -586,5 +587,15 @@ func TestAndroidRuntimeMinimumMatrix(t *testing.T) {
 				t.Fatalf("%+v: %v", tc, e)
 			}
 		})
+	}
+}
+
+func TestAndroidPackageRequirementAdvice(t *testing.T) {
+	root, c, q := androidApp(t, false)
+	resolutionFile(t, root, "node_modules/native-plugin/package.json", `{"name":"native-plugin","version":"1.0.0","nativescript":{"platforms":{"android":">9"}}}`)
+	_, err := c.Prepare(context.Background(), q)
+	var op *ns.OperationError
+	if !errors.Is(err, ns.ErrUnavailable) || !errors.As(err, &op) || op.Advice != "package native-plugin requires android >9 but the project has 9.0.0" {
+		t.Fatalf("named requirement advice lost: %v", err)
 	}
 }

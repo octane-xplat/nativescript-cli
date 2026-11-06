@@ -99,6 +99,10 @@ func operationError(op string, err error) error {
 	if errors.As(err, &diagnostic) {
 		result.Advice = diagnostic.Message
 	}
+	var requirement *workflow.PackageRequirement
+	if errors.As(err, &requirement) {
+		result.Advice = requirement.Error()
+	}
 	return result
 }
 func (c *Client) notify(op string) workflow.Notify {

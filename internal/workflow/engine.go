@@ -17,6 +17,17 @@ var (
 	ErrHandoff     = errors.New("incompatible stage output")
 )
 
+// PackageRequirement is safe remediation naming the first native package whose
+// declared platform requirement the installed runtime cannot satisfy.
+type PackageRequirement struct {
+	Package, Platform, Requirement, Installed string
+}
+
+func (e *PackageRequirement) Error() string {
+	return "package " + e.Package + " requires " + e.Platform + " " + e.Requirement + " but the project has " + e.Installed
+}
+func (e *PackageRequirement) Unwrap() error { return ErrUnavailable }
+
 type Request struct {
 	ProjectDir, OutputDir string
 	Target                project.Target

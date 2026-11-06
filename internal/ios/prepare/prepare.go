@@ -132,15 +132,25 @@ func (a Adapter) Validate(r project.Resolved, target project.Target) error {
 	if target.Platform != "ios" {
 		return workflow.ErrUnavailable
 	}
-	var installed string
+	var installed, present string
 	for _, p := range r.Packages {
-		if p.Name == "@nativescript/ios" && project.RuntimeSupported("ios", p.Version) {
-			installed = p.Version
+		if p.Name == "@nativescript/ios" {
+			present = p.Version
+			if project.RuntimeSupported("ios", p.Version) {
+				installed = p.Version
+			}
 		}
 	}
 	for _, p := range r.Packages {
 		if p.IOSRequirement != "" && !project.RuntimeSatisfies(installed, p.IOSRequirement) {
-			return fmt.Errorf("native package requires an unsupported iOS runtime: %w", workflow.ErrUnavailable)
+			version := installed
+			if version == "" {
+				version = present
+			}
+			if version == "" {
+				version = "none"
+			}
+			return &workflow.PackageRequirement{Package: p.Name, Platform: "ios", Requirement: p.IOSRequirement, Installed: version}
 		}
 	}
 	for _, p := range r.Packages {
