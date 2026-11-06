@@ -69,7 +69,9 @@ func TestResolveInstalledGraphAndProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.ApplicationID != "org.example.environment" || len(p.Packages) != 5 || len(p.Dependencies) != 5 || len(p.Contributions) != 5 || len(p.Sources) != 12 {
+	// The nested duplicate dual@2 stays in the graph but contributes nothing:
+	// upstream keeps only the first same-name install in breadth-first order.
+	if p.ApplicationID != "org.example.environment" || len(p.Packages) != 5 || len(p.Dependencies) != 5 || len(p.Contributions) != 4 || len(p.Sources) != 12 {
 		t.Fatalf("unexpected resolution: %+v", p)
 	}
 	var configured bool

@@ -6,15 +6,19 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 graph ')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
  const contributions=[];
- for(const [name,kind,text] of [['Binding.swift','source','class Binding {}'],['Native.h','source','void example(void);'],['libNative.a','framework','fixture'],['Picture.png','resource','fixture'],['Compiled.metallib','resource','MTLB component fixture'],['build.xcconfig','configuration','EXAMPLE = 1'],['Info.plist','configuration','<?xml version="1.0"?><plist version="1.0"><dict><key>NSCameraUsageDescription</key><string>Camera</string></dict></plist>']]) {
+ for(const [name,kind,text] of [['Binding.swift','source','class Binding {}'],['Native.h','source','void example(void);'],['libNative.a','framework','fixture'],['Picture.png','resource','fixture'],['Compiled.metallib','resource','MTLB component fixture']]) {
   const file=path.join(dir,name);fs.writeFileSync(file,text);contributions.push({path:file,kind,platform:'ios',packageDirectory:dir});
+ }
+ const resources=path.join(dir,'App_Resources','iOS');fs.mkdirSync(resources,{recursive:true});
+ for(const [name,text] of [['build.xcconfig','EXAMPLE = 1'],['Info.plist','<?xml version="1.0"?><plist version="1.0"><dict><key>NSCameraUsageDescription</key><string>Camera</string></dict></plist>']]) {
+  const file=path.join(resources,name);fs.writeFileSync(file,text);contributions.push({path:file,kind:'configuration',platform:'ios',packageDirectory:dir});
  }
  for (const [name,dynamic] of [['Dynamic',true],['Static',false]]) {
   const framework=path.join(dir,name+'.framework');fs.mkdirSync(framework);
   const bytes=Buffer.alloc(32);if(dynamic){bytes.writeUInt32LE(0xfeedfacf,0);bytes.writeUInt32LE(6,12);}else bytes.write('!<arch>\n');
   fs.writeFileSync(path.join(framework,name),bytes);contributions.push({path:framework,kind:'framework',platform:'ios',packageDirectory:dir});
  }
- const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions};
+ const r={directory:dir,applicationID:'org.example.test',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions};
  const output=path.join(dir,'generated');const q={directory:output,resolved:r};await prepare(q);
  assert.equal(fs.existsSync(path.join(output,'Podfile')),false);
  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output,'app/package.json'))),{main:'bundle.mjs'});
@@ -30,7 +34,10 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  assert.equal(sources.some(v=>v.files.some(f=>f.value===shaderBuild)),false);
  assert.ok(Object.values(o.PBXCopyFilesBuildPhase).some(v=>v&&typeof v==='object'&&v.files.length===1&&owned.includes(v.files[0].value)));
  assert.match(fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8'),/NSCameraUsageDescription/);
- assert.match(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native.h/);
+ // Contributed headers stay out of the app bridging header; plugin modulemaps
+ // load through header-search-path discovery like upstream.
+ assert.doesNotMatch(fs.readFileSync(path.join(output,'internal/Swift-ObjC-Bridging-Header.h'),'utf8'),/Native\.h/);
+ assert.equal(fs.existsSync(path.join(output,'internal/NativeContributions')),false);
  const original=fs.readFileSync(file,'utf8');assert.doesNotMatch(original,/value = [A-F0-9]{24}/);assert.match(fs.readFileSync(path.join(output,'NativeScriptApp.xcodeproj/xcshareddata/xcschemes/NativeScriptApp.xcscheme'),'utf8'),/BlueprintName = "NativeScriptApp"/);await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),original);
  // A non-owned graph edit and exact dependency pins survive regeneration.
  project=xcode.project(file);project.parseSync();project.hash.project.objects.PBXProject[project.hash.project.rootObject].developmentRegion='fr';fs.writeFileSync(file,project.writeSync());
@@ -47,7 +54,7 @@ test('Pods and local SPM membership and removal',{skip:process.platform!=='darwi
  const pod=path.join(dir,'Podfile');fs.writeFileSync(pod,"pod 'Example', '1.0'\n");
  const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{platform:'ios',kind:'spm',path:swift},{platform:'ios',kind:'pods',path:pod}]};
  const q={directory:path.join(dir,'out'),resolved:r};const result=await prepare(q);assert.equal(result.spm,true);assert.equal(result.pods,true);
- const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');assert.match(fs.readFileSync(file,'utf8'),/XCLocalSwiftPackageReference/);assert.match(fs.readFileSync(file,'utf8'),/productName = "Example"/);assert.match(fs.readFileSync(path.join(q.directory,'Podfile'),'utf8'),/instance_eval/);
+ const file=path.join(q.directory,'NativeScriptApp.xcodeproj/project.pbxproj');assert.match(fs.readFileSync(file,'utf8'),/XCLocalSwiftPackageReference/);assert.match(fs.readFileSync(file,'utf8'),/productName = "Example"/);assert.match(fs.readFileSync(path.join(q.directory,'Podfile'),'utf8'),/pod 'Example', '1\.0'/);assert.doesNotMatch(fs.readFileSync(path.join(q.directory,'Podfile'),'utf8'),/instance_eval/);
  const original=fs.readFileSync(file,'utf8');await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),original);
  r.contributions=[];const removed=await prepare(q);assert.equal(removed.pods,true);assert.equal(removed.spm,true);assert.doesNotMatch(fs.readFileSync(file,'utf8'),/productName = "Example"/);
 });
@@ -102,7 +109,7 @@ test('iOS XCFramework validation ignores unrelated platform slices and retains m
  const modulemap=path.join(dir,'qualified-includes/module.modulemap');fs.mkdirSync(path.dirname(modulemap));fs.writeFileSync(modulemap,'module Probe { export * }');
  const resolved={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir},{path:modulemap,kind:'configuration',platform:'ios',packageDirectory:dir}]};
  const output=path.join(dir,'out');await prepare({resolved,directory:output});
- const flags=fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8');assert.match(flags,/OTHER_CFLAGS.*-fmodule-map-file=/);assert.match(flags,/OTHER_SWIFT_FLAGS.*-Xcc/);
+ const flags=fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8');assert.doesNotMatch(flags,/-fmodule-map-file/);
  const configured=xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj'));configured.parseSync();
  const targetSettings=Object.values(configured.hash.project.objects.XCBuildConfiguration).filter(v=>v&&typeof v==='object').map(v=>v.buildSettings).filter(v=>Array.isArray(v.HEADER_SEARCH_PATHS));assert.equal(targetSettings.length,2);
  for(const settings of targetSettings)assert.ok(settings.HEADER_SEARCH_PATHS.some(value=>value.includes(path.dirname(modulemap))),'module map include root must resolve nested angle-bracket imports');
@@ -141,16 +148,22 @@ test('remote Swift package requirements/products preserve ownership through repe
 
 test('binary property lists from installed packages merge and classify like XML',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 bplist '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
- // A binary Info.plist contribution merges into the generated app manifest.
- const info=path.join(dir,'Info.plist');fs.writeFileSync(info,bplistCreate({NSCameraUsageDescription:'Binary camera'}));
+ // A binary platform-root Info.plist contribution merges into the generated
+ // app manifest; a binary plist outside the manifest site does not.
+ const plugin=path.join(dir,'plugin','platforms','ios');fs.mkdirSync(path.join(plugin,'src'),{recursive:true});
+ const info=path.join(plugin,'Info.plist');fs.writeFileSync(info,bplistCreate({NSCameraUsageDescription:'Binary camera'}));
  assert.equal(fs.readFileSync(info).subarray(0,8).toString('latin1'),'bplist00');
+ const nested=path.join(plugin,'src','Info.plist');fs.writeFileSync(nested,bplistCreate({CFBundleIdentifier:'com.plugin.framework'}));
  // Binary xcframework metadata still classifies the embedded slices.
  const framework=path.join(dir,'Binary.xcframework');const slice=path.join(framework,'ios-arm64-simulator/Binary.framework');fs.mkdirSync(slice,{recursive:true});
  const bytes=Buffer.alloc(32);bytes.writeUInt32LE(0xfeedfacf,0);bytes.writeUInt32LE(6,12);fs.writeFileSync(path.join(slice,'Binary'),bytes);
  fs.writeFileSync(path.join(framework,'Info.plist'),bplistCreate({AvailableLibraries:[{LibraryIdentifier:'ios-arm64-simulator',LibraryPath:'Binary.framework',SupportedPlatform:'ios',SupportedPlatformVariant:'simulator'}]}));
- const resolved={directory:dir,applicationID:'org.example.bplist',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:info,kind:'configuration',platform:'ios',packageDirectory:dir},{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}]};
+ const resolved={directory:dir,applicationID:'org.example.bplist',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:info,kind:'configuration',platform:'ios',packageDirectory:path.dirname(path.dirname(plugin))},{path:nested,kind:'configuration',platform:'ios',packageDirectory:path.dirname(path.dirname(plugin))},{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}]};
  const output=path.join(dir,'out');await prepare({resolved,directory:output});
- assert.match(fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8'),/<key>NSCameraUsageDescription<\/key>\s*<string>Binary camera<\/string>/);
+ const manifest=fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8');
+ assert.match(manifest,/<key>NSCameraUsageDescription<\/key>\s*<string>Binary camera<\/string>/);
+ assert.doesNotMatch(manifest,/com\.plugin\.framework/);
+ assert.match(manifest,/<key>CFBundleIdentifier<\/key>\s*<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)<\/string>/);
  // The binary xcmanifest classified its slice as dynamic, so it is embedded.
  const objects=(p=>{p.parseSync();return p.hash.project.objects;})(xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj')));
  const ref=Object.entries(objects.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(framework))[0];
@@ -159,4 +172,86 @@ test('binary property lists from installed packages merge and classify like XML'
  // A truncated binary payload rejects before Xcode rather than parsing partially.
  fs.writeFileSync(info,fs.readFileSync(info).subarray(0,16));
  await assert.rejects(prepare({resolved,directory:path.join(dir,'invalid')}),e=>e.code==='unavailable');
+});
+
+test('plugin Podfiles inline inside the target with re-hosted hooks and a merged platform section',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 podfile '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
+ const plugin=path.join(dir,'plugin'),older=path.join(dir,'older');
+ fs.mkdirSync(path.join(plugin,'platforms','ios'),{recursive:true});fs.mkdirSync(path.join(older,'platforms','ios'),{recursive:true});
+ const podfile=path.join(plugin,'platforms','ios','Podfile');fs.writeFileSync(podfile,"platform :ios, '13.0'\nuse_frameworks!\npod 'Dep', '~> 1.0'\npost_install do |installer|\n  puts 'plugin'\nend\n");
+ const lower=path.join(older,'platforms','ios','Podfile');fs.writeFileSync(lower,"platform :ios, '12.0'\npod 'Older'\n");
+ const resources=path.join(dir,'App_Resources','iOS');fs.mkdirSync(resources,{recursive:true});
+ const appPod=path.join(resources,'Podfile');fs.writeFileSync(appPod,"post_install do |installer|\n  puts 'app'\nend\n");
+ const resolved={directory:dir,applicationID:'org.example.pods',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime},{name:'@scope/plugin',version:'1.0.0',directory:plugin},{name:'older',version:'1.0.0',directory:older}],contributions:[{platform:'ios',kind:'pods',path:podfile,packageDirectory:plugin},{platform:'ios',kind:'pods',path:lower,packageDirectory:older},{platform:'ios',kind:'pods',path:appPod,packageDirectory:dir}]};
+ const out=path.join(dir,'out');await prepare({resolved,directory:out});
+ const generated=fs.readFileSync(path.join(out,'Podfile'),'utf8');
+ assert.match(generated,/^use_frameworks!\n\ntarget "NativeScriptApp" do\n/);
+ assert.match(generated,/\nend\n$/);
+ assert.doesNotMatch(generated,/instance_eval/);
+ // Plugin bodies sit verbatim between markers; platform rows are commented and
+ // the highest declared version survives as the single platform section.
+ assert.match(generated,new RegExp(`# Begin Podfile - ${podfile.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\n`));
+ assert.match(generated,/# platform :ios, '13\.0'/);
+ assert.match(generated,/# platform :ios, '12\.0'/);
+ assert.match(generated,new RegExp(`# NativeScriptPlatformSection ${podfile.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} with 13\\.0\\nplatform :ios, '13\\.0'\\n# End NativeScriptPlatformSection`));
+ // post_install blocks become named functions called from one hook; the app
+ // Podfile applies last under the NSPodfileBase name.
+ assert.match(generated,/def post_install_scope_plugin_0 \(installer\)\n  puts 'plugin'\nend/);
+ assert.match(generated,/def post_installNSPodfileBase_0 \(installer\)\n  puts 'app'\nend/);
+ assert.match(generated,/post_install do \|installer\|\n  post_install_scope_plugin_0 installer\n  post_installNSPodfileBase_0 installer\nend/);
+ // The plugin's own use_frameworks! survives inside its inlined body.
+ assert.match(generated,/# Begin Podfile[\s\S]*?use_frameworks!\n/);
+});
+
+test('manifest merges apply plugin keys, keep app identity, and register the identifier scheme outside release',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 manifest '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
+ const plugin=path.join(dir,'plugin');fs.mkdirSync(path.join(plugin,'platforms','ios','src'),{recursive:true});
+ fs.writeFileSync(path.join(plugin,'platforms','ios','Info.plist'),'<?xml version="1.0"?><plist version="1.0"><dict><key>NSFaceIDUsageDescription</key><string>Face</string><key>CFBundleIdentifier</key><string>com.plugin.identity</string><key>UIBackgroundModes</key><array><string>fetch</string></array></dict></plist>');
+ // A plist outside the platform root never reaches the app manifest.
+ fs.writeFileSync(path.join(plugin,'platforms','ios','src','Info.plist'),'<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.plugin.framework</string></dict></plist>');
+ const resources=path.join(dir,'App_Resources','iOS');fs.mkdirSync(resources,{recursive:true});
+ fs.writeFileSync(path.join(resources,'Info.plist'),'<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundlePackageType</key><string>APPL</string><key>UIBackgroundModes</key><array><string>audio</string></array><key>CFBundleURLTypes</key><array><dict><key>CFBundleTypeRole</key><string>Viewer</string><key>CFBundleURLSchemes</key><array><string>app</string></array></dict></array></dict></plist>');
+ const contributions=['platforms/ios/Info.plist','platforms/ios/src/Info.plist'].map(f=>({platform:'ios',kind:'configuration',path:path.join(plugin,f),packageDirectory:plugin}));
+ contributions.push({platform:'ios',kind:'configuration',path:path.join(resources,'Info.plist'),packageDirectory:dir});
+ const resolved={directory:dir,applicationID:'org.example.app',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions};
+ const manifest=async configuration=>{const out=path.join(dir,'out-'+configuration);await prepare({resolved,directory:out,configuration});return fs.readFileSync(path.join(out,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8');};
+ const debug=await manifest('debug');
+ assert.match(debug,/<key>NSFaceIDUsageDescription<\/key>/);
+ assert.doesNotMatch(debug,/com\.plugin\.(identity|framework)/);
+ assert.match(debug,/<key>CFBundleIdentifier<\/key>\s*<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)<\/string>/);
+ // The app array wins over the plugin's while the generated Editor scheme is
+ // appended for non-release builds.
+ assert.match(debug,/<key>UIBackgroundModes<\/key>\s*<array>\s*<string>audio<\/string>/);
+ assert.match(debug,/<string>orgexampleapp<\/string>/);
+ assert.match(debug,/<string>Viewer<\/string>/);
+ const release=await manifest('release');
+ assert.doesNotMatch(release,/orgexampleapp/);
+});
+
+test('plugin xcconfigs merge behind the app xcconfig and expose the app node_modules alias',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 xcconfig '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
+ fs.mkdirSync(path.join(dir,'node_modules'),{recursive:true});
+ const resources=path.join(dir,'App_Resources','iOS');fs.mkdirSync(resources,{recursive:true});
+ fs.writeFileSync(path.join(resources,'build.xcconfig'),'OTHER_LDFLAGS = $(inherited) -framework "App"\nAPP_ONLY = app\nSHARED = app\n');
+ const plugin=path.join(dir,'plugin');fs.mkdirSync(path.join(plugin,'platforms','ios'),{recursive:true});
+ fs.writeFileSync(path.join(plugin,'platforms','ios','build.xcconfig'),'OTHER_LDFLAGS = $(inherited) -framework "Plugin"\nSHARED = plugin\nPLUGIN_ONLY = -l"z"\n');
+ // An xcconfig outside the manifest site is a project file, not merged input.
+ fs.writeFileSync(path.join(plugin,'platforms','ios','extra.xcconfig'),'IGNORED = yes\n');
+ const resolved={directory:dir,applicationID:'org.example.xc',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions:[{platform:'ios',kind:'configuration',path:path.join(resources,'build.xcconfig'),packageDirectory:dir},{platform:'ios',kind:'configuration',path:path.join(plugin,'platforms','ios','build.xcconfig'),packageDirectory:plugin},{platform:'ios',kind:'configuration',path:path.join(plugin,'platforms','ios','extra.xcconfig'),packageDirectory:plugin}]};
+ const out=path.join(dir,'generated','platforms','ios');await prepare({resolved,directory:out});
+ const merged=fs.readFileSync(path.join(out,'plugins-debug.xcconfig'),'utf8');
+ assert.match(merged,/^#include\? "Pods\/Target Support Files\/Pods-NativeScriptApp\/Pods-NativeScriptApp\.debug\.xcconfig"\n/m);
+ assert.match(merged,/^OTHER_LDFLAGS = \$\(inherited\) -framework "App" -framework "Plugin"$/m);
+ assert.match(merged,/^APP_ONLY = app$/m);
+ assert.match(merged,/^SHARED = app$/m);
+ assert.match(merged,/^PLUGIN_ONLY = -l"z"$/m);
+ assert.doesNotMatch(merged,/IGNORED/);
+ // $(SRCROOT)/../../node_modules resolves to the app's install even for a
+ // detached output directory.
+ const alias=path.join(dir,'generated','node_modules');
+ assert.ok(fs.lstatSync(alias).isSymbolicLink());
+ assert.equal(fs.realpathSync(alias),fs.realpathSync(path.join(dir,'node_modules')));
 });

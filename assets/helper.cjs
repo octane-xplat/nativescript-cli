@@ -18115,7 +18115,90 @@ var require_xcode2 = __commonJS({
       }
     }
     var values = (section) => Object.entries(section || {}).filter(([key2, v]) => !key2.endsWith("_comment") && v && typeof v === "object");
-    module2.exports = async ({ resolved, directory }) => {
+    function mergePlist(base, patch) {
+      if (patch === void 0) return base;
+      if (base === void 0 || base === null || typeof base !== "object" || Array.isArray(base) || Array.isArray(patch)) return structuredClone(patch);
+      const out = structuredClone(base);
+      for (const key2 of Object.keys(patch)) out[key2] = mergePlistKey(key2, out[key2], patch[key2]);
+      return out;
+    }
+    function mergePlistKey(key2, base, patch) {
+      if (key2 === "CFBundleURLTypes" && Array.isArray(base) && Array.isArray(patch)) {
+        for (const element of patch) {
+          const same = element && typeof element === "object" && element.CFBundleTypeRole ? base.find((item) => item && item.CFBundleTypeRole === element.CFBundleTypeRole) : void 0;
+          if (same && Array.isArray(same.CFBundleURLSchemes) && Array.isArray(element.CFBundleURLSchemes)) same.CFBundleURLSchemes = same.CFBundleURLSchemes.concat(element.CFBundleURLSchemes);
+          else if (!same) base.push(element);
+        }
+        return base;
+      }
+      if (key2 === "LSApplicationQueriesSchemes" && Array.isArray(base) && Array.isArray(patch)) {
+        for (const element of patch) if (!base.some((item) => item === element)) base.push(element);
+        return base;
+      }
+      if (base && typeof base === "object" && !Array.isArray(base) && patch && typeof patch === "object" && !Array.isArray(patch)) return mergePlist(base, patch);
+      return structuredClone(patch);
+    }
+    var inheritedPattern = /\$\(inherited\)|\$\{inherited\}/g;
+    function parseXcconfig(text) {
+      const attributes = /* @__PURE__ */ new Map(), includes = [];
+      for (const raw of text.split("\n")) {
+        const line = raw.split("//")[0];
+        const include = /#include\??\s*"(.+)"/.exec(line);
+        if (include) {
+          includes.push(include[1].endsWith(".xcconfig") ? include[1] : include[1] + ".xcconfig");
+          continue;
+        }
+        const assignment = /([^=\[]+(?:\[[^\]]*?(?:=[^\]]*?)?\])*)\s*=(.*)/.exec(line);
+        if (!assignment) continue;
+        const key2 = assignment[1].trim();
+        attributes.set(key2, assignment[2].trim().replace(inheritedPattern, (marker) => attributes.has(key2) ? attributes.get(key2) : marker));
+      }
+      return { attributes, includes };
+    }
+    var shellsplit = (value) => (value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map((token) => token.replace(/["']/g, ""));
+    function mergeXcconfigAttributes(attributes, incoming) {
+      for (const [key2, source] of incoming) {
+        const kept = attributes.get(key2);
+        if (kept === void 0) {
+          attributes.set(key2, source);
+          continue;
+        }
+        if (!/\$\(inherited\)|\$\{inherited\}/.test(kept)) continue;
+        const appended = source.replace(inheritedPattern, "").trim();
+        if (!appended) continue;
+        const keptTokens = shellsplit(kept.trim()), sourceTokens = shellsplit(appended);
+        attributes.set(
+          key2,
+          sourceTokens.every((token) => keptTokens.includes(token)) || keptTokens.slice(0, sourceTokens.length).join(" ") === sourceTokens.join(" ") ? kept.trim() : sourceTokens.slice(0, keptTokens.length).join(" ") === keptTokens.join(" ") ? appended : `${kept.trim()} ${appended}`
+        );
+      }
+    }
+    var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var podfileFunctionBase = (name) => "post_install" + name.replace(/_/g, "___").replace(/[^A-Za-z0-9_]/g, "_");
+    function rehostPostInstall(content, pluginName) {
+      const functions = [];
+      const replaced = content.replace(/post_install do *(\|(\w+)\|)?/g, (match, group, parameter) => {
+        const functionName = `${podfileFunctionBase(pluginName)}_${functions.length}`;
+        functions.push({ name: functionName, parameters: !!parameter });
+        return `def ${functionName}${parameter ? ` (${parameter})` : ""}`;
+      });
+      return { replaced, functions };
+    }
+    var platformRow = /^\s*?(platform\b\s*?:\s*?ios\b(?:,\s*?['"](.+)['"])?)/gm;
+    function commentPlatformRows(content, file) {
+      let platform = null;
+      const replaced = content.replace(platformRow, (match, row, version) => {
+        platform = { content: row, version, path: file };
+        return `# ${match.trim()}`;
+      });
+      return { replaced, platform };
+    }
+    var coerceVersion = (version) => {
+      const match = /(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version || "");
+      return match && [match[1] | 0, match[2] | 0, match[3] | 0];
+    };
+    var versionGreater = (a, b) => !!a && !!b && (a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2]);
+    module2.exports = async ({ resolved, directory, configuration }) => {
       const normalize = (value) => Array.isArray(value) ? value.map(normalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k[0].toLowerCase() + k.slice(1), normalize(v)])) : value;
       resolved = normalize(resolved);
       if (resolved) resolved.contributions ??= [];
@@ -18209,9 +18292,35 @@ var require_xcode2 = __commonJS({
         }
       };
       const productNames = new Set(values(objects.XCSwiftPackageProductDependency).map(([, p]) => unquote(p.productName)));
-      let info = { CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)", CFBundleExecutable: "$(EXECUTABLE_NAME)", CFBundleName: name, CFBundlePackageType: "APPL", CFBundleVersion: "1", CFBundleShortVersionString: "1.0", LSRequiresIPhoneOS: true };
-      let entitlements = plist.parse(fs2.readFileSync(path2.join(template, "__PROJECT_NAME__/__PROJECT_NAME__.entitlements"), "utf8"));
-      const contributions = resolved.contributions.filter((c) => c.platform === "ios").sort((a, b) => (a.packageDirectory === resolved.directory) - (b.packageDirectory === resolved.directory) || a.path.localeCompare(b.path));
+      let info = {}, entitlements = {}, entitlementsMerged = false;
+      const realCache = /* @__PURE__ */ new Map();
+      const real = (p) => {
+        let r = realCache.get(p);
+        if (r === void 0) {
+          try {
+            r = fs2.realpathSync(p);
+          } catch {
+            r = p;
+          }
+          realCache.set(p, r);
+        }
+        return r;
+      };
+      const appRoot = resolved.directory && fs2.existsSync(resolved.directory) ? fs2.realpathSync(resolved.directory) : resolved.directory;
+      const appIOSDirectory = resolved.config?.appResourcesPath ? path2.join(real(resolved.config.appResourcesPath), "iOS") : void 0;
+      const isAppOwned = (c) => !c.packageDirectory || c.packageDirectory === appRoot;
+      const manifestDirectory = (c) => isAppOwned(c) ? appIOSDirectory : path2.join(c.packageDirectory, "platforms", "ios");
+      const rank = /* @__PURE__ */ new Map([[appRoot, 0]]);
+      {
+        const adjacency = /* @__PURE__ */ new Map();
+        for (const edge of resolved.dependencies || []) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+        const queue = [appRoot];
+        for (let i2 = 0; i2 < queue.length; i2++) for (const next of adjacency.get(queue[i2]) || []) if (!rank.has(next)) {
+          rank.set(next, rank.get(queue[i2]) + 1);
+          queue.push(next);
+        }
+      }
+      const contributions = resolved.contributions.filter((c) => c.platform === "ios").map((c) => c.packageDirectory ? { ...c, packageDirectory: real(c.packageDirectory) } : c).sort((a, b) => isAppOwned(a) - isAppOwned(b) || (rank.get(a.packageDirectory) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.packageDirectory) ?? Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
       for (const c of contributions) {
         if (!path2.isAbsolute(c.path) || !fs2.existsSync(c.path)) fail("invalid_input");
         const ext = path2.extname(c.path).toLowerCase();
@@ -18235,7 +18344,7 @@ var require_xcode2 = __commonJS({
           continue;
         }
         if (c.kind === "pods") {
-          pods.push(c.path);
+          pods.push({ path: c.path, packageDirectory: c.packageDirectory });
           continue;
         }
         if (c.kind === "spm") {
@@ -18282,18 +18391,30 @@ var require_xcode2 = __commonJS({
             modulemaps.push(c.path);
             continue;
           }
-          if (ext === ".xcconfig") configs.push(c.path);
-          else {
+          const site = manifestDirectory(c);
+          const atManifestSite = site !== void 0 && real(path2.dirname(c.path)) === site;
+          if (ext === ".xcconfig") {
+            if (atManifestSite && path2.basename(c.path) === "build.xcconfig") configs.push({ path: c.path, packageDirectory: c.packageDirectory });
+          } else if (ext === ".entitlements" && atManifestSite && path2.basename(c.path) === "app.entitlements") {
             let data;
             try {
               data = readPlist(c.path);
             } catch {
               fail("unavailable");
             }
-            if (ext === ".entitlements") Object.assign(entitlements, data);
-            else if (path2.basename(c.path) === "Info.plist") Object.assign(info, data);
-            else fail("unavailable");
-          }
+            entitlements = mergePlist(entitlements, data);
+            entitlementsMerged = true;
+          } else if (path2.basename(c.path) === "Info.plist") {
+            if (atManifestSite) {
+              let data;
+              try {
+                data = readPlist(c.path);
+              } catch {
+                fail("unavailable");
+              }
+              info = mergePlist(info, data);
+            }
+          } else if (ext === ".plist") fail("unavailable");
         }
         const types = { ".swift": "sourcecode.swift", ".m": "sourcecode.c.objc", ".mm": "sourcecode.cpp.objcpp", ".h": "sourcecode.c.h", ".c": "sourcecode.c.c", ".cpp": "sourcecode.cpp.cpp", ".framework": "wrapper.framework", ".xcframework": "wrapper.xcframework", ".a": "archive.ar", ".xcconfig": "text.xcconfig", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements", ".xcassets": "folder.assetcatalog" };
         const ref = put("PBXFileReference", `file:${c.path}`, { path: q(c.path), sourceTree: q("<absolute>"), lastKnownFileType: types[ext] || (fs2.statSync(c.path).isDirectory() ? "folder" : "file") });
@@ -18317,7 +18438,7 @@ var require_xcode2 = __commonJS({
         const settings = objects.XCBuildConfiguration[entry.value].buildSettings;
         settings.PRODUCT_BUNDLE_IDENTIFIER = q(resolved.applicationID);
         settings.CODE_SIGN_ENTITLEMENTS = q(`${name}/${name}.entitlements`);
-        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), q(q("$(SRCROOT)/internal/NativeContributions")), ...Array.from(new Set([...headers, ...modulemaps].map((p) => q(q(path2.dirname(p))))))];
+        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), ...Array.from(new Set([...headers, ...modulemaps].map((p) => q(q(path2.dirname(p))))))];
         settings.FRAMEWORK_SEARCH_PATHS = ['"$(inherited)"', ...Array.from(new Set(contributions.filter((c) => c.kind === "framework").map((c) => q(q(path2.dirname(c.path))))))];
       }
       const write = (file, text) => {
@@ -18326,30 +18447,108 @@ var require_xcode2 = __commonJS({
         fs2.writeFileSync(temp, text);
         fs2.renameSync(temp, file);
       };
+      info = mergePlist(info, { CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)" });
+      if (configuration !== "release") info = mergePlist(info, { CFBundleURLTypes: [{ CFBundleTypeRole: "Editor", CFBundleURLSchemes: [resolved.applicationID.replace(/[^A-Za-z0-9]/g, "")] }] });
       write(path2.join(directory, name, `${name}-Info.plist`), plist.build(info));
-      write(path2.join(directory, name, `${name}.entitlements`), plist.build(entitlements));
-      write(path2.join(directory, "internal/Swift-ObjC-Bridging-Header.h"), '#import <NativeScript/NativeScript.h>\n#import "NativeScriptStart.h"\n' + headers.map((p) => `#import ${q(p)}
-`).join(""));
-      write(path2.join(directory, "internal/NativeContributions/module.modulemap"), "module NativeContributions {\n" + headers.map((p) => `  header ${q(p)}
-`).join("") + "  export *\n}\n");
+      if (entitlementsMerged) write(path2.join(directory, name, `${name}.entitlements`), plist.build(entitlements));
+      const bridgingHeader = path2.join(directory, "internal/Swift-ObjC-Bridging-Header.h");
+      if (!fs2.existsSync(bridgingHeader)) write(bridgingHeader, '#import "TargetConditionals.h"\n\n#ifndef TARGET_OS_WATCH\n    #import "NativeScript/NativeScript.h"\n    #import "NativeScriptStart.h"\n#endif\n');
+      fs2.rmSync(path2.join(internal, "NativeContributions"), { recursive: true, force: true });
+      const xcconfigs = { attributes: /* @__PURE__ */ new Map(), includes: [] };
+      for (const c of [...configs.filter(isAppOwned), ...configs.filter((c2) => !isAppOwned(c2))]) {
+        let parsed;
+        try {
+          parsed = parseXcconfig(fs2.readFileSync(c.path, "utf8"));
+        } catch {
+          fail("unavailable");
+        }
+        for (const include of parsed.includes) if (!xcconfigs.includes.includes(include)) xcconfigs.includes.push(include);
+        mergeXcconfigAttributes(xcconfigs.attributes, parsed.attributes);
+      }
       for (const mode of ["debug", "release"]) write(path2.join(directory, `plugins-${mode}.xcconfig`), `#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"
-` + (modulemaps.length ? `OTHER_CFLAGS = $(inherited) ${modulemaps.map((p) => "-fmodule-map-file=" + q(p)).join(" ")}
-OTHER_SWIFT_FLAGS = $(inherited) ${modulemaps.map((p) => "-Xcc -fmodule-map-file=" + q(p)).join(" ")}
-` : "") + configs.map((p) => `#include ${q(p)}
+` + xcconfigs.includes.map((p) => `#include ${q(p)}
+`).join("") + [...xcconfigs.attributes].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k} = ${v}
 `).join(""));
       const ruby = (value) => `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-      if (pods.length || previous.pods) write(path2.join(directory, "Podfile"), `platform :ios, '13.0'
-project '${name}.xcodeproj'
-target '${name}' do
-` + pods.map((p) => path2.extname(p) === ".podspec" ? `  pod ${ruby(path2.basename(p, ".podspec"))}, :path => ${ruby(path2.dirname(p))}
-` : `  instance_eval(File.read(${ruby(p)}), ${ruby(p)})
-`).join("") + "end\n");
-      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods, packages, remotePackages }, null, 2) + "\n");
+      if (pods.length || previous.pods) {
+        const appPodfile = appIOSDirectory ? path2.join(appIOSDirectory, "Podfile") : "";
+        const packageNames = new Map(resolved.packages.map((p) => [real(p.directory), p.name]));
+        const pluginName = (c) => isAppOwned(c) ? "NSPodfileBase" : packageNames.get(c.packageDirectory) ?? path2.basename(c.packageDirectory);
+        let body = "";
+        const appendBlock = (block) => {
+          body = body.trim() ? body.trim() + "\n\n" + block.trim() : block.trim();
+        };
+        const hookHeader = "post_install do |installer|\n";
+        const addHookCalls = (functions) => {
+          if (!functions.length) return;
+          const calls = functions.map((f) => `  ${f.name}${f.parameters ? " installer" : ""}`).join("\n");
+          if (body.includes(hookHeader)) body = body.replace(new RegExp(`(${escapeRegExp(hookHeader)}[\\s\\S]*?)(\\bend\\b)`, "m"), (m, inside, end) => inside + calls + "\n" + end);
+          else body = (body.trim() ? body.trim() + "\n\n" : "") + hookHeader + calls + "\nend";
+        };
+        const sectionHeader = "# NativeScriptPlatformSection", sectionFooter = "# End NativeScriptPlatformSection";
+        const buildSection = (data) => `${sectionHeader} ${data.path} with${data.version ? ` ${data.version}` : ""}
+${data.content}
+${sectionFooter}`;
+        const sectionPattern = new RegExp(`${sectionHeader} ([\\s\\S]*?)with[\\s\\S]*?\\n([\\s\\S]*?(?:,\\s*?['"](.+)['"])?)\\n${sectionFooter}`, "m");
+        const addPlatformSection = (data) => {
+          const existing = sectionPattern.exec(body);
+          if (!existing) {
+            body = body.trim() + "\n\n" + buildSection(data) + "\n";
+            return;
+          }
+          const current = { path: existing[1].trim(), content: existing[2], version: existing[3] };
+          if (current.path !== appPodfile && data.path === appPodfile || current.path === appPodfile && data.path === appPodfile && versionGreater(coerceVersion(data.version), coerceVersion(current.version)) || (!data.version || current.version && versionGreater(coerceVersion(data.version), coerceVersion(current.version)))) body = body.replace(existing[0], buildSection(data).trim());
+        };
+        for (const c of pods) {
+          if (path2.extname(c.path) === ".podspec") {
+            appendBlock(`pod ${ruby(path2.basename(c.path, ".podspec"))}, :path => ${ruby(path2.dirname(c.path))}`);
+            continue;
+          }
+          let content;
+          try {
+            content = fs2.readFileSync(c.path, "utf8");
+          } catch {
+            fail("unavailable");
+          }
+          const hooks = rehostPostInstall(content, pluginName(c));
+          const platforms = commentPlatformRows(hooks.replaced, c.path);
+          addHookCalls(hooks.functions);
+          if (platforms.platform) addPlatformSection(platforms.platform);
+          appendBlock(`# Begin Podfile - ${c.path.replace(/\+/g, "\\+")}
+${platforms.replaced}
+# End Podfile`);
+        }
+        write(path2.join(directory, "Podfile"), `use_frameworks!
+
+target "${name}" do
+${body.trim()}
+end
+`);
+      }
+      write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods: pods.map((c) => c.path), packages, remotePackages }, null, 2) + "\n");
       write(projectFile, project.writeSync());
       write(stateFile, JSON.stringify({ runtime: runtime.version, ids, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm }) + "\n");
       fs2.mkdirSync(path2.join(directory, "app"), { recursive: true });
       const bundlePackage = path2.join(directory, "app/package.json");
       if (!fs2.existsSync(bundlePackage)) write(bundlePackage, JSON.stringify({ main: "bundle.mjs" }));
+      const appModules = appRoot && path2.join(appRoot, "node_modules");
+      if (appModules && fs2.existsSync(appModules) && fs2.statSync(appModules).isDirectory()) {
+        const alias = path2.resolve(directory, "../../node_modules");
+        try {
+          const current = fs2.lstatSync(alias, { throwIfNoEntry: false });
+          if (current) {
+            if (current.isSymbolicLink() && fs2.realpathSync(alias) !== fs2.realpathSync(appModules)) {
+              fs2.rmSync(alias);
+              fs2.symlinkSync(appModules, alias);
+            }
+          } else {
+            fs2.mkdirSync(path2.dirname(alias), { recursive: true });
+            fs2.symlinkSync(appModules, alias);
+          }
+        } catch {
+          fail("unavailable");
+        }
+      }
       return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm, target: name, localSwiftPackages };
     };
   }
@@ -19515,9 +19714,28 @@ var require_resolve = __commonJS({
         }
       }
       await visit(root, app, true);
+      const order = /* @__PURE__ */ new Map([[root, 0]]);
+      {
+        const adjacency = /* @__PURE__ */ new Map();
+        for (const edge of edges) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+        const queue = [root];
+        for (let i2 = 0; i2 < queue.length; i2++) for (const next of adjacency.get(queue[i2]) || []) if (!order.has(next)) {
+          order.set(next, order.size);
+          queue.push(next);
+        }
+      }
+      const winners = /* @__PURE__ */ new Map();
+      for (const item of packages.values()) {
+        if (!item.native || item.directory === root) continue;
+        const winner = winners.get(item.name);
+        const position = order.get(item.directory) ?? Number.MAX_SAFE_INTEGER;
+        if (!winner || position < winner.position) winners.set(item.name, { directory: item.directory, position });
+      }
+      const dropped = new Set([...packages.values()].filter((item) => item.native && item.directory !== root && winners.get(item.name)?.directory !== item.directory).map((item) => item.directory));
+      const appliedContributions = contributions.filter((c) => !dropped.has(c.packageDirectory));
       let selectedContributions;
       try {
-        selectedContributions = swiftPackages.mergeLocal(contributions, root);
+        selectedContributions = swiftPackages.mergeLocal(appliedContributions, root);
       } catch {
         fail("invalid_input", "Conflicting local Swift package products or local/remote declarations");
       }
@@ -19540,7 +19758,8 @@ var require_resolve = __commonJS({
       }
       for (const c of remote) membership.set(JSON.stringify(["spm-remote", c.spm.repositoryURL]), c);
       const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
-      if (nativeSourceGroups.length) result.nativeSourceGroups = nativeSourceGroups;
+      const appliedGroups = nativeSourceGroups.filter((group) => !dropped.has(group.packageDirectory));
+      if (appliedGroups.length) result.nativeSourceGroups = appliedGroups;
       result.revision = crypto.createHash("sha256").update(JSON.stringify(result)).digest("hex");
       return result;
     }

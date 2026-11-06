@@ -41,7 +41,91 @@ function dynamicFramework(file) {
   } catch { fail('unavailable'); } finally {if(fd!==undefined) fs.closeSync(fd);}
 }
 const values = section => Object.entries(section || {}).filter(([key,v]) => !key.endsWith('_comment') && v && typeof v === 'object');
-module.exports = async ({ resolved, directory }) => {
+// The property-list merges reproduce upstream's PlistMerger (lodash mergeWith
+// semantics): dictionaries merge recursively, CFBundleURLTypes concatenate by
+// role, LSApplicationQueriesSchemes deduplicate, and every other array or
+// scalar is replaced by the later patch.
+function mergePlist(base, patch) {
+  if (patch === undefined) return base;
+  if (base === undefined || base === null || typeof base !== 'object' || Array.isArray(base) || Array.isArray(patch)) return structuredClone(patch);
+  const out = structuredClone(base);
+  for (const key of Object.keys(patch)) out[key] = mergePlistKey(key, out[key], patch[key]);
+  return out;
+}
+function mergePlistKey(key, base, patch) {
+  if (key === 'CFBundleURLTypes' && Array.isArray(base) && Array.isArray(patch)) {
+    for (const element of patch) {
+      const same = element && typeof element === 'object' && element.CFBundleTypeRole ? base.find(item => item && item.CFBundleTypeRole === element.CFBundleTypeRole) : undefined;
+      if (same && Array.isArray(same.CFBundleURLSchemes) && Array.isArray(element.CFBundleURLSchemes)) same.CFBundleURLSchemes = same.CFBundleURLSchemes.concat(element.CFBundleURLSchemes);
+      else if (!same) base.push(element);
+    }
+    return base;
+  }
+  if (key === 'LSApplicationQueriesSchemes' && Array.isArray(base) && Array.isArray(patch)) {
+    for (const element of patch) if (!base.some(item => item === element)) base.push(element);
+    return base;
+  }
+  if (base && typeof base === 'object' && !Array.isArray(base) && patch && typeof patch === 'object' && !Array.isArray(patch)) return mergePlist(base, patch);
+  return structuredClone(patch);
+}
+// xcconfig contributions merge like upstream's XcconfigService.mergeFiles:
+// the App_Resources build.xcconfig applies first and keeps its values, plugin
+// files fill gaps, and a kept value containing $(inherited) absorbs the later
+// file's non-inherited remainder.
+const inheritedPattern = /\$\(inherited\)|\$\{inherited\}/g;
+function parseXcconfig(text) {
+  const attributes = new Map(), includes = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.split('//')[0];
+    const include = /#include\??\s*"(.+)"/.exec(line);
+    if (include) { includes.push(include[1].endsWith('.xcconfig') ? include[1] : include[1] + '.xcconfig'); continue; }
+    const assignment = /([^=\[]+(?:\[[^\]]*?(?:=[^\]]*?)?\])*)\s*=(.*)/.exec(line);
+    if (!assignment) continue;
+    const key = assignment[1].trim();
+    attributes.set(key, assignment[2].trim().replace(inheritedPattern, marker => attributes.has(key) ? attributes.get(key) : marker));
+  }
+  return { attributes, includes };
+}
+const shellsplit = value => (value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map(token => token.replace(/["']/g, ''));
+function mergeXcconfigAttributes(attributes, incoming) {
+  for (const [key, source] of incoming) {
+    const kept = attributes.get(key);
+    if (kept === undefined) { attributes.set(key, source); continue; }
+    if (!/\$\(inherited\)|\$\{inherited\}/.test(kept)) continue;
+    const appended = source.replace(inheritedPattern, '').trim();
+    if (!appended) continue;
+    const keptTokens = shellsplit(kept.trim()), sourceTokens = shellsplit(appended);
+    attributes.set(key,
+      sourceTokens.every(token => keptTokens.includes(token)) || keptTokens.slice(0, sourceTokens.length).join(' ') === sourceTokens.join(' ') ? kept.trim()
+        : sourceTokens.slice(0, keptTokens.length).join(' ') === keptTokens.join(' ') ? appended
+          : `${kept.trim()} ${appended}`);
+  }
+}
+const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Podfile composition matches upstream's CocoaPodsService: plugin Podfiles are
+// inlined verbatim inside the target between Begin/End markers, their platform
+// rows are commented into a single platform section, and post_install blocks
+// become named functions invoked from one hook. Instance evaluation inside the
+// target fails on plugin platform/use_frameworks/post_install declarations.
+const podfileFunctionBase = name => 'post_install' + name.replace(/_/g, '___').replace(/[^A-Za-z0-9_]/g, '_');
+function rehostPostInstall(content, pluginName) {
+  const functions = [];
+  const replaced = content.replace(/post_install do *(\|(\w+)\|)?/g, (match, group, parameter) => {
+    const functionName = `${podfileFunctionBase(pluginName)}_${functions.length}`;
+    functions.push({ name: functionName, parameters: !!parameter });
+    return `def ${functionName}${parameter ? ` (${parameter})` : ''}`;
+  });
+  return { replaced, functions };
+}
+const platformRow = /^\s*?(platform\b\s*?:\s*?ios\b(?:,\s*?['"](.+)['"])?)/gm;
+function commentPlatformRows(content, file) {
+  let platform = null;
+  const replaced = content.replace(platformRow, (match, row, version) => { platform = { content: row, version, path: file }; return `# ${match.trim()}`; });
+  return { replaced, platform };
+}
+const coerceVersion = version => { const match = /(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version || ''); return match && [match[1] | 0, match[2] | 0, match[3] | 0]; };
+const versionGreater = (a, b) => !!a && !!b && (a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2]);
+module.exports = async ({ resolved, directory, configuration }) => {
   const normalize = value => Array.isArray(value) ? value.map(normalize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k,v])=>[k[0].toLowerCase()+k.slice(1),normalize(v)])) : value;
   resolved = normalize(resolved);
   if(resolved)resolved.contributions??=[];
@@ -124,9 +208,26 @@ module.exports = async ({ resolved, directory }) => {
   const headers=[], configs=[], pods=[], packages=[], modulemaps=[], remotePackages=[], localSwiftPackages=[];
   const unquote=value=>{try{return JSON.parse(value);}catch{return value;}};
   const productNames=new Set(values(objects.XCSwiftPackageProductDependency).map(([,p])=>unquote(p.productName)));
-  let info = {CFBundleIdentifier:'$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleExecutable:'$(EXECUTABLE_NAME)', CFBundleName:name, CFBundlePackageType:'APPL', CFBundleVersion:'1', CFBundleShortVersionString:'1.0', LSRequiresIPhoneOS:true};
-  let entitlements = plist.parse(fs.readFileSync(path.join(template,'__PROJECT_NAME__/__PROJECT_NAME__.entitlements'),'utf8'));
-  const contributions = resolved.contributions.filter(c=>c.platform==='ios').sort((a,b)=>(a.packageDirectory===resolved.directory)-(b.packageDirectory===resolved.directory) || a.path.localeCompare(b.path));
+  // Plugin manifests merge only from the plugin platform root and the app's
+  // iOS resources directory; upstream never collects files such as a
+  // platforms/ios/src/Info.plist framework manifest into the app plist.
+  let info = {}, entitlements = {}, entitlementsMerged = false;
+  const realCache=new Map();
+  const real=p=>{let r=realCache.get(p);if(r===undefined){try{r=fs.realpathSync(p);}catch{r=p;}realCache.set(p,r);}return r;};
+  const appRoot = resolved.directory && fs.existsSync(resolved.directory) ? fs.realpathSync(resolved.directory) : resolved.directory;
+  const appIOSDirectory = resolved.config?.appResourcesPath ? path.join(real(resolved.config.appResourcesPath), 'iOS') : undefined;
+  const isAppOwned = c => !c.packageDirectory || c.packageDirectory === appRoot;
+  const manifestDirectory = c => isAppOwned(c) ? appIOSDirectory : path.join(c.packageDirectory, 'platforms', 'ios');
+  // Plugins apply in breadth-first dependency order upstream; the app always
+  // applies last so its manifest values win.
+  const rank = new Map([[appRoot, 0]]);
+  {
+    const adjacency = new Map();
+    for (const edge of resolved.dependencies || []) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+    const queue = [appRoot];
+    for (let i = 0; i < queue.length; i++) for (const next of adjacency.get(queue[i]) || []) if (!rank.has(next)) { rank.set(next, rank.get(queue[i]) + 1); queue.push(next); }
+  }
+  const contributions = resolved.contributions.filter(c=>c.platform==='ios').map(c=>c.packageDirectory?{...c,packageDirectory:real(c.packageDirectory)}:c).sort((a,b)=>(isAppOwned(a)-isAppOwned(b)) || (rank.get(a.packageDirectory)??Number.MAX_SAFE_INTEGER)-(rank.get(b.packageDirectory)??Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
   for (const c of contributions) {
     if (!path.isAbsolute(c.path) || !fs.existsSync(c.path)) fail('invalid_input');
     const ext = path.extname(c.path).toLowerCase();
@@ -149,7 +250,7 @@ module.exports = async ({ resolved, directory }) => {
       }
       remotePackages.push(p);continue;
     }
-    if (c.kind === 'pods') { pods.push(c.path); continue; }
+    if (c.kind === 'pods') { pods.push({path:c.path,packageDirectory:c.packageDirectory}); continue; }
     if (c.kind === 'spm') {
       const sourceSHA256=c.spm?.path?resolved.sources?.find(source=>source.path===c.path)?.digest:undefined;
       const manifestDigest=()=>{try{if(!fs.lstatSync(c.path).isFile())fail('invalid_input');return crypto.createHash('sha256').update(fs.readFileSync(c.path)).digest('hex');}catch{fail('invalid_input');}};
@@ -179,13 +280,19 @@ module.exports = async ({ resolved, directory }) => {
     }
     if (c.kind === 'configuration') {
       if(ext==='.modulemap') {modulemaps.push(c.path);continue;}
-      if (ext === '.xcconfig') configs.push(c.path);
-      else {
+      const site = manifestDirectory(c);
+      const atManifestSite = site !== undefined && real(path.dirname(c.path)) === site;
+      if (ext === '.xcconfig') { if(atManifestSite && path.basename(c.path)==='build.xcconfig') configs.push({path:c.path,packageDirectory:c.packageDirectory}); }
+      else if (ext === '.entitlements' && atManifestSite && path.basename(c.path)==='app.entitlements') {
         let data; try { data=readPlist(c.path); } catch { fail('unavailable'); }
-        if (ext === '.entitlements') Object.assign(entitlements,data);
-        else if (path.basename(c.path) === 'Info.plist') Object.assign(info,data);
-        else fail('unavailable');
+        entitlements=mergePlist(entitlements,data); entitlementsMerged=true;
       }
+      else if (path.basename(c.path) === 'Info.plist') {
+        // Upstream merges only the platform-root Info.plist; one inside src/ is
+        // a framework manifest and stays an inert project file.
+        if (atManifestSite) { let data; try { data=readPlist(c.path); } catch { fail('unavailable'); } info=mergePlist(info,data); }
+      }
+      else if (ext === '.plist') fail('unavailable');
     }
     const types={'.swift':'sourcecode.swift','.m':'sourcecode.c.objc','.mm':'sourcecode.cpp.objcpp','.h':'sourcecode.c.h','.c':'sourcecode.c.c','.cpp':'sourcecode.cpp.cpp','.framework':'wrapper.framework','.xcframework':'wrapper.xcframework','.a':'archive.ar','.xcconfig':'text.xcconfig','.plist':'text.plist.xml','.entitlements':'text.plist.entitlements','.xcassets':'folder.assetcatalog'};
     const ref=put('PBXFileReference',`file:${c.path}`,{path:q(c.path),sourceTree:q('<absolute>'),lastKnownFileType:types[ext] || (fs.statSync(c.path).isDirectory()?'folder':'file')});
@@ -207,22 +314,85 @@ module.exports = async ({ resolved, directory }) => {
     settings.CODE_SIGN_ENTITLEMENTS=q(`${name}/${name}.entitlements`);
     // A module map's umbrella directory can contain nested include namespaces
     // (for example <SDWebImage/Header.h>), not just sibling header files.
-    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),q(q('$(SRCROOT)/internal/NativeContributions')),...Array.from(new Set([...headers,...modulemaps].map(p=>q(q(path.dirname(p))))))];
+    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),...Array.from(new Set([...headers,...modulemaps].map(p=>q(q(path.dirname(p))))))];
     settings.FRAMEWORK_SEARCH_PATHS=['"$(inherited)"',...Array.from(new Set(contributions.filter(c=>c.kind==='framework').map(c=>q(q(path.dirname(c.path))))))];
   }
   const write=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.p1-tmp';fs.writeFileSync(temp,text);fs.renameSync(temp,file);};
+  // Upstream applies the application identity last so plugin manifests can
+  // never override it, and registers the identifier URL scheme on non-release
+  // builds.
+  info=mergePlist(info,{CFBundleIdentifier:'$(PRODUCT_BUNDLE_IDENTIFIER)'});
+  if(configuration!=='release')info=mergePlist(info,{CFBundleURLTypes:[{CFBundleTypeRole:'Editor',CFBundleURLSchemes:[resolved.applicationID.replace(/[^A-Za-z0-9]/g,'')]}]});
   write(path.join(directory,name,`${name}-Info.plist`),plist.build(info));
-  write(path.join(directory,name,`${name}.entitlements`),plist.build(entitlements));
-  write(path.join(directory,'internal/Swift-ObjC-Bridging-Header.h'), '#import <NativeScript/NativeScript.h>\n#import "NativeScriptStart.h"\n'+headers.map(p=>`#import ${q(p)}\n`).join(''));
-  write(path.join(directory,'internal/NativeContributions/module.modulemap'), 'module NativeContributions {\n'+headers.map(p=>`  header ${q(p)}\n`).join('')+'  export *\n}\n');
-  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+(modulemaps.length?`OTHER_CFLAGS = $(inherited) ${modulemaps.map(p=>'-fmodule-map-file='+q(p)).join(' ')}\nOTHER_SWIFT_FLAGS = $(inherited) ${modulemaps.map(p=>'-Xcc -fmodule-map-file='+q(p)).join(' ')}\n`:'')+configs.map(p=>`#include ${q(p)}\n`).join(''));
+  // Upstream rewrites the app entitlements only when app.entitlements files
+  // merge; otherwise the template file stands.
+  if(entitlementsMerged)write(path.join(directory,name,`${name}.entitlements`),plist.build(entitlements));
+  // Upstream keeps the runtime's bridging header verbatim: no contributed
+  // headers are imported into Swift, and plugin module maps load through
+  // header-search-path module.modulemap discovery instead of a generated
+  // umbrella module.
+  const bridgingHeader=path.join(directory,'internal/Swift-ObjC-Bridging-Header.h');
+  if(!fs.existsSync(bridgingHeader))write(bridgingHeader,'#import "TargetConditionals.h"\n\n#ifndef TARGET_OS_WATCH\n    #import "NativeScript/NativeScript.h"\n    #import "NativeScriptStart.h"\n#endif\n');
+  fs.rmSync(path.join(internal,'NativeContributions'),{recursive:true,force:true});
+  const xcconfigs={attributes:new Map(),includes:[]};
+  for(const c of [...configs.filter(isAppOwned),...configs.filter(c=>!isAppOwned(c))]){
+    let parsed;try{parsed=parseXcconfig(fs.readFileSync(c.path,'utf8'));}catch{fail('unavailable');}
+    for(const include of parsed.includes)if(!xcconfigs.includes.includes(include))xcconfigs.includes.push(include);
+    mergeXcconfigAttributes(xcconfigs.attributes,parsed.attributes);
+  }
+  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+xcconfigs.includes.map(p=>`#include ${q(p)}\n`).join('')+[...xcconfigs.attributes].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k} = ${v}\n`).join(''));
   const ruby = value => `'${value.replaceAll('\\','\\\\').replaceAll("'","\\'")}'`;
-  if(pods.length || previous.pods) write(path.join(directory,'Podfile'), `platform :ios, '13.0'\nproject '${name}.xcodeproj'\ntarget '${name}' do\n`+pods.map(p=>path.extname(p)==='.podspec'?`  pod ${ruby(path.basename(p,'.podspec'))}, :path => ${ruby(path.dirname(p))}\n`:`  instance_eval(File.read(${ruby(p)}), ${ruby(p)})\n`).join('')+'end\n');
-  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods,packages,remotePackages},null,2)+'\n');
+  if(pods.length || previous.pods) {
+    const appPodfile=appIOSDirectory?path.join(appIOSDirectory,'Podfile'):'';
+    const packageNames=new Map(resolved.packages.map(p=>[real(p.directory),p.name]));
+    const pluginName=c=>isAppOwned(c)?'NSPodfileBase':packageNames.get(c.packageDirectory)??path.basename(c.packageDirectory);
+    let body='';
+    const appendBlock=block=>{body=body.trim()?body.trim()+'\n\n'+block.trim():block.trim();};
+    const hookHeader='post_install do |installer|\n';
+    const addHookCalls=functions=>{
+      if(!functions.length)return;
+      const calls=functions.map(f=>`  ${f.name}${f.parameters?' installer':''}`).join('\n');
+      if(body.includes(hookHeader))body=body.replace(new RegExp(`(${escapeRegExp(hookHeader)}[\\s\\S]*?)(\\bend\\b)`,'m'),(m,inside,end)=>inside+calls+'\n'+end);
+      else body=(body.trim()?body.trim()+'\n\n':'')+hookHeader+calls+'\nend';
+    };
+    const sectionHeader='# NativeScriptPlatformSection',sectionFooter='# End NativeScriptPlatformSection';
+    const buildSection=data=>`${sectionHeader} ${data.path} with${data.version?` ${data.version}`:''}\n${data.content}\n${sectionFooter}`;
+    const sectionPattern=new RegExp(`${sectionHeader} ([\\s\\S]*?)with[\\s\\S]*?\\n([\\s\\S]*?(?:,\\s*?['"](.+)['"])?)\\n${sectionFooter}`,'m');
+    const addPlatformSection=data=>{
+      const existing=sectionPattern.exec(body);
+      if(!existing){body=body.trim()+'\n\n'+buildSection(data)+'\n';return;}
+      const current={path:existing[1].trim(),content:existing[2],version:existing[3]};
+      if((current.path!==appPodfile&&data.path===appPodfile)||(current.path===appPodfile&&data.path===appPodfile&&versionGreater(coerceVersion(data.version),coerceVersion(current.version)))||(!data.version||(current.version&&versionGreater(coerceVersion(data.version),coerceVersion(current.version)))))body=body.replace(existing[0],buildSection(data).trim());
+    };
+    for(const c of pods){
+      if(path.extname(c.path)==='.podspec'){appendBlock(`pod ${ruby(path.basename(c.path,'.podspec'))}, :path => ${ruby(path.dirname(c.path))}`);continue;}
+      let content;try{content=fs.readFileSync(c.path,'utf8');}catch{fail('unavailable');}
+      const hooks=rehostPostInstall(content,pluginName(c));
+      const platforms=commentPlatformRows(hooks.replaced,c.path);
+      addHookCalls(hooks.functions);
+      if(platforms.platform)addPlatformSection(platforms.platform);
+      appendBlock(`# Begin Podfile - ${c.path.replace(/\+/g,'\\+')}\n${platforms.replaced}\n# End Podfile`);
+    }
+    write(path.join(directory,'Podfile'),`use_frameworks!\n\ntarget "${name}" do\n${body.trim()}\nend\n`);
+  }
+  write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods:pods.map(c=>c.path),packages,remotePackages},null,2)+'\n');
   write(projectFile,project.writeSync());
   write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm})+'\n');
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});
   const bundlePackage=path.join(directory,'app/package.json');
   if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.mjs'}));
+  // Contributed xcconfigs resolve plugin resources as $(SRCROOT)/../../node_modules,
+  // assuming the generated project sits at <app>/platforms/ios like upstream's.
+  // A detached output directory keeps that contract through a node_modules
+  // alias two levels up, so $(SRCROOT)/../.. still reads as the app root.
+  const appModules=appRoot&&path.join(appRoot,'node_modules');
+  if(appModules&&fs.existsSync(appModules)&&fs.statSync(appModules).isDirectory()){
+    const alias=path.resolve(directory,'../../node_modules');
+    try{
+      const current=fs.lstatSync(alias,{throwIfNoEntry:false});
+      if(current){if(current.isSymbolicLink()&&fs.realpathSync(alias)!==fs.realpathSync(appModules)){fs.rmSync(alias);fs.symlinkSync(appModules,alias);}}
+      else{fs.mkdirSync(path.dirname(alias),{recursive:true});fs.symlinkSync(appModules,alias);}
+    }catch{fail('unavailable');}
+  }
   return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm,target:name,localSwiftPackages};
 };

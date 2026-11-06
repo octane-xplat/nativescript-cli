@@ -313,8 +313,28 @@ async function resolve({ projectDir }) {
     }
   }
   await visit(root, app, true);
+  // Upstream applies each native package name once: getAllProductionPlugins
+  // keeps the first occurrence in breadth-first dependency order, so the
+  // install resolvable closest to the app root wins and duplicate nested
+  // versions cannot contribute a second copy of the same native code.
+  const order = new Map([[root, 0]]);
+  {
+    const adjacency = new Map();
+    for (const edge of edges) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+    const queue = [root];
+    for (let i = 0; i < queue.length; i++) for (const next of adjacency.get(queue[i]) || []) if (!order.has(next)) { order.set(next, order.size); queue.push(next); }
+  }
+  const winners = new Map();
+  for (const item of packages.values()) {
+    if (!item.native || item.directory === root) continue;
+    const winner = winners.get(item.name);
+    const position = order.get(item.directory) ?? Number.MAX_SAFE_INTEGER;
+    if (!winner || position < winner.position) winners.set(item.name, { directory: item.directory, position });
+  }
+  const dropped = new Set([...packages.values()].filter(item => item.native && item.directory !== root && winners.get(item.name)?.directory !== item.directory).map(item => item.directory));
+  const appliedContributions = contributions.filter(c => !dropped.has(c.packageDirectory));
   let selectedContributions;
-  try{selectedContributions=swiftPackages.mergeLocal(contributions,root);}catch{fail('invalid_input','Conflicting local Swift package products or local/remote declarations');}
+  try{selectedContributions=swiftPackages.mergeLocal(appliedContributions,root);}catch{fail('invalid_input','Conflicting local Swift package products or local/remote declarations');}
   // Explicit NativeSource groups can select a file already owned by an installed
   // native package. Compile physical membership once, preferring that package's
   // physical ownership over another selector or an app declaration.
@@ -333,7 +353,8 @@ async function resolve({ projectDir }) {
   try{remote=swiftPackages.merge(selectedContributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
   for(const c of remote)membership.set(JSON.stringify(['spm-remote',c.spm.repositoryURL]),c);
   const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
-  if(nativeSourceGroups.length)result.nativeSourceGroups=nativeSourceGroups;
+  const appliedGroups=nativeSourceGroups.filter(group=>!dropped.has(group.packageDirectory));
+  if(appliedGroups.length)result.nativeSourceGroups=appliedGroups;
   result.revision = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');
   return result;
 };

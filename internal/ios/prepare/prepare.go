@@ -66,9 +66,10 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 	}
 	dir := filepath.Join(l.GeneratedRoot, "ios")
 	payload, _ := json.Marshal(struct {
-		Resolved  project.Resolved `json:"resolved"`
-		Directory string           `json:"directory"`
-	}{r, dir})
+		Resolved      project.Resolved `json:"resolved"`
+		Directory     string           `json:"directory"`
+		Configuration string           `json:"configuration"`
+	}{r, dir, l.Identity.Target.Configuration})
 	var result struct {
 		Directory, ProjectFile, Target string
 		Pods, SPM                      bool
