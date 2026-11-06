@@ -171,6 +171,25 @@ func TestErrorsAndRedaction(t *testing.T) {
 	}
 }
 
+// Operation advice rides the existing message field for both output modes; the
+// envelope shape and failure code do not change.
+func TestFailureAdviceSurfacesInMessage(t *testing.T) {
+	advice := "xcodebuild build failed (exit 65): file.m:10:5: error: use of undeclared identifier 'x'"
+	f := &fakeLibrary{err: &ns.OperationError{Operation: "build", Kind: ns.ErrBuild, Cause: errors.New("PRIVATE_SECRET"), Advice: advice}}
+	var out, diag bytes.Buffer
+	code := execute(context.Background(), append([]string{"build"}, targetArgs...), &out, &diag, factoryFor(f))
+	if code != 1 || !strings.Contains(diag.String(), advice) {
+		t.Fatalf("%d %s", code, &diag)
+	}
+	f = &fakeLibrary{err: &ns.OperationError{Operation: "build", Kind: ns.ErrBuild, Cause: errors.New("PRIVATE_SECRET"), Advice: advice}}
+	out.Reset()
+	code = execute(context.Background(), append(append([]string{"build"}, targetArgs...), "--json"), &out, io.Discard, factoryFor(f))
+	var r response
+	if code != 1 || json.Unmarshal(out.Bytes(), &r) != nil || r.Error == nil || r.Error.Code != "operation_failed" || r.Error.Message != advice || strings.Contains(out.String(), "PRIVATE_SECRET") {
+		t.Fatalf("%d %s", code, &out)
+	}
+}
+
 type brokenWriter struct{}
 
 func (brokenWriter) Write([]byte) (int, error) { return 0, errors.New("broken") }

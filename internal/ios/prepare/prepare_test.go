@@ -24,6 +24,8 @@ type tool struct {
 	started chan process.Command
 	release chan struct{}
 	failure error
+	emit    []byte
+	code    int
 }
 type handle struct {
 	ctx  context.Context
@@ -32,13 +34,16 @@ type handle struct {
 
 func (p *tool) Start(ctx context.Context, c process.Command) (process.Handle, error) {
 	p.started <- c
+	if len(p.emit) > 0 && c.Output != nil {
+		c.Output(ctx, process.Stderr, p.emit)
+	}
 	return handle{ctx, p}, nil
 }
 func (h handle) Wait() (process.Exit, error) {
 	if h.tool.release != nil {
 		<-h.tool.release
 	}
-	return process.Exit{}, h.tool.failure
+	return process.Exit{Code: h.tool.code}, h.tool.failure
 }
 func (h handle) Close(context.Context) error { return nil }
 func TestDependencyToolRetainsLeaseUntilRetirement(t *testing.T) {
@@ -93,6 +98,47 @@ func TestDependencyToolRetainsLeaseUntilRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	replacement.Release()
+}
+
+// A dependency tool failure keeps its bounded captured output for advice.
+func TestDependencyToolFailureRetainsDiagnostic(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Darwin dependency tools only")
+	}
+	root := t.TempDir()
+	native := filepath.Join(root, "Podfile")
+	os.WriteFile(native, []byte("# component fixture"), 0600)
+	pkg, _ := filepath.Abs("testdata/runtime")
+	assets, _ := filepath.Abs("../../../assets")
+	r := project.Resolved{Directory: root, Revision: "fixture", ApplicationID: "org.example.fixture", Packages: []project.Package{{Name: "@nativescript/ios", Version: "8.9.0", Directory: pkg}}, Contributions: []project.Contribution{{Platform: "ios", Kind: "pods", Path: native}}}
+	layout, err := workspace.NewLayout(t.TempDir(), project.Identity{Schema: 1, ProjectDir: root, Revision: r.Revision, Target: project.Target{Platform: "ios", DestinationKind: "simulator", Architecture: "arm64", Configuration: "debug"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Directory = layout.Identity.ProjectDir
+	lease, err := workspace.Acquire(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	p := &tool{
+		started: make(chan process.Command, 1),
+		code:    1,
+		emit:    []byte("Analyzing dependencies\n\x1b[31m[!] Invalid `Podfile` file: cannot eval fragment twice\x1b[0m\n"),
+		failure: &process.Error{Kind: process.ErrExit, Cause: errors.New("exit status 1")},
+	}
+	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(assets)}, CacheDir: t.TempDir()}, Executor: p}
+	_, err = a.Prepare(context.Background(), r, lease)
+	var failure *Failure
+	if !errors.As(err, &failure) {
+		t.Fatalf("pod failure not typed: %v", err)
+	}
+	if failure.Stage != "pod install" || failure.ExitCode != 1 {
+		t.Fatalf("stage/exit lost: %+v", failure)
+	}
+	if !strings.Contains(failure.Diagnostic, "Invalid `Podfile` file") || !errors.Is(err, process.ErrExit) {
+		t.Fatalf("diagnostic/cause lost: %+v", failure)
+	}
 }
 
 func TestInstalledRuntimeControlsPackageMinimum(t *testing.T) {

@@ -18,6 +18,16 @@ import (
 var ErrRestart = errors.New("bundle inputs require re-resolution")
 var ErrServer = errors.New("bundle server stopped")
 
+// Failure is a helper-reported engine failure. Diagnostic is helper-authored
+// bounded text, never raw output; the helper redacts paths before framing.
+type Failure struct {
+	Diagnostic string
+	Cause      error
+}
+
+func (e *Failure) Error() string { return "bundling failed" }
+func (e *Failure) Unwrap() error { return e.Cause }
+
 type Adapter struct{ Host jsbridge.Host }
 type Endpoint struct {
 	URL    string `json:"url"`
@@ -78,6 +88,11 @@ func (a Adapter) call(ctx context.Context, q Request, sink func(jsbridge.Frame) 
 			err = ErrRestart
 		case "server_closed":
 			err = ErrServer
+		default:
+			// Unmapped engine failures carry the bounded helper diagnostic.
+			if remote.Failure.Detail != "" {
+				err = &Failure{Diagnostic: remote.Failure.Detail, Cause: err}
+			}
 		}
 	}
 	if err != nil {

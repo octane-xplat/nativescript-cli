@@ -34,6 +34,9 @@ func (f *fakeXcode) Start(_ context.Context, c process.Command) (process.Handle,
 		return completed{}, nil
 	}
 	if f.fail {
+		if c.Output != nil {
+			c.Output(context.Background(), process.Stderr, []byte("CompileC /tmp/out/file.o /tmp/src/file.m normal arm64 objective-c\n/tmp/src/file.m:10:5: error: use of undeclared identifier 'fixtureSymbol'\n** BUILD FAILED **\n"))
+		}
 		return completed{errors.New("fixture exit")}, nil
 	}
 	if c.Executable == "/usr/bin/plutil" {
@@ -150,6 +153,9 @@ func TestCommandsArtifactsAndFailures(t *testing.T) {
 				var failure *Failure
 				if !errors.As(e, &failure) || failure.ExitCode != 65 {
 					t.Fatal(e)
+				}
+				if failure.Stage != "build" || !strings.Contains(failure.Diagnostic, "error: use of undeclared identifier 'fixtureSymbol'") {
+					t.Fatalf("diagnostic not captured: %+v", failure)
 				}
 				return
 			}

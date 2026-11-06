@@ -23,7 +23,8 @@ import (
 var ErrSigning = errors.New("explicit signing inputs required")
 var ErrArtifact = errors.New("missing or incompatible Xcode artifact")
 
-// Failure identifies the failed stage without leaking tool output or signing values.
+// Failure identifies the failed stage. Diagnostic holds the tool's bounded
+// captured output; callers must surface only its sanitized error summary.
 type Failure struct {
 	Stage      string
 	ExitCode   int

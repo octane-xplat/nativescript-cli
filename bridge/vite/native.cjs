@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
+const { engineFailure } = require('./native-failure.cjs');
 const fail = code => Object.assign(new Error(), { code });
 
 // Runs in its own helper process. These environment/argv inputs belong only to
@@ -57,8 +58,10 @@ module.exports = async function native(p, emit) {
     if(!files.includes(entry))throw fail('operation_failed');
     return {directory:p.directory,entry,files:files.sort()};
   }
+  // Engine failures carry a bounded, sanitized detail summary into the error frame.
+  const engineCall = async run => { try { return await run(); } catch (error) { throw engineFailure(error, p.projectDir); } };
   if(!development){
-    await aliases.run(async()=>vite.build(await configs.config('build')));
+    await engineCall(async()=>aliases.run(async()=>vite.build(await configs.config('build'))));
     if(configs.changed())throw fail('restart_required');
     return manifest();
   }
@@ -71,7 +74,7 @@ module.exports = async function native(p, emit) {
   // an unhandled rejection or allow stale output to reach the native compiler.
   lifetime.catch(() => {});
   try {
-    server = await vite.createServer(await configs.config('serve'));
+    server = await engineCall(async()=>vite.createServer(await configs.config('serve')));
     // Vite must not restart this owned session internally with a stale resolved
     // project. Hand any restart request back to the Go lifecycle coordinator.
     server.restart=async()=>{rejectLifetime(fail('restart_required'));};
@@ -102,13 +105,13 @@ module.exports = async function native(p, emit) {
       nativeWatchers.push(watcher);
     }
     try { await server.listen(); }
-    catch(error) { if (/^Port \d+ is already in use$/.test(error.message || '')) throw fail('EADDRINUSE'); throw error; }
-    await aliases.run(async()=>vite.build(await configs.config('build')));
-    if (terminalError) throw terminalError;
+    catch(error) { if (/^Port \d+ is already in use$/.test(error.message || '')) throw fail('EADDRINUSE'); throw engineFailure(error, p.projectDir); }
+    await engineCall(async()=>aliases.run(async()=>vite.build(await configs.config('build'))));
+    if (terminalError) throw engineFailure(terminalError, p.projectDir);
     if(configs.changed())throw fail('restart_required');
     emit({type:'ready',manifest:manifest(),
       endpoint:{url:`http://127.0.0.1:${p.port}`,hmrURL:`ws://${p.hmrHost || '127.0.0.1'}:${p.port}/ns-hmr`}});
-    await lifetime;
+    await engineCall(()=>lifetime);
   } finally { for(const watcher of nativeWatchers) watcher.close(); await server?.close(); }
   }); } finally { aliases.close(); }
 };

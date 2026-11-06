@@ -25,6 +25,9 @@ type Request struct {
 type Failure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Detail is helper-authored, bounded diagnostic text. It is never raw logs,
+	// environment values or stack traces; producers bound it before framing.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Kind is event/result/error/cancel. Events have strictly increasing Sequence;

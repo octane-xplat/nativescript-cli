@@ -7,9 +7,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	androidbuild "github.com/octane-xplat/nativescript-cli/internal/android/build"
+	"github.com/octane-xplat/nativescript-cli/internal/bundle"
+	iosbuild "github.com/octane-xplat/nativescript-cli/internal/ios/build"
+	iosprepare "github.com/octane-xplat/nativescript-cli/internal/ios/prepare"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
@@ -402,6 +407,92 @@ func TestSinkBlocksStageAdvancement(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Tool failures keep their stage, exit status and a bounded sanitized summary
+// in Advice instead of collapsing to a bare category.
+func TestToolFailureDiagnosticsSurfaceInAdvice(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want []string
+	}{
+		{"xcodebuild", &iosbuild.Failure{Stage: "build", ExitCode: 65, Diagnostic: "CompileC file.o file.m\nfile.m:10:5: error: use of undeclared identifier 'x'\nnote: expanded\n** BUILD FAILED **\n", Cause: errors.New("exit")}, []string{"xcodebuild build failed (exit 65)", "error: use of undeclared identifier 'x'", "** BUILD FAILED **"}},
+		{"pod", &iosprepare.Failure{Stage: "pod install", ExitCode: 1, Diagnostic: "Analyzing dependencies\n[!] Invalid `Podfile` file: cannot eval fragment twice\n", Cause: errors.New("exit")}, []string{"pod install failed (exit 1)", "Invalid `Podfile` file"}},
+		{"spm resolve", &iosprepare.Failure{Stage: "xcodebuild -resolvePackageDependencies", ExitCode: 74, Diagnostic: "Fetching\ncould not resolve: error: no such module 'Missing'\n", Cause: errors.New("exit")}, []string{"xcodebuild -resolvePackageDependencies failed (exit 74)", "no such module"}},
+		{"vite", &bundle.Failure{Diagnostic: "[MISSING_EXPORT] \"missing\" is not exported by \"app/value.ts\", imported by \"app/app.ts\"", Cause: errors.New("remote")}, []string{"bundling failed", "MISSING_EXPORT", "is not exported"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := operationError("build", c.err)
+			var op *OperationError
+			if !errors.As(err, &op) || !errors.Is(err, ErrBuild) {
+				t.Fatalf("category lost: %v", err)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(op.Advice, want) {
+					t.Fatalf("advice %q missing %q", op.Advice, want)
+				}
+			}
+		})
+	}
+}
+
+// Native and dependency failures also convert to BuildError, preserving stage
+// and exit code for programmatic inspection.
+func TestToolFailurePreservesBuildError(t *testing.T) {
+	for _, err := range []error{
+		&iosbuild.Failure{Stage: "archive", ExitCode: 65, Cause: errors.New("exit")},
+		&iosprepare.Failure{Stage: "pod install", ExitCode: 1, Cause: errors.New("exit")},
+	} {
+		var be *BuildError
+		if !errors.As(operationError("build", err), &be) {
+			t.Fatalf("BuildError lost: %v", err)
+		}
+	}
+	var be *BuildError
+	if !errors.As(operationError("build", &androidbuild.Failure{Stage: ":app:assembleDebug", ExitCode: 1, Cause: errors.New("exit")}), &be) || be.Stage != ":app:assembleDebug" {
+		t.Fatal("android BuildError lost")
+	}
+}
+
+// Advice stays bounded no matter how large the captured tool log is.
+func TestToolDiagnosticBounded(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 500; i++ {
+		sb.WriteString("noise line\n")
+	}
+	for i := 0; i < 200; i++ {
+		sb.WriteString("file.m:1:1: error: repeated failure line\n")
+	}
+	op, ok := operationError("build", &iosbuild.Failure{Stage: "build", ExitCode: 65, Diagnostic: sb.String(), Cause: errors.New("exit")}).(*OperationError)
+	if !ok {
+		t.Fatal("not OperationError")
+	}
+	if len(op.Advice) > 2048+64 {
+		t.Fatalf("unbounded advice: %d bytes", len(op.Advice))
+	}
+	if strings.Count(op.Advice, "\n") > 10 {
+		t.Fatalf("unbounded advice lines: %d", strings.Count(op.Advice, "\n"))
+	}
+	if !strings.Contains(op.Advice, "error: repeated failure line") {
+		t.Fatalf("error lines missing: %q", op.Advice)
+	}
+	// Output without failure markers falls back to the bounded tail.
+	op, ok = operationError("build", &iosprepare.Failure{Stage: "pod install", ExitCode: 1, Diagnostic: "first\nmiddle\nlast line of output\n", Cause: errors.New("exit")}).(*OperationError)
+	if !ok || !strings.Contains(op.Advice, "last line of output") {
+		t.Fatalf("tail fallback lost: %q", op.Advice)
+	}
+	// ANSI sequences never reach advice.
+	op, ok = operationError("build", &iosprepare.Failure{Stage: "pod install", ExitCode: 1, Diagnostic: "\x1b[31merror: colored\x1b[0m\n", Cause: errors.New("exit")}).(*OperationError)
+	if !ok || strings.Contains(op.Advice, "\x1b") || !strings.Contains(op.Advice, "error: colored") {
+		t.Fatalf("ANSI leaked: %q", op.Advice)
+	}
+	// A cancellation wrapped in a tool failure is never reported as a tool failure.
+	err := operationError("run", errors.Join(context.Canceled, &iosprepare.Failure{Stage: "pod install", ExitCode: 1, Diagnostic: "error: x\n"}))
+	var op2 *OperationError
+	if !errors.As(err, &op2) || !errors.Is(err, context.Canceled) || op2.Advice != "" {
+		t.Fatalf("cancellation gained tool advice: %v", err)
 	}
 }
 

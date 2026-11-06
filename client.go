@@ -83,6 +83,10 @@ func operationError(op string, err error) error {
 	if errors.As(err, &android) {
 		cause = &BuildError{Stage: android.Stage, ExitCode: android.ExitCode, Cause: err}
 	}
+	var dependency *iosprepare.Failure
+	if errors.As(err, &dependency) {
+		cause = &BuildError{Stage: dependency.Stage, ExitCode: dependency.ExitCode, Cause: err}
+	}
 	// Cleanup can fail alongside the initiating sink/build/cancellation error.
 	// Expose that independent ownership failure without replacing its category.
 	if errors.Is(err, process.ErrCleanup) {
@@ -102,6 +106,23 @@ func operationError(op string, err error) error {
 	var requirement *workflow.PackageRequirement
 	if errors.As(err, &requirement) {
 		result.Advice = requirement.Error()
+	}
+	// Bounded tool diagnostics attach only to generic build failures; other
+	// categories keep their authored remediation or none.
+	if kind == ErrBuild {
+		if native != nil {
+			result.Advice = toolAdvice("xcodebuild "+native.Stage, native.ExitCode, native.Diagnostic)
+		}
+		if android != nil {
+			result.Advice = toolAdvice("gradle "+android.Stage, android.ExitCode, android.Diagnostic)
+		}
+		if dependency != nil {
+			result.Advice = toolAdvice(dependency.Stage, dependency.ExitCode, dependency.Diagnostic)
+		}
+		var bundling *bundle.Failure
+		if errors.As(err, &bundling) && bundling.Diagnostic != "" {
+			result.Advice = "bundling failed: " + truncateDiagnostic(bundling.Diagnostic)
+		}
 	}
 	return result
 }

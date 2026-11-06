@@ -8,6 +8,8 @@ The frame buffer limit is 16 MiB. Invalid framing or sink failure cancels the
 owned tree; completion waits for descendant retirement. Cancellation uses F1
 process cancellation, rather than a cooperative cancel frame which synchronous
 parsers cannot service. Stderr and dependency exception text are not forwarded.
+A handler may instead opt in a bounded, sanitized `detail` summary on its error
+frame (10 lines/2 KiB), which adapters surface through `OperationError.Advice`.
 Sinks run synchronously and must return; never call application sinks under a
 workspace lease. This is a private helper, never the external extension protocol.
 

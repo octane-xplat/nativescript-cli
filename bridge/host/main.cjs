@@ -51,5 +51,7 @@ console.log = console.info = console.warn = console.error = () => {};
 })().catch(error => {
   if (!request) { process.exitCode = 1; return; }
   // Do not forward arbitrary dependency messages, paths, environment or stack traces.
-  frame('error', { error: { code: ['invalid_input', 'unavailable', 'EADDRINUSE', 'server_closed', 'restart_required'].includes(error.code) ? error.code : 'operation_failed', message: request.feature === 'resolve' && error.safeResolve ? error.message : 'Helper operation failed' } });
+  // A handler may opt in a bounded, sanitized detail string for its owned tool.
+  const detail = typeof error.detail === 'string' && error.detail ? error.detail.split('\n').slice(0, 10).join('\n').slice(0, 2048) : undefined;
+  frame('error', { error: { code: ['invalid_input', 'unavailable', 'EADDRINUSE', 'server_closed', 'restart_required'].includes(error.code) ? error.code : 'operation_failed', message: request.feature === 'resolve' && error.safeResolve ? error.message : 'Helper operation failed', ...(detail ? { detail } : {}) } });
 });

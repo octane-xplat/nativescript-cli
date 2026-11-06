@@ -20,7 +20,9 @@ type OperationError struct {
 	Operation string
 	Kind      error
 	Cause     error
-	// Advice is safe, resolver-authored remediation; arbitrary dependency errors are excluded.
+	// Advice is safe, bounded diagnostic or remediation text: resolver-authored
+	// messages or a sanitized summary of a failed tool's own diagnostics. Raw
+	// logs, environment values and stack traces are always excluded.
 	Advice string
 }
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
@@ -311,6 +313,55 @@ func TestInvalidEntryFailsEngineBuild(t *testing.T) {
 	write(t, filepath.Join(r.Config.AppPath, "app.ts"), "invalid (((")
 	if _, err := a.Bundle(context.Background(), r, p, l); err == nil {
 		t.Fatal("invalid JS accepted")
+	}
+}
+
+// An unmapped helper error keeps its bounded detail instead of collapsing to a
+// bare operation_failed code, preserving the engine's diagnostic summary.
+func TestRemoteFailureDetailSurfaces(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("F1 helper unavailable")
+	}
+	if _, e := exec.LookPath("node"); e != nil {
+		t.Skip("Node unavailable")
+	}
+	script := `console.log(JSON.stringify({version:1,payloadVersion:'0.1.0',id:'vite',kind:'event',sequence:1}));` +
+		`console.log(JSON.stringify({version:1,payloadVersion:'0.1.0',id:'vite',kind:'error',error:{code:'operation_failed',message:'Helper operation failed',detail:'[MISSING_EXPORT] "missing" is not exported by "app/value.ts", imported by "app/app.ts"'}}));`
+	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: fstest.MapFS{
+		"helper.cjs":  {Data: []byte(script)},
+		"NOTICES.txt": {Data: []byte("fixture")},
+	}}, CacheDir: t.TempDir()}}
+	_, err := a.call(context.Background(), Request{ProjectDir: t.TempDir()}, nil)
+	var failure *Failure
+	if !errors.As(err, &failure) || !strings.Contains(failure.Diagnostic, `MISSING_EXPORT`) || !strings.Contains(failure.Diagnostic, `is not exported by "app/value.ts"`) {
+		t.Fatalf("engine diagnostic lost: %v", err)
+	}
+	var remote *jsbridge.RemoteError
+	if !errors.As(err, &remote) {
+		t.Fatal("remote cause replaced")
+	}
+}
+
+// Mapped helper codes still translate to their typed categories; detail only
+// rides on unmapped engine failures.
+func TestMappedRemoteCodesIgnoreDetail(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("F1 helper unavailable")
+	}
+	if _, e := exec.LookPath("node"); e != nil {
+		t.Skip("Node unavailable")
+	}
+	for code, want := range map[string]error{"unavailable": workflow.ErrUnavailable, "restart_required": ErrRestart, "server_closed": ErrServer} {
+		script := `console.log(JSON.stringify({version:1,payloadVersion:'0.1.0',id:'vite',kind:'error',error:{code:'` + code + `',message:'Helper operation failed',detail:'noise'}}));`
+		a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: fstest.MapFS{
+			"helper.cjs":  {Data: []byte(script)},
+			"NOTICES.txt": {Data: []byte("fixture")},
+		}}, CacheDir: t.TempDir()}}
+		_, err := a.call(context.Background(), Request{ProjectDir: t.TempDir()}, nil)
+		var failure *Failure
+		if !errors.Is(err, want) || errors.As(err, &failure) {
+			t.Fatalf("%s mapped to %v", code, err)
+		}
 	}
 }
 

@@ -18355,6 +18355,26 @@ target '${name}' do
   }
 });
 
+// bridge/vite/native-failure.cjs
+var require_native_failure = __commonJS({
+  "bridge/vite/native-failure.cjs"(exports2, module2) {
+    "use strict";
+    var passthrough = /* @__PURE__ */ new Set(["invalid_input", "unavailable", "EADDRINUSE", "server_closed", "restart_required", "operation_failed", "version"]);
+    function detail(error, projectDir) {
+      const lines = String(error && (error.message || error) || "engine failure").split(/\r?\n/).map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim()).filter(Boolean).slice(0, 10);
+      if (error && typeof error.code === "string" && !passthrough.has(error.code)) lines.unshift(`[${error.code}]`);
+      const summary = lines.join("\n");
+      const redacted = projectDir ? summary.split(projectDir).join("<project>") : summary;
+      return redacted.slice(0, 2048);
+    }
+    function engineFailure(error, projectDir) {
+      if (error && passthrough.has(error.code)) return error;
+      return Object.assign(new Error(), { code: "operation_failed", detail: detail(error, projectDir) });
+    }
+    module2.exports = { detail, engineFailure };
+  }
+});
+
 // bridge/vite/native-inputs.cjs
 var require_native_inputs = __commonJS({
   "bridge/vite/native-inputs.cjs"(exports2, module2) {
@@ -18894,6 +18914,7 @@ var require_native = __commonJS({
     var path2 = require("node:path");
     var { createRequire: createRequire2 } = require("node:module");
     var { pathToFileURL } = require("node:url");
+    var { engineFailure } = require_native_failure();
     var fail = (code) => Object.assign(new Error(), { code });
     module2.exports = async function native(p, emit) {
       const development = p.mode === "native";
@@ -18955,8 +18976,15 @@ var require_native = __commonJS({
             if (!files.includes(entry)) throw fail("operation_failed");
             return { directory: p.directory, entry, files: files.sort() };
           }
+          const engineCall = async (run) => {
+            try {
+              return await run();
+            } catch (error) {
+              throw engineFailure(error, p.projectDir);
+            }
+          };
           if (!development) {
-            await aliases.run(async () => vite.build(await configs.config("build")));
+            await engineCall(async () => aliases.run(async () => vite.build(await configs.config("build"))));
             if (configs.changed()) throw fail("restart_required");
             return manifest();
           }
@@ -18973,7 +19001,7 @@ var require_native = __commonJS({
           lifetime.catch(() => {
           });
           try {
-            server = await vite.createServer(await configs.config("serve"));
+            server = await engineCall(async () => vite.createServer(await configs.config("serve")));
             server.restart = async () => {
               rejectLifetime(fail("restart_required"));
             };
@@ -19013,17 +19041,17 @@ var require_native = __commonJS({
               await server.listen();
             } catch (error) {
               if (/^Port \d+ is already in use$/.test(error.message || "")) throw fail("EADDRINUSE");
-              throw error;
+              throw engineFailure(error, p.projectDir);
             }
-            await aliases.run(async () => vite.build(await configs.config("build")));
-            if (terminalError) throw terminalError;
+            await engineCall(async () => aliases.run(async () => vite.build(await configs.config("build"))));
+            if (terminalError) throw engineFailure(terminalError, p.projectDir);
             if (configs.changed()) throw fail("restart_required");
             emit({
               type: "ready",
               manifest: manifest(),
               endpoint: { url: `http://127.0.0.1:${p.port}`, hmrURL: `ws://${p.hmrHost || "127.0.0.1"}:${p.port}/ns-hmr` }
             });
-            await lifetime;
+            await engineCall(() => lifetime);
           } finally {
             for (const watcher of nativeWatchers) watcher.close();
             await server?.close();
@@ -19580,5 +19608,6 @@ console.log = console.info = console.warn = console.error = () => {
     process.exitCode = 1;
     return;
   }
-  frame("error", { error: { code: ["invalid_input", "unavailable", "EADDRINUSE", "server_closed", "restart_required"].includes(error.code) ? error.code : "operation_failed", message: request.feature === "resolve" && error.safeResolve ? error.message : "Helper operation failed" } });
+  const detail = typeof error.detail === "string" && error.detail ? error.detail.split("\n").slice(0, 10).join("\n").slice(0, 2048) : void 0;
+  frame("error", { error: { code: ["invalid_input", "unavailable", "EADDRINUSE", "server_closed", "restart_required"].includes(error.code) ? error.code : "operation_failed", message: request.feature === "resolve" && error.safeResolve ? error.message : "Helper operation failed", ...detail ? { detail } : {} } });
 });

@@ -2,6 +2,7 @@
 package prepare
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,18 @@ type Adapter struct {
 	Host     jsbridge.Host
 	Executor process.Executor
 }
+
+// Failure reports a failed dependency tool. Diagnostic is the tool's bounded
+// captured output; the caller extracts its sanitized summary for advice.
+type Failure struct {
+	Stage      string
+	ExitCode   int
+	Diagnostic string
+	Cause      error
+}
+
+func (e *Failure) Error() string { return "iOS dependency tool " + e.Stage + " failed" }
+func (e *Failure) Unwrap() error { return e.Cause }
 
 func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspace.Lease) (project.Prepared, error) {
 	if err := ctx.Err(); err != nil {
@@ -90,16 +103,27 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 			if runtime.GOOS != "darwin" {
 				return workflow.ErrUnavailable
 			}
-			child, err := executor.Start(ctx, process.Command{Executable: tool, Args: args, Dir: dir, Environment: h.Environment})
+			stage := tool
+			if len(args) > 0 {
+				stage += " " + args[0]
+			}
+			var output bytes.Buffer
+			var exit process.Exit
+			child, err := executor.Start(ctx, process.Command{Executable: tool, Args: args, Dir: dir, Environment: h.Environment, Output: func(_ context.Context, _ process.Stream, data []byte) error {
+				if output.Len() < 1<<20 {
+					output.Write(data[:min(len(data), (1<<20)-output.Len())])
+				}
+				return nil
+			}})
 			if errors.Is(err, process.ErrStart) {
 				return fmt.Errorf("iOS dependency tool %s required: %w", tool, workflow.ErrUnavailable)
 			}
 			if err != nil {
 				return err
 			}
-			_, err = child.Wait()
+			exit, err = child.Wait()
 			if err != nil {
-				return fmt.Errorf("iOS dependency tool %s failed: %w", tool, err)
+				return &Failure{Stage: stage, ExitCode: exit.Code, Diagnostic: output.String(), Cause: err}
 			}
 			return nil
 		}
