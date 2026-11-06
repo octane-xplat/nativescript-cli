@@ -4,16 +4,24 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const xcode = require('xcode');
 const plist = require('plist');
+const bplist = require('bplist-parser');
 const { execFileSync } = require('node:child_process');
 const swiftPackages = require('../resolve/swift-packages.cjs');
 const fail = code => { throw Object.assign(new Error(), {code}); };
 const q = value => JSON.stringify(value);
 const id = value => crypto.createHash('sha256').update(`p1:${value}`).digest('hex').slice(0,24).toUpperCase();
+// Installed packages may ship binary property lists (for example a bplist00
+// Info.plist); generated template files stay XML-only and keep plist.parse.
+function readPlist(file) {
+  const bytes = fs.readFileSync(file);
+  if (bytes.length >= 8 && bytes.subarray(0,8).toString('latin1') === 'bplist00') return bplist.parseBuffer(bytes)[0];
+  return plist.parse(bytes.toString('utf8'));
+}
 // Embed dynamic libraries only. Unknown binary layouts fail before Xcode.
 function dynamicFramework(file) {
   if (file.endsWith('.a')) return false;
   if (file.endsWith('.xcframework')) {
-    let info; try { info=plist.parse(fs.readFileSync(path.join(file,'Info.plist'),'utf8')); } catch { fail('unavailable'); }
+    let info; try { info=readPlist(path.join(file,'Info.plist')); } catch { fail('unavailable'); }
     const kinds=(info.AvailableLibraries || []).filter(lib=>lib.SupportedPlatform==='ios' && [undefined,'simulator'].includes(lib.SupportedPlatformVariant)).map(lib=>dynamicFramework(path.join(file,lib.LibraryIdentifier,lib.LibraryPath)));
     if (!kinds.length || kinds.some(k=>k!==kinds[0])) fail('unavailable');
     return kinds[0];
@@ -173,7 +181,7 @@ module.exports = async ({ resolved, directory }) => {
       if(ext==='.modulemap') {modulemaps.push(c.path);continue;}
       if (ext === '.xcconfig') configs.push(c.path);
       else {
-        let data; try { data=plist.parse(fs.readFileSync(c.path,'utf8')); } catch { fail('unavailable'); }
+        let data; try { data=readPlist(c.path); } catch { fail('unavailable'); }
         if (ext === '.entitlements') Object.assign(entitlements,data);
         else if (path.basename(c.path) === 'Info.plist') Object.assign(info,data);
         else fail('unavailable');

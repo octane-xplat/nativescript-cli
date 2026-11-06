@@ -442,7 +442,6 @@ func TestResolveMasonProvenanceBoundary(t *testing.T) {
 	root := resolutionApp(t)
 	resolutionFile(t, root, "package.json", `{"name":"app","version":"1","dependencies":{"@octane-xplat/nativescript-mason-core":"1.0.0-beta.5"}}`)
 	plugin := "node_modules/@octane-xplat/nativescript-mason-core/"
-	resolutionFile(t, root, plugin+"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"1.0.0-beta.5","nativescript":{"platforms":{"ios":"9.1","android":"9.1"}}}`)
 	const metadata = `{"platform":"Android","abi":"arm64-v8a"}`
 	digest := sha256.Sum256([]byte(metadata))
 	inventory, _ := json.Marshal([]map[string]string{{"name": "platforms/android/manifest.json", "sha256": fmt.Sprintf("%x", digest)}})
@@ -450,9 +449,13 @@ func TestResolveMasonProvenanceBoundary(t *testing.T) {
 	resolutionFile(t, root, plugin+"platforms/android/manifest.json", metadata)
 	resolutionFile(t, root, plugin+"platforms/android/Core.aar", "library fixture")
 	c, _ := ns.New(ns.Options{})
-	p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
-	if err != nil || len(p.Contributions) != 1 || p.Contributions[0].Kind != "library" {
-		t.Fatal(p, err)
+	// Every published beta in the line validates against the same inventory gate.
+	for _, version := range []string{"1.0.0-beta.5", "1.0.0-beta.7"} {
+		resolutionFile(t, root, plugin+"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"`+version+`","nativescript":{"platforms":{"ios":"9.1","android":"9.1"}}}`)
+		p, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root})
+		if err != nil || len(p.Contributions) != 1 || p.Contributions[0].Kind != "library" {
+			t.Fatal(version, p, err)
+		}
 	}
 	for _, tc := range []struct {
 		name, text string
@@ -461,6 +464,7 @@ func TestResolveMasonProvenanceBoundary(t *testing.T) {
 		{"platforms/android/manifest.json", `{"platform":"modified"}`, ns.ErrInvalidInput},
 		{"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"unqualified","nativescript":{}}`, ns.ErrUnavailable},
 	} {
+		resolutionFile(t, root, plugin+"package.json", `{"name":"@octane-xplat/nativescript-mason-core","version":"1.0.0-beta.7","nativescript":{"platforms":{"ios":"9.1","android":"9.1"}}}`)
 		resolutionFile(t, root, plugin+"platforms/android/manifest.json", metadata)
 		resolutionFile(t, root, plugin+tc.name, tc.text)
 		if _, err := c.Resolve(context.Background(), ns.ResolveRequest{ProjectDir: root}); !errors.Is(err, tc.kind) {

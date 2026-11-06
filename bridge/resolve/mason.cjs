@@ -5,10 +5,11 @@ const crypto=require('node:crypto');
 
 // These are producer provenance records in the published Mason core payload,
 // not Android resources or app dependency declarations. Keep this adapter
-// version scoped; unknown package layouts retain normal strict classification.
+// scoped to the published 1.0.0-beta.* line; the artifact inventory remains the
+// gate, and unknown package layouts retain normal strict classification.
 module.exports=function masonMetadata(pkg,dir,read){
   const result=new Set();
-  if(pkg.name!=='@octane-xplat/nativescript-mason-core'||pkg.version!=='1.0.0-beta.5')return result;
+  if(pkg.name!=='@octane-xplat/nativescript-mason-core'||!pkg.version.startsWith('1.0.0-beta.'))return result;
   const file=path.join(dir,'artifact-inventory.json');
   if(!fs.existsSync(file))return result;
   const inventory=JSON.parse(read(file));

@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const xcode=require('xcode');const prepare=require('./index.cjs');
+const xcode=require('xcode');const bplistCreate=require('bplist-creator');const prepare=require('./index.cjs');
 test('runtime graph membership, stable regeneration, removal and pin preservation',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 graph ')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
@@ -137,4 +137,26 @@ test('remote Swift package requirements/products preserve ownership through repe
  assert.equal(entries(o.XCRemoteSwiftPackageReference).length,1);assert.ok(o.XCRemoteSwiftPackageReference[unrelated]);assert.equal(entries(o.XCSwiftPackageProductDependency).length,0);assert.equal(fs.readFileSync(pin,'utf8'),'fixture-retained-pin');
  const removed=fs.readFileSync(file,'utf8');await prepare(q);assert.equal(fs.readFileSync(file,'utf8'),removed);
  r.contributions=[declared('Keep','https://example.com/keep','2.0.0',['Keep'])];await assert.rejects(prepare(q),e=>e.code==='unavailable');assert.equal(fs.readFileSync(file,'utf8'),removed);
+});
+
+test('binary property lists from installed packages merge and classify like XML',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 bplist '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ // A binary Info.plist contribution merges into the generated app manifest.
+ const info=path.join(dir,'Info.plist');fs.writeFileSync(info,bplistCreate({NSCameraUsageDescription:'Binary camera'}));
+ assert.equal(fs.readFileSync(info).subarray(0,8).toString('latin1'),'bplist00');
+ // Binary xcframework metadata still classifies the embedded slices.
+ const framework=path.join(dir,'Binary.xcframework');const slice=path.join(framework,'ios-arm64-simulator/Binary.framework');fs.mkdirSync(slice,{recursive:true});
+ const bytes=Buffer.alloc(32);bytes.writeUInt32LE(0xfeedfacf,0);bytes.writeUInt32LE(6,12);fs.writeFileSync(path.join(slice,'Binary'),bytes);
+ fs.writeFileSync(path.join(framework,'Info.plist'),bplistCreate({AvailableLibraries:[{LibraryIdentifier:'ios-arm64-simulator',LibraryPath:'Binary.framework',SupportedPlatform:'ios',SupportedPlatformVariant:'simulator'}]}));
+ const resolved={directory:dir,applicationID:'org.example.bplist',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:path.resolve('internal/ios/prepare/testdata/runtime')}],contributions:[{path:info,kind:'configuration',platform:'ios',packageDirectory:dir},{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}]};
+ const output=path.join(dir,'out');await prepare({resolved,directory:output});
+ assert.match(fs.readFileSync(path.join(output,'NativeScriptApp/NativeScriptApp-Info.plist'),'utf8'),/<key>NSCameraUsageDescription<\/key>\s*<string>Binary camera<\/string>/);
+ // The binary xcmanifest classified its slice as dynamic, so it is embedded.
+ const objects=(p=>{p.parseSync();return p.hash.project.objects;})(xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj')));
+ const ref=Object.entries(objects.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(framework))[0];
+ const embed=Object.entries(objects.PBXBuildFile).find(([,v])=>v&&v.fileRef===ref&&v.settings&&Array.isArray(v.settings.ATTRIBUTES))[0];
+ assert.ok(Object.values(objects.PBXCopyFilesBuildPhase).some(v=>v&&Array.isArray(v.files)&&v.files.some(f=>f.value===embed)));
+ // A truncated binary payload rejects before Xcode rather than parsing partially.
+ fs.writeFileSync(info,fs.readFileSync(info).subarray(0,16));
+ await assert.rejects(prepare({resolved,directory:path.join(dir,'invalid')}),e=>e.code==='unavailable');
 });

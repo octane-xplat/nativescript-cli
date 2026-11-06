@@ -18066,6 +18066,7 @@ var require_xcode2 = __commonJS({
     var crypto = require("node:crypto");
     var xcode2 = require_xcode();
     var plist = require_plist();
+    var bplist = require_bplistParser();
     var { execFileSync } = require("node:child_process");
     var swiftPackages = require_swift_packages();
     var fail = (code) => {
@@ -18073,12 +18074,17 @@ var require_xcode2 = __commonJS({
     };
     var q = (value) => JSON.stringify(value);
     var id = (value) => crypto.createHash("sha256").update(`p1:${value}`).digest("hex").slice(0, 24).toUpperCase();
+    function readPlist(file) {
+      const bytes = fs2.readFileSync(file);
+      if (bytes.length >= 8 && bytes.subarray(0, 8).toString("latin1") === "bplist00") return bplist.parseBuffer(bytes)[0];
+      return plist.parse(bytes.toString("utf8"));
+    }
     function dynamicFramework(file) {
       if (file.endsWith(".a")) return false;
       if (file.endsWith(".xcframework")) {
         let info;
         try {
-          info = plist.parse(fs2.readFileSync(path2.join(file, "Info.plist"), "utf8"));
+          info = readPlist(path2.join(file, "Info.plist"));
         } catch {
           fail("unavailable");
         }
@@ -18280,7 +18286,7 @@ var require_xcode2 = __commonJS({
           else {
             let data;
             try {
-              data = plist.parse(fs2.readFileSync(c.path, "utf8"));
+              data = readPlist(c.path);
             } catch {
               fail("unavailable");
             }
@@ -19073,7 +19079,7 @@ var require_mason = __commonJS({
     var crypto = require("node:crypto");
     module2.exports = function masonMetadata(pkg, dir, read) {
       const result = /* @__PURE__ */ new Set();
-      if (pkg.name !== "@octane-xplat/nativescript-mason-core" || pkg.version !== "1.0.0-beta.5") return result;
+      if (pkg.name !== "@octane-xplat/nativescript-mason-core" || !pkg.version.startsWith("1.0.0-beta.")) return result;
       const file = path2.join(dir, "artifact-inventory.json");
       if (!fs2.existsSync(file)) return result;
       const inventory = JSON.parse(read(file));
