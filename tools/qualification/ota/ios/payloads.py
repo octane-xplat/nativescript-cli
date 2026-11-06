@@ -26,13 +26,18 @@ manifest_pkg = json.loads((emitted / 'package.json').read_text())
 entry_name = manifest_pkg.get('main')
 if not isinstance(entry_name, str) or not (emitted / entry_name).is_file():
     raise RuntimeError('emitted package.json has no resolvable main entry')
-entry = (emitted / entry_name).read_text()
-if entry.count('P91_EMBEDDED') < 1:
-    raise RuntimeError('emitted entry has no P91_EMBEDDED marker')
+if entry_name == 'main.mjs':
+    raise RuntimeError('emitted entry name collides with the payload main.mjs wrapper')
 files = {}
 for path in sorted(emitted.rglob('*')):
     if path.is_file() and path.name != 'package.json' and path != stamp_path:
         files[str(path.relative_to(emitted))] = path.read_bytes()
+# The engine may move app code into a chunk; exactly one emitted JS file must
+# carry the marker so substitution cannot silently miss or double-replace.
+marked = [name for name, data in files.items()
+          if name.endswith(('.js', '.mjs')) and b'P91_EMBEDDED' in data]
+if len(marked) != 1:
+    raise RuntimeError('expected exactly one marked emitted JS file, found: ' + json.dumps(marked))
 
 
 def archive(marker, broken=False, stamp_override=None):
@@ -46,10 +51,14 @@ def archive(marker, broken=False, stamp_override=None):
 
     with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         put(z, 'package.json', b'{"main":"main.mjs"}')
-        source = 'throw new Error("P91 deliberate unconfirmed boot failure");\n' if broken else entry.replace('P91_EMBEDDED', marker)
+        # Emitted chunks may import the entry by name, so it keeps its name and
+        # main.mjs only imports it; renaming would evaluate the entry twice.
+        source = 'throw new Error("P91 deliberate unconfirmed boot failure");\n' if broken else 'import ' + json.dumps('./' + entry_name) + ';\n'
         put(z, 'main.mjs', source.encode())
         put(z, 'xplat-native.json', json.dumps(stamp_override or stamp).encode())
         for name, data in sorted(files.items()):
+            if name in marked:
+                data = data.replace(b'P91_EMBEDDED', marker.encode())
             put(z, name, data)
     return stream.getvalue()
 

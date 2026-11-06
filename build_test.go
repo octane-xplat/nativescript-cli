@@ -19,7 +19,7 @@ func TestFreshIOSSimulatorBuild(t *testing.T) {
 		t.Skip("requires explicit runtime/Vite inputs and native build reservation")
 	}
 	root, _, q := prepareApp(t, true)
-	resolutionFile(t, root, "package.json", `{"name":"app","version":"1.0.0","main":"app.js","devDependencies":{"@nativescript/ios":"8.9.0","vite":"7.3.1"},"dependencies":{"native-plugin":"1"}}`)
+	resolutionFile(t, root, "package.json", `{"name":"app","version":"1.0.0","main":"app/app.js","devDependencies":{"@nativescript/ios":"9.1.0","@nativescript/vite":"8.0.21"},"dependencies":{"native-plugin":"1"}}`)
 	resolutionFile(t, root, "app/app.js", `console.log("B1 bundled startup"); D1StartApplication();`)
 	// Exercise native header metadata and a real UIKit event loop without a framework dependency.
 	resolutionFile(t, root, "node_modules/native-plugin/platforms/ios/Session.h", `void D1StartApplication(void);`)
@@ -46,8 +46,18 @@ func TestFreshIOSSimulatorBuild(t *testing.T) {
 @end
 void D1StartApplication(void) { UIApplicationMain(0,NULL,nil,NSStringFromClass([D1SessionDelegate class])); }
 `)
-	if err := os.Symlink(os.Getenv("B1_VITE_DIR"), filepath.Join(root, "node_modules/vite")); err != nil {
-		t.Fatal(err)
+	engine := os.Getenv("NS_NATIVE_VITE_DIR")
+	if engine == "" {
+		t.Skip("set NS_NATIVE_VITE_DIR to an installed @nativescript/vite8.0.20 or 8.0.21 consumer")
+	}
+	for _, name := range []string{"vite", "typescript", "@nativescript/core", "@nativescript/vite"} {
+		target := filepath.Join(root, "node_modules", name)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(engine, "node_modules", name), target); err != nil {
+			t.Fatal(err)
+		}
 	}
 	resolutionFile(t, root, "App_Resources/iOS/build.xcconfig", "IPHONEOS_DEPLOYMENT_TARGET = 15.0\n")
 	resolutionFile(t, root, "App_Resources/iOS/Info.plist", `<plist version="1.0"><dict><key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/><key>UISceneConfigurations</key><dict/></dict></dict></plist>`)
@@ -64,10 +74,10 @@ void D1StartApplication(void) { UIApplicationMain(0,NULL,nil,NSStringFromClass([
 	if len(result.Artifacts) != 1 || result.Artifacts[0].Kind != "app" || result.Artifacts[0].ApplicationID != "org.example.app" {
 		t.Fatalf("unexpected artifacts: %+v", result.Artifacts)
 	}
-	if _, err := os.Stat(filepath.Join(result.Artifacts[0].Path, "app", "bundle.js")); err != nil {
+	if _, err := os.Stat(filepath.Join(result.Artifacts[0].Path, "app", "bundle.mjs")); err != nil {
 		t.Fatal("bundled entry absent from app", err)
 	}
-	if data, err := os.ReadFile(filepath.Join(result.Artifacts[0].Path, "app", "package.json")); err != nil || !strings.Contains(string(data), `"main":"bundle.js"`) {
+	if data, err := os.ReadFile(filepath.Join(result.Artifacts[0].Path, "app", "package.json")); err != nil || !strings.Contains(string(data), `"main":"bundle.mjs"`) {
 		t.Fatal("runtime entry manifest absent", err)
 	}
 	if dest := os.Getenv("B1_ARTIFACT_DIR"); dest != "" {

@@ -215,6 +215,6 @@ module.exports = async ({ resolved, directory }) => {
   write(stateFile,JSON.stringify({runtime:runtime.version,ids,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm})+'\n');
   fs.mkdirSync(path.join(directory,'app'),{recursive:true});
   const bundlePackage=path.join(directory,'app/package.json');
-  if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.js'}));
+  if(!fs.existsSync(bundlePackage)) write(bundlePackage,JSON.stringify({main:'bundle.mjs'}));
   return {directory,projectFile,pods:pods.length>0 || !!previous.pods,spm:runtime.version==='9.1.0' || packages.length>0 || remotePackages.length>0 || !!previous.spm,target:name,localSwiftPackages};
 };

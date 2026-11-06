@@ -14,7 +14,7 @@ if dest.exists():
     raise RuntimeError('output must be new; never reuse generated native trees')
 source = pathlib.Path(__file__).resolve().parent / a.platform / 'app'
 shutil.copytree(source, dest)
-manifest = {'name': 'p91-' + a.platform + '-guard', 'version': '1.0.0', 'private': True, 'dependencies': {'@octane-xplat/updates': 'file:' + str(a.updates.resolve()), '@octane-xplat/fingerprint': 'file:' + str(a.fingerprint.resolve()), 'p91-native-' + ('health' if a.platform == 'ios' else 'android-health'): 'file:./native-plugin'}, 'devDependencies': {'@nativescript/' + a.platform: '9.1.0' if a.platform == 'ios' else '9.1.1', 'vite': '7.3.1'}}
+manifest = {'name': 'p91-' + a.platform + '-guard', 'version': '1.0.0', 'private': True, 'main': 'app/app.js', 'dependencies': {'@octane-xplat/updates': 'file:' + str(a.updates.resolve()), '@octane-xplat/fingerprint': 'file:' + str(a.fingerprint.resolve()), 'p91-native-' + ('health' if a.platform == 'ios' else 'android-health'): 'file:./native-plugin'}, 'devDependencies': {'@nativescript/' + a.platform: '9.1.0' if a.platform == 'ios' else '9.1.1', '@nativescript/vite': '8.0.21', 'vite': '8.3.0', 'typescript': '5.9.3'}}
 if a.sdk_installer:
     if a.platform != 'ios':
         raise RuntimeError('--sdk-installer is iOS only')

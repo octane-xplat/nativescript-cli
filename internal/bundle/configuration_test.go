@@ -45,7 +45,7 @@ func TestInstalledNativeProjectConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(t, filepath.Join(dir, "package.json"), `{"name":"native-config-fixture","version":"1.0.0","type":"module","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3"}}`)
+	write(t, filepath.Join(dir, "package.json"), `{"name":"native-config-fixture","version":"1.0.0","type":"module","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3","@nativescript/ios":"9.1.0"}}`)
 	write(t, filepath.Join(dir, "nativescript.config.cjs"), `module.exports={id:'org.example.nativeconfig',cli:{packageManager:'bun'},bundler:'vite',bundlerConfigPath:'vite.config.mts'}`)
 	write(t, filepath.Join(dir, "app/app.ts"), `console.log('PROJECT_CONFIG_VALUE', __PROJECT_CONFIG_VALUE__);`)
 	write(t, filepath.Join(dir, "config-value.mts"), `export const value='config-before';`)
@@ -65,9 +65,39 @@ export default async ({mode,command})=>{
  }}]};
 };`
 	write(t, filepath.Join(dir, "vite.config.mts"), config)
-	if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules/@nativescript"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	entries, err := os.ReadDir(filepath.Join(installed, "node_modules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		src := filepath.Join(installed, "node_modules", name)
+		if name == "@nativescript" {
+			sub, err := os.ReadDir(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range sub {
+				if err := os.Symlink(filepath.Join(src, s.Name()), filepath.Join(dir, "node_modules/@nativescript", s.Name())); err != nil {
+					t.Fatal(err)
+				}
+			}
+			continue
+		}
+		if err := os.Symlink(src, filepath.Join(dir, "node_modules", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules/@nativescript/ios"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "node_modules/@nativescript/ios/package.json"), `{"name":"@nativescript/ios","version":"9.1.0"}`)
 	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(filepath.Join(root, "assets"))}, CacheDir: t.TempDir(), Environment: map[string]string{"DEBUG": "caller-debug"}}}
 	r, err := (resolver.Resolver{Host: a.Host}).Resolve(ctx, dir)
 	if err != nil {

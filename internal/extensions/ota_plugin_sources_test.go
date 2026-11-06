@@ -94,7 +94,7 @@ func TestCanonicalPluginNativeSources(t *testing.T) {
 		defer lease.Release()
 		native := filepath.Join(layout.GeneratedRoot, "native")
 		write(filepath.Join(native, "internal/main.m"), "int main() { NSString *baseDir = [[NSBundle mainBundle] resourcePath]; }")
-		write(filepath.Join(native, "app/package.json"), `{"main":"bundle.js"}`)
+		write(filepath.Join(native, "app/package.json"), `{"main":"bundle.mjs"}`)
 		stampFile := filepath.Join(native, "app/xplat-native.json")
 		previous, previousErr := os.ReadFile(stampFile)
 		err = (OTAStartup{Host: host}).Apply(context.Background(), r, project.Prepared{Identity: id, NativeDir: native, BundleDir: filepath.Join(native, "app")}, lease)

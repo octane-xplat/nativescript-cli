@@ -50,4 +50,4 @@ jobs:
           NS_NATIVE_VITE_DIR: ${{ github.workspace }}/tools/qualification/development
         run: |
           bun install --cwd tools/qualification/development --frozen-lockfile --ignore-scripts
-          go test . ./internal/bundle -run 'TestPublicNativeDevelopmentLifecycle|TestInstalledNativeDevelopmentServer' -count=1
+          go test . ./internal/bundle -count=1

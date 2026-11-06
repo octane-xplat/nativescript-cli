@@ -115,7 +115,7 @@ func TestCanonicalLocalSwiftOwnedSnapshot(t *testing.T) {
 			}
 			// Labeled boot/bundle fixtures, not compiled native artifacts.
 			write(filepath.Join(native, "internal/main.m"), "int main() { NSString *baseDir = [[NSBundle mainBundle] resourcePath]; }")
-			write(filepath.Join(native, "app/package.json"), `{"main":"bundle.js"}`)
+			write(filepath.Join(native, "app/package.json"), `{"main":"bundle.mjs"}`)
 			request := otaRequest{ProjectDir: app, NativeDir: native, BundleDir: filepath.Join(native, "app"), Platform: "ios", Configuration: "release", NativeConfig: config, Architecture: "arm64", DestinationKind: "simulator", SourceFiles: sources, LocalSwiftPackages: preparation.LocalSwiftPackages, ProjectStateDir: filepath.Dir(native)}
 			var records []json.RawMessage
 			var stages []string

@@ -87,7 +87,7 @@ func fixture(t *testing.T) (project.Prepared, project.Bundle, workspace.Lease) {
 	os.MkdirAll(native, 0700)
 	os.WriteFile(filepath.Join(native, "package.json"), []byte(`{"nativescript":{"id":"org.example.app"}}`), 0600)
 	p := project.Prepared{Identity: l.Layout().Identity, NativeDir: native, BundleDir: filepath.Join(native, "bundle")}
-	return p, project.Bundle{Identity: p.Identity, Directory: p.BundleDir, Entry: filepath.Join(p.BundleDir, "bundle.js")}, l
+	return p, project.Bundle{Identity: p.Identity, Directory: p.BundleDir, Entry: filepath.Join(p.BundleDir, "bundle.mjs")}, l
 }
 func TestVariantsSigningMetadataAndFailures(t *testing.T) {
 	for _, tc := range []struct {

@@ -71,6 +71,13 @@ func developmentRequest(r project.Resolved, target project.Target, settings Requ
 	if err != nil {
 		return Request{}, "", err
 	}
+	// Development keeps its original floor: a present runtime must be 9.1+,
+	// while development fixtures may resolve without a runtime package at all.
+	for _, pkg := range r.Packages {
+		if pkg.Name == "@nativescript/"+target.Platform && !project.RuntimeSatisfies(pkg.Version, "9.1.0") {
+			return Request{}, "", workflow.ErrUnavailable
+		}
+	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return Request{}, "", err
@@ -150,7 +157,7 @@ func (a Adapter) StartDevelopment(ctx context.Context, r project.Resolved, targe
 	}
 	if !filepath.IsAbs(r.Directory) || !filepath.IsAbs(r.Config.AppPath) || !filepath.IsAbs(r.Config.AppResourcesPath) || r.Revision == "" ||
 		(target.Platform != "ios" && target.Platform != "android") || target.Configuration != "debug" ||
-		settings.Port < 0 || settings.Port > 65535 || settings.CallerEndpoint != nil || settings.HMRPort != 0 {
+		settings.Port < 0 || settings.Port > 65535 {
 		return nil, workflow.ErrInvalid
 	}
 	for _, c := range settings.HMRHost {

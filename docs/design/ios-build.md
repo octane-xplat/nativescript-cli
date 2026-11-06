@@ -52,8 +52,9 @@ uses iOS 15 through App_Resources/iOS/build.xcconfig.
 ## Qualification
 
 `TestFreshIOSSimulatorBuild` is opt-in. Under a native-build reservation, supply
-B1_NATIVE_BUILD=1, P1_RUNTIME_DIR (an explicitly installed @nativescript/ios 8.9.0
-package) and B1_VITE_DIR (an explicitly installed Vite 7 package). It constructs a
+B1_NATIVE_BUILD=1, P1_RUNTIME_DIR (an explicitly installed @nativescript/ios 9.1
+package) and NS_NATIVE_VITE_DIR (an installed @nativescript/vite 8.0.20/8.0.21
+consumer). It constructs a
 fresh app and Swift contribution, resolves/prepares/bundles/compiles it through
 the public client, and validates the resulting arm64 simulator app. Xcode 27 on
 Darwin arm64 passed. This does not boot, install or launch an app. Runtime health,

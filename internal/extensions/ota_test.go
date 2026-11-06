@@ -88,7 +88,7 @@ func TestCanonicalOTAOwnedHelperPublication(t *testing.T) {
 	defer lease.Release()
 	native := filepath.Join(layout.GeneratedRoot, "native")
 	write(filepath.Join(native, "internal/main.m"), "int main() { NSString *baseDir = [[NSBundle mainBundle] resourcePath]; }")
-	write(filepath.Join(native, "app/package.json"), `{"main":"bundle.js"}`)
+	write(filepath.Join(native, "app/package.json"), `{"main":"bundle.mjs"}`)
 	assets, e := filepath.Abs("../../assets")
 	if e != nil {
 		t.Fatal(e)

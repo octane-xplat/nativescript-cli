@@ -1,3 +1,5 @@
+> Note: the results recorded below exercised the removed Vite 7 fallback bundler on runtime 9.0.0. Under current Build (official @nativescript/vite engine, ESM bundle.mjs, runtime >= 9.1 required) this fixture is not runnable until migrated to a 9.1+ runtime and the installed engine.
+
 # Fresh Android public-library qualification
 
 `qualify.py` installs a clean standalone app, builds two external Go consumers

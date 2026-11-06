@@ -8,7 +8,7 @@ test('canonical producer records actual local Pod, source-control SwiftPM and Gr
  const native=path.join(output,platform);fs.cpSync(path.join(process.env.OTA_PINS_DIR,platform),native,{recursive:true,dereference:true});
  const write=(file,content)=>{fs.mkdirSync(path.dirname(path.join(native,file)),{recursive:true});fs.writeFileSync(path.join(native,file),content);};
  const boot=platform==='ios'?'internal/main.m':'app/src/main/java/com/tns/NativeScriptApplication.java';const bundle=platform==='ios'?'app':'app/src/main/assets/app';
- write(boot,platform==='ios'?'int main() { NSString *baseDir = [[NSBundle mainBundle] resourcePath]; }':'class Application { void start() { com.tns.Runtime runtime = RuntimeHelper.initRuntime(this); } }');write(bundle+'/package.json','{"main":"bundle.js"}');
+ write(boot,platform==='ios'?'int main() { NSString *baseDir = [[NSBundle mainBundle] resourcePath]; }':'class Application { void start() { com.tns.Runtime runtime = RuntimeHelper.initRuntime(this); } }');write(bundle+'/package.json','{"main":"bundle.mjs"}');
  if(platform==='android')write('app/src/main/AndroidManifest.xml','<manifest><application android:name="com.tns.NativeScriptApplication"/></manifest>');
  const stage=fs.mkdtempSync(path.join(output,'stage-'));const result=await ota({projectDir:app,nativeDir:native,bundleDir:path.join(native,bundle),stageDir:stage,platform,configuration:'release',nativeConfig,architecture:'arm64',destinationKind:'simulator'});
  const record=JSON.parse(fs.readFileSync(path.join(stage,'native/.xplat/fingerprints',platform+'.json')));

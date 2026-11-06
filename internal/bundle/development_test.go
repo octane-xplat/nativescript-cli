@@ -184,6 +184,8 @@ func TestDevelopmentRequestScopesNativeIdentityToTargetPlatform(t *testing.T) {
 		Packages: []project.Package{
 			{Name: "plugin", Directory: pkg, Native: true},
 			{Name: "plain", Directory: filepath.Join(pkg, "plain")},
+			{Name: "@nativescript/ios", Version: "9.1.0"},
+			{Name: "@nativescript/android", Version: "9.1.0"},
 		},
 		Sources: []project.Source{
 			source(dir, "App_Resources", "iOS", "qualification.json"),

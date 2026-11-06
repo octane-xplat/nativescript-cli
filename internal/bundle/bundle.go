@@ -15,7 +15,6 @@ import (
 	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
-var ErrBackpressure = errors.New("bundle event buffer exhausted")
 var ErrRestart = errors.New("bundle inputs require re-resolution")
 var ErrServer = errors.New("bundle server stopped")
 
@@ -52,8 +51,6 @@ type Request struct {
 	Mode                string                      `json:"mode"`
 	Port                int                         `json:"port"`
 	HMRHost             string                      `json:"hmrHost"`
-	HMRPort             int                         `json:"hmrPort"`
-	CallerEndpoint      *Endpoint                   `json:"callerEndpoint,omitempty"`
 }
 
 func (a Adapter) call(ctx context.Context, q Request, sink func(jsbridge.Frame) error) (Manifest, error) {
@@ -123,36 +120,16 @@ func request(r project.Resolved, p project.Prepared, lease workspace.Lease) (Req
 	if err != nil || relBundle == ".." || strings.HasPrefix(relBundle, ".."+string(filepath.Separator)) || !filepath.IsAbs(p.BundleDir) {
 		return Request{}, workflow.ErrHandoff
 	}
-	// The supported bootstrap is the app package's explicit main, or app.js.
-	entry := "app.js"
-	b, err := os.ReadFile(filepath.Join(r.Config.AppPath, "package.json"))
-	if err == nil {
-		var pkg struct{ Main string }
-		if json.Unmarshal(b, &pkg) != nil {
-			return Request{}, workflow.ErrInvalid
-		}
-		if pkg.Main != "" {
-			entry = pkg.Main
-		}
+	// Build always runs through the project's installed official engine, whose
+	// ESM output requires a 9.1+ runtime.
+	if !supportedRuntime(r, p.Identity.Target.Platform) {
+		return Request{}, workflow.ErrUnavailable
 	}
-	entry = filepath.Join(r.Config.AppPath, entry)
-	rel, err := filepath.Rel(r.Config.AppPath, entry)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return Request{}, workflow.ErrInvalid
+	entry, err := nativeEntry(r)
+	if err != nil {
+		return Request{}, err
 	}
-	q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: entry, Mode: "bundle", Platform: p.Identity.Target.Platform, AppPath: r.Config.AppPath, Configuration: p.Identity.Target.Configuration}
-	if r.Config.BundlerConfigPath != "" {
-		entry, err := nativeEntry(r)
-		if err != nil {
-			return Request{}, err
-		}
-		q.Entry, q.Mode = entry, "native-bundle"
-		q.ProjectDir = canonical
-		q.BundlerConfigPath = r.Config.BundlerConfigPath
-		q.NativeSources = append([]project.Source(nil), r.Sources...)
-		q.ApplicationID = r.ApplicationID
-		q.CacheDirectory = filepath.Join(lease.Layout().GeneratedRoot, "vite-cache")
-	}
+	q := Request{ProjectDir: canonical, Directory: p.BundleDir, Entry: entry, Mode: "native-bundle", Platform: p.Identity.Target.Platform, AppPath: r.Config.AppPath, Configuration: p.Identity.Target.Configuration, BundlerConfigPath: r.Config.BundlerConfigPath, NativeSources: append([]project.Source(nil), r.Sources...), ApplicationID: r.ApplicationID, CacheDirectory: filepath.Join(lease.Layout().GeneratedRoot, "vite-cache")}
 	if p.Identity.Target.Platform == "android" {
 		config, err := project.AndroidSettings(r)
 		if err != nil {
@@ -182,60 +159,13 @@ func (a Adapter) Bundle(ctx context.Context, r project.Resolved, p project.Prepa
 	return project.Bundle{Identity: p.Identity, Directory: m.Directory, Entry: m.Entry, Files: m.Files}, nil
 }
 
-// Watch runs under a caller-retained lease until all children retire. Events are
-// delivered through a bounded channel, never callbacks under workspace ownership.
-// ready follows initial disk emission and listening; errors terminate the session.
-// CallerEndpoint is borrowed: no probing, closing or forwarding is performed.
-func (a Adapter) Watch(ctx context.Context, r project.Resolved, p project.Prepared, lease workspace.Lease, settings Request) (*workflow.Session, <-chan Event, error) {
-	q, err := request(r, p, lease)
-	if err != nil {
-		return nil, nil, err
+// supportedRuntime reports whether the project pins a runtime new enough to
+// execute the installed engine's ESM output. A missing runtime package fails.
+func supportedRuntime(r project.Resolved, platform string) bool {
+	for _, pkg := range r.Packages {
+		if pkg.Name == "@nativescript/"+platform {
+			return project.RuntimeSatisfies(pkg.Version, "9.1.0")
+		}
 	}
-	q.Mode = "watch"
-	if q.BundlerConfigPath != "" {
-		return nil, nil, workflow.ErrUnavailable
-	}
-	q.Port = settings.Port
-	q.HMRHost = settings.HMRHost
-	q.HMRPort = settings.HMRPort
-	if settings.CallerEndpoint != nil {
-		endpoint := *settings.CallerEndpoint
-		q.CallerEndpoint = &endpoint
-	}
-	if q.Port < 0 || q.Port > 65535 || q.HMRPort < 0 || q.HMRPort > 65535 {
-		return nil, nil, workflow.ErrInvalid
-	}
-	events := make(chan Event, 32)
-	owner, ok := lease.(interface {
-		RunHelper(context.Context, func(context.Context) error) error
-	})
-	if !ok {
-		return nil, nil, workflow.ErrHandoff
-	}
-	s := workflow.StartSession(ctx, func(ctx context.Context) error {
-		defer close(events)
-		err := owner.RunHelper(ctx, func(ctx context.Context) error {
-			_, err := a.call(ctx, q, func(f jsbridge.Frame) error {
-				var e Event
-				if json.Unmarshal(f.Payload, &e) != nil {
-					return workflow.ErrHandoff
-				}
-				if e.Type == "" {
-					return nil
-				}
-				if !validManifest(e.Manifest, q.Directory) {
-					return workflow.ErrHandoff
-				}
-				select {
-				case events <- e:
-					return nil
-				default:
-					return ErrBackpressure
-				}
-			})
-			return err
-		})
-		return err
-	})
-	return s, events, nil
+	return false
 }

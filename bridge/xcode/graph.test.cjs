@@ -17,7 +17,7 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  const r={directory:dir,applicationID:'org.example.test',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions};
  const output=path.join(dir,'generated');const q={directory:output,resolved:r};await prepare(q);
  assert.equal(fs.existsSync(path.join(output,'Podfile')),false);
- assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output,'app/package.json'))),{main:'bundle.js'});
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output,'app/package.json'))),{main:'bundle.mjs'});
  const file=path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj');
  let project=xcode.project(file);project.parseSync();
  const o=project.hash.project.objects;const owned=JSON.parse(fs.readFileSync(path.join(output,'.p1.json'))).ids;

@@ -225,7 +225,7 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 	if err = jsonFile(dir, "runtime-config.json", r.Config.Android); err != nil {
 		return err
 	}
-	if err = jsonFile(dir, "app/src/main/assets/app/package.json", map[string]any{"main": "bundle.js", "id": r.ApplicationID, "android": map[string]string{"v8Flags": r.Config.Android.V8Flags, "markingMode": r.Config.Android.MarkingMode}}); err != nil {
+	if err = jsonFile(dir, "app/src/main/assets/app/package.json", map[string]any{"main": "bundle.mjs", "id": r.ApplicationID, "android": map[string]string{"v8Flags": r.Config.Android.V8Flags, "markingMode": r.Config.Android.MarkingMode}}); err != nil {
 		return err
 	}
 	contributions := append([]project.Contribution(nil), r.Contributions...)

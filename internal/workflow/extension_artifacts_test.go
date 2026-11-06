@@ -63,7 +63,7 @@ func TestPostBuildArtifactContextAndFailure(t *testing.T) {
 			if err = os.WriteFile(artifact, []byte("fixture compiler output"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			f := fixtureStages{project.Prepared{Identity: layout.Identity, NativeDir: native, BundleDir: app}, project.Bundle{Identity: layout.Identity, Directory: app, Entry: filepath.Join(app, "bundle.js")}, project.Artifact{Identity: layout.Identity, Path: artifact, Kind: "apk", ApplicationID: "org.example.inspection"}}
+			f := fixtureStages{project.Prepared{Identity: layout.Identity, NativeDir: native, BundleDir: app}, project.Bundle{Identity: layout.Identity, Directory: app, Entry: filepath.Join(app, "bundle.mjs")}, project.Artifact{Identity: layout.Identity, Path: artifact, Kind: "apk", ApplicationID: "org.example.inspection"}}
 			var phases []extension.Phase
 			stages := Stages{Preparer: f, Bundler: f, Compiler: f, Extensions: []extension.Extension{artifactInspector{artifact, reject, &phases}}}
 			_, artifacts, err := (Engine{}).Native(context.Background(), stages, project.Resolved{Directory: layout.Identity.ProjectDir, Revision: "fixture", ApplicationID: "org.example.inspection"}, Request{ProjectDir: dir, OutputDir: filepath.Join(dir, "state"), Target: target}, true, nil)

@@ -1,3 +1,5 @@
+> Note: the results recorded below exercised the removed Vite 7 fallback bundler on runtime 8.9.0. Under current Build (official @nativescript/vite engine, ESM bundle.mjs, runtime >= 9.1 required) this fixture is not runnable until migrated to a 9.1+ runtime and the installed engine.
+
 # Fresh iOS public-library qualification
 
 This opt-in gate builds a new isolated app through the public Go library, then

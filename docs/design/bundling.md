@@ -1,78 +1,49 @@
 # Bundling and development lifecycle
 
-V1 implements the private W1 bundler adapter and an owned development watcher.
-The root client wires the bundler; Build still requires preparation and compiler
-producers. No public native workflow is claimed by this component alone.
+Build and native development both run through the project's installed official
+`@nativescript/vite` engine (8.0.20 or 8.0.21) with project-local Vite 8. There
+is no internal fallback bundler: without a selected `bundlerConfigPath` the
+engine's TypeScript/XML preset applies, and a missing engine or a runtime older
+than 9.1 fails `unavailable`. Node and installed project dependencies are
+checked lazily. No installation or upstream CLI is performed.
 
-The embedded helper resolves Vite from the selected project. Vite 7 is the
-supported major; the independent fixture qualifies 7.3.1. Node and installed
-project dependencies are checked lazily. No installation or upstream CLI is
-performed. Vite is a development dependency here solely for qualification.
-The module-distributed payload does not embed Vite: consumers supply their app's
-Vite installation. API reference: https://vite.dev/guide/api-javascript.
-
-The supported bootstrap is appPath/package.json main, falling back to app.js.
-V1 uses an explicit Vite library build producing an IIFE bundle.js and emitted
-assets without browser HTML or HMR injection. It disables Vite config discovery.
-A selected project config uses the separate native-engine path below.
-Unsupported Vite majors fail unavailable. Native runtime
-execution must be qualified by G2/G3; this JavaScript fixture does not establish it.
+The engine emits an ESM `bundle.mjs` and a runtime `package.json` manifest
+(`main:"bundle.mjs"`, application id and Android v8Flags/markingMode). ESM
+arrived in 9.0 native runtimes; the floor is 9.1 to match the development
+qualification and canonical OTA archives. The root package's `main` must
+identify an entry inside appPath. Unsupported engine/Vite majors fail
+unavailable. Native runtime execution must be qualified by G2/G3; the emitted
+JavaScript fixture does not establish it.
 
 Adapter.Bundle receives the real resolved project, prepared destination and F2
 lease. It reports identity, entry and emitted files only after disk output and
 helper retirement. Native compilation belongs to the next stage. A failed build
 returns no bundle; callers must not consume older files after failure.
 
-Adapter.Watch returns a W1 session and a channel of typed events. Callers retain
-the supplied F2 lease until Wait completes. RunHelper tracks active helper work,
-so Release waits through F1 descendant cleanup. Private frame parsing writes only
-to a bounded queue and never invokes application callbacks under the lease.
-Events close on completion; overflow fails and cancels the owned helper. Callers
-inspect Wait for terminal errors. Close is idempotent; cancellation returns the
-context error after cleanup. This internal API is intended for device owners;
-public native development uses the separate ownership path described below.
-
-The emitted event follows each successful watched disk write. The ready event
-follows initial output and server listening and includes that manifest and HTTP
-and WebSocket endpoints. The server binds loopback and uses strict port selection;
-zero chooses an available port. HMRHost/HMRPort configure the advertised endpoint
-for later forwarding, which V1 does not create. Source/bootstrap edits rebuild;
-configuration/package edits terminate with ErrRestart for caller re-resolution.
-Build and server failures terminate the session. Actual NativeScript HMR module
-application, device forwarding and native-input change handling remain G5 gates.
-
-CallerEndpoint is an explicit borrowed HTTP/HMR pair. V1 starts only its build
-watcher in that mode and returns the supplied endpoint unchanged. It never probes,
-shuts down, or configures the caller's server. Endpoint health and compatibility
-remain the caller's responsibility. Without CallerEndpoint the helper owns both
-Vite resources, and F1 retires their process tree on completion or cancellation.
-
-The integration test uses real R1 resolution, extracted J1 payload, F1 processes,
-F2 leases and W1 orchestration in an independent temporary JavaScript app. Its
-preparer/compiler are explicitly component fixtures, with no native build or
-reused platform tree. Tests execute the emitted JavaScript in Node, request the
-real HMR client, check source/bootstrap rebuilds, cold readiness, port contention,
-server crash, config restart, cancellation and preservation of a borrowed server.
+The integration coverage uses real R1 resolution, extracted J1 payload, F1
+processes and F2 leases in independent temporary apps, with preparer/compiler
+component fixtures. Without an installed engine the tests assert runtime floor,
+entry validation, unavailable engine, cancellation and lease retention. With
+`NS_NATIVE_VITE_DIR` they run the real engine's release bundle for iOS and
+Android, checking platform export/module selection, the emitted ESM entry, the
+runtime manifest and core's XHR polyfill presence.
 
 Native requests carry the target platform, build configuration and authored app
-path. Vite selects the `native`/platform export conditions, resolves extensionless
-platform-specific `.ios`/`.android` modules before generic modules, and defines
-NativeScript's platform/development flags. `~/` resolves within the selected app
-path. `~/package.json` uses the authored app package when present and otherwise a
-virtual runtime entry manifest, so importing core does not require an extra
-source manifest. Core's package `sideEffects` omits its globals polyfill
-imports, so native bundles keep side effects for modules inside the resolved
-`@nativescript/core` package (matching the upstream engine); otherwise the
-XMLHttpRequest/FormData/Blob/File/FileReader globals are dropped and core Http
-fails. No installed package files are edited or upstream CLI spawned.
-The existing emitted `bundle.js` contract remains unchanged; downloaded canonical
-OTA archives have their own entry/package contract.
+path. The engine selects the `native`/platform export conditions, resolves
+extensionless platform-specific `.ios`/`.android` modules before generic modules,
+and defines NativeScript's platform/development flags. `~/` resolves within the
+selected app path. `~/package.json` resolves to a virtual runtime entry manifest,
+so importing core does not require an extra source manifest. The engine keeps
+side effects for modules inside `@nativescript/core`, so the
+XMLHttpRequest/FormData/Blob/File/FileReader globals survive tree-shaking.
+No installed package files are edited or upstream CLI spawned. The existing
+emitted `bundle.mjs` contract remains unchanged; downloaded canonical OTA
+archives have their own entry/package contract.
 
 ## Public native development sessions
 
 `RunRequest.Development = &DevelopmentOptions{Port: 0}` opts into the installed
-`@nativescript/vite` 8.0.20 or 8.0.21 engine with project-local Vite 8. This is distinct from
-the Vite 7 IIFE bundler above: the native engine emits `bundle.mjs` and serves its
+`@nativescript/vite` 8.0.20 or 8.0.21 engine with project-local Vite 8. The native engine emits `bundle.mjs` and serves its
 native `/ns/*` module graph and `/ns-hmr` WebSocket. The CLI exposes `run --hmr`
 and `--hmr-port`. The root package's `main` must identify an entry inside appPath.
 The caller installs core, engine, Vite and any runtime WebSocket dependencies;
@@ -120,8 +91,6 @@ resolved runtime manifest, and owns root, mode, cache, output directory, complet
 disk writes and the loopback strict-port server settings. Conflicting output
 file/directory overrides reject. Configs/plugins are trusted project code, not
 sandboxed code. The framework's completed output must include `bundle.mjs`.
-The internal Vite 7 Watch/borrowed-server adapter rejects selected project configs;
-use the separately owned native Development path.
 
 Development verifies the selected config against R1's source digest before
 loading it. Changes to that file, imported config dependencies reported by Vite,

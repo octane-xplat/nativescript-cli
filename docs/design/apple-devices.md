@@ -55,7 +55,6 @@ the exact app PID remaining alive, and owned shutdown after repeated Close. Buil
 are separate. Physical runtime, x86_64 execution, HMR and G2–G6 remain separate
 gates.
 
-Real runtime integration found that Vite's emitted app needs a package.json
-pointing to bundle.js. The Vite producer emits that asset with its output manifest
-for both bundle and watch. This selects the emitted entry; it does not qualify
+Real runtime integration found that the engine's emitted app needs a package.json
+pointing to bundle.mjs. The Vite producer emits that asset with its output manifest. This selects the emitted entry; it does not qualify
 NativeScript framework imports, runtime transforms or HMR.

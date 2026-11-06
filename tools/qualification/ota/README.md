@@ -1,3 +1,5 @@
+> Note: the earlier -14/-15 installer passes exercised the removed Vite 7 fallback bundler. Requalification on the official @nativescript/vite engine is pending the next device run.
+
 # NativeScript 9.1 runtime guard qualification
 
 These opt-in checks distinguish native runtime behavior from full OTA SDK

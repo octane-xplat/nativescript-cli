@@ -102,16 +102,27 @@ def stage(version, marker, incompatible=False, broken=False):
     stamp = json.loads((bundle / 'xplat-native.json').read_text())
     if incompatible:
         stamp['hash'] = '0' * 64
-    source = (bundle / 'bundle.js').read_text().replace('P91_EMBEDDED', marker)
+    entry = json.loads((bundle / 'package.json').read_text())['main']
+    if entry == 'main.mjs':
+        raise RuntimeError('emitted entry name collides with the payload main.mjs wrapper')
+    files = {str(path.relative_to(bundle)): path.read_bytes() for path in sorted(bundle.rglob('*'))
+             if path.is_file() and path.name not in ('package.json', 'xplat-native.json')}
+    marked = [name for name, data in files.items() if name.endswith(('.js', '.mjs')) and b'P91_EMBEDDED' in data]
+    if len(marked) != 1:
+        raise RuntimeError('expected exactly one marked emitted JS file, found: ' + json.dumps(marked))
+    # Chunks may import the entry by name, so main.mjs only imports it.
+    source = 'import ' + json.dumps('./' + entry) + ';\n'
     if broken:
         source = 'throw new Error("P91 deliberate unconfirmed boot failure");\n'
     if incompatible:
-        source = 'P91WriteState("executed-incompatible","1");\n' + source
+        source = 'globalThis.P91WriteState("executed-incompatible","1");\nawait import(' + json.dumps('./' + entry) + ');\n'
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr('package.json', '{"main":"main.mjs"}')
         z.writestr('main.mjs', source)
         z.writestr('xplat-native.json', json.dumps(stamp))
+        for name, data in files.items():
+            z.writestr(name, data.replace(b'P91_EMBEDDED', marker.encode()) if name in marked else data)
     sha = hashlib.sha256(stream.getvalue()).hexdigest()
     release = {'version': version, 'sha256': sha, 'size': len(stream.getvalue()), 'nativeFingerprint': json.loads((bundle / 'xplat-native.json').read_text())['hash'], 'url': 'https://not-running.invalid/bundles/' + sha}
     (next_dir / 'app').mkdir(parents=True)
