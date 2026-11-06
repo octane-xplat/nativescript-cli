@@ -17,12 +17,15 @@ import urllib.parse
 import preflight
 
 
-def handler(root, origin):
+def handler(root, origin, access_log=None):
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def reply(self, status, body, content_type='application/json', immutable=False):
+            if access_log is not None:
+                with access_log.open('a') as stream:
+                    stream.write(json.dumps({'method': self.command, 'path': self.path, 'status': status}) + '\n')
             self.send_response(status)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(body)))
@@ -83,10 +86,11 @@ def main():
     parser.add_argument('root', type=Path)
     parser.add_argument('--origin', default=os.environ.get('PORTLESS_URL'))
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', '0')))
+    parser.add_argument('--access-log', type=Path, help='append one JSON request line per reply')
     args = parser.parse_args()
     if not args.origin or not re.fullmatch(r'https://[a-zA-Z0-9.-]+(?::[0-9]+)?', args.origin):
         parser.error('Supply the existing proxy HTTPS origin via --origin or PORTLESS_URL')
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', args.port), handler(args.root.resolve(), args.origin))
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', args.port), handler(args.root.resolve(), args.origin, args.access_log))
     print(json.dumps({'backend': '127.0.0.1', 'port': server.server_port, 'origin': args.origin}), flush=True)
     try:
         server.serve_forever()

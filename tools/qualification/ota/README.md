@@ -15,8 +15,8 @@ actual Foundation files; it deliberately has no network/installer transport.
 The Android fixture uses real Java state/health files. Neither fixture qualifies
 the public `createUpdates`/`native.mobile` adapter. The resolver now migrates only the exact reviewed core 9.1.3 compatibility hook,
 and bundling selects native/platform modules. A normal core-backed SDK baseline
-can be staged with `stage-consumer.py --sdk`; actual native SDK execution and its
-network installer still need separate qualification. Do not bypass those responses
+can be staged with `stage-consumer.py --sdk`. The iOS network installer has its
+own check below; Android installer behavior remains unqualified. Do not bypass those responses
 or edit installed packages to manufacture full SDK acceptance.
 
 For the public SDK baseline, stage each platform with `--sdk`, compile with the
@@ -125,3 +125,32 @@ The port is part of the HTTPS origin when the proxy uses a nonstandard port.
 Host CA trust and host name resolution do not establish guest trust/reachability.
 Probe those separately before a native installer run; never bypass certificate
 validation or treat an internal loopback backend as the external OTA origin.
+
+## Public createUpdates installer over the authorized local HTTPS origin
+
+`installer.py` qualifies the public `@octane-xplat/updates` `createUpdates`
+client's real `check()`/`install()` against the Portless-fronted fixture backend
+in one iOS release simulator app built by the public library. The device command
+drives no-release, install, activate/confirm, boot-failure rejection,
+native-incompatible and stamp-mismatch refusal, then origin-unavailable rollback
+and embedded restore. Stage with `--sdk-installer https://ns-ota-qualification.localhost:1355`,
+build under `native_builds:1`, generate `bundles/`+`manifests/` with `payloads.py`,
+then run the harness inside the `ios:<UDID>`/`resident_devices:1` reservation:
+
+```sh
+python3 tools/qualification/ota/stage-consumer.py ios /absolute/updates.tgz /absolute/fingerprint.tgz /new/ios-app --sdk-installer https://ns-ota-qualification.localhost:1355
+python3 tools/qualification/ota/ios/payloads.py /absolute/ios-artifact.json /new/fixture-root https://ns-ota-qualification.localhost:1355
+python3 tools/qualification/ota/ios/installer.py /absolute/ios-app /absolute/ios-artifact.json /absolute/consumer EXACT_SHUTDOWN_UDID /absolute/evidence --origin https://ns-ota-qualification.localhost:1355 --fixture-root /absolute/fixture-root
+```
+
+The simulator must already trust the existing Portless CA; the harness never
+changes trust. It starts and stops its own `ns-ota-qualification` Portless route,
+records guest requests in `access.jsonl`, and asserts per-launch app markers,
+SDK results, host OTA state and each launch's own requests. Commands are written
+only into this app's `simctl get_app_container` Documents before launch; the
+public Run reinstall may move that container, but its contents move with it.
+After the backend stops, the still-running proxy answers the removed route with
+404, so the rollback launch's check reports `no-release`; both remaining launches
+boot without the backend. Boundary: public createUpdates check/install over local
+Portless HTTPS on an iOS release simulator; backend-unavailable (not
+device-offline) restore; no Android/physical/production-host claim.

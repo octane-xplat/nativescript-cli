@@ -21,7 +21,8 @@ class ServerTests(unittest.TestCase):
             (root / 'bundles').mkdir()
             (root / 'bundles' / manifest['sha256']).write_bytes(raw)
             (root / 'manifest.json').write_text(json.dumps(manifest))
-            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler(root, fixture.origin))
+            access = root / 'access.jsonl'
+            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler(root, fixture.origin, access))
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
@@ -55,6 +56,11 @@ class ServerTests(unittest.TestCase):
                 # A changed archive at a hash URL fails closed.
                 (root / 'bundles' / manifest['sha256']).write_bytes(b'tampered')
                 self.assertEqual(request('/bundles/' + manifest['sha256'])[0], 400)
+                entries = [json.loads(line) for line in access.read_text().splitlines()]
+                self.assertTrue(all(set(entry) == {'method', 'path', 'status'} for entry in entries))
+                self.assertIn({'method': 'GET', 'path': path(), 'status': 200}, entries)
+                self.assertTrue(any(entry['path'] == '/bundles/' + manifest['sha256'] and entry['status'] == 400
+                                    for entry in entries))
             finally:
                 server.shutdown()
                 thread.join()

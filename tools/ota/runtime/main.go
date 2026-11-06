@@ -84,6 +84,10 @@ func main() {
 }
 func must(e error) {
 	if e != nil {
+		var op *ns.OperationError
+		if errors.As(e, &op) && op.Cause != nil {
+			panic(fmt.Sprintf("%v (cause: %v)", e, op.Cause))
+		}
 		panic(e)
 	}
 }
