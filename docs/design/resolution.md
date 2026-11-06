@@ -43,8 +43,14 @@ dotted identifier. Paths become canonical absolute existing directories, default
 to `app` and `App_Resources`. Other settings fail explicitly rather than disappearing.
 
 App and plugin `ios.SPMPackages` also accept `{name,path,libs}` local declarations.
-Paths resolve from the application root, including plugin declarations, matching
-the producer contract. A local declaration cannot also specify a remote URL or
+Paths resolve from the application root first, including plugin declarations,
+matching the producer contract. When a declared `node_modules/<package>/…` tail
+is absent at the application root — the isolated-install layout where transitive
+packages are not linked there — the packaged path re-resolves through Node
+lookup from the application root, then from the declaring package's own install
+location, and rejoins the remaining suffix. Validation still precedes same-name
+dedup: a losing declaration whose path is absent from every lookup rejects
+rather than disappearing. A local declaration cannot also specify a remote URL or
 version. Its ordinary `Package.swift` and package tree are hashed, excluding
 SwiftPM caches; internal symlinks reject. Linked package roots remain supported.
 The returned `spm` contribution identifies the canonical manifest and retains
@@ -131,8 +137,12 @@ Precompiled iOS `.metallib` binaries resolve as hashed resources, including
 separate simulator/device variants. Metal source compilation remains unavailable.
 A native package may have its own executable config with platform settings;
 app-only fields in package config fail. Package Android settings remain on the
-installed package result. Native files under `platforms/ios` and
-`platforms/android`, plus app resources under `iOS` and `Android`, become typed contributions owned by the canonical package.
+installed package result. Native files under an installed package's `platforms/ios`
+and `platforms/android`, plus app resources under `iOS` and `Android`, become
+typed contributions owned by the canonical package. The application's own
+top-level `platforms/` is generated preparation output (`ns clean` material),
+never an authored input: it is not walked, contributes nothing and cannot
+invalidate the revision.
 
 Supported categories include iOS source, frameworks, Podfile/podspec, Package.swift,
 configuration and resources; Android source, AAR/JAR, Gradle/manifest and resources.

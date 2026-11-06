@@ -17603,6 +17603,7 @@ var require_swift_packages = __commonJS({
     "use strict";
     var path2 = require("node:path");
     var fs2 = require("node:fs");
+    var { createRequire: createRequire2 } = require("node:module");
     var fail = (code) => {
       throw Object.assign(new Error("Invalid Swift package declaration"), { code });
     };
@@ -17641,13 +17642,31 @@ var require_swift_packages = __commonJS({
         return { name: p.name, repositoryURL: url.href.replace(/\/$/, ""), version: p.version, products };
       });
     };
-    exports2.local = (projectDir, declaration, read) => {
+    var installedPath = (projectDir, declared, ownerDir) => {
+      const tail = declared.split("/").lastIndexOf("node_modules");
+      if (tail < 0) return;
+      const rest = declared.split("/").slice(tail + 1).filter(Boolean);
+      const count = rest[0] !== void 0 && rest[0].startsWith("@") ? 2 : 1;
+      const name = rest.slice(0, count).join("/");
+      const suffix = rest.slice(count);
+      if (!name) return;
+      for (const base of [projectDir, ownerDir]) {
+        if (!base) continue;
+        try {
+          const manifest = createRequire2(path2.join(base, "package.json")).resolve(name + "/package.json");
+          return fs2.realpathSync(path2.join(path2.dirname(manifest), ...suffix));
+        } catch {
+        }
+      }
+    };
+    exports2.local = (projectDir, declaration, read, ownerDir) => {
       let directory;
       try {
         directory = fs2.realpathSync(path2.resolve(projectDir, declaration.path));
       } catch {
-        fail("invalid_input");
+        directory = installedPath(projectDir, declaration.path, ownerDir);
       }
+      if (directory === void 0) fail("invalid_input");
       const manifest = path2.join(directory, "Package.swift");
       if (!fs2.statSync(directory).isDirectory() || !fs2.existsSync(manifest) || !fs2.lstatSync(manifest).isFile()) fail("invalid_input");
       const hash = (folder) => {
@@ -19238,7 +19257,7 @@ var require_resolve = __commonJS({
             let manifest = origin;
             if (spm.path) {
               try {
-                manifest = swiftPackages.local(root, spm, read);
+                manifest = swiftPackages.local(root, spm, read, dir);
               } catch (e) {
                 fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "Local Swift packages require an existing ordinary Package.swift and supported source tree at the app-relative path");
               }
@@ -19358,7 +19377,7 @@ var require_resolve = __commonJS({
             contributions.push({ packageDirectory: owner, platform, kind, path: real });
           }
         }
-        for (const platform of ["ios", "android"]) walk(path2.join(dir, "platforms", platform), platform);
+        for (const platform of ["ios", "android"]) if (dir !== root) walk(path2.join(dir, "platforms", platform), platform);
         if (resources) {
           walk(path2.join(resources, "iOS"), "ios");
           walk(path2.join(resources, "Android"), "android");

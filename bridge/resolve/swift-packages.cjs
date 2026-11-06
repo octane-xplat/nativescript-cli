@@ -1,6 +1,7 @@
 'use strict';
 const path=require('node:path');
 const fs=require('node:fs');
+const {createRequire}=require('node:module');
 const fail=code=>{throw Object.assign(new Error('Invalid Swift package declaration'),{code});};
 const version='(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?';
 exports.key=url=>url.replace(/\/$/,'').replace(/\.git$/,'');
@@ -33,9 +34,36 @@ exports.parse=declarations=>{
  });
 };
 
-exports.local=(projectDir,declaration,read)=>{
+// Declared paths stay app-root-relative first, matching the producer contract.
+// Declarations also reference their own installed package by that root-relative
+// path, which fails under isolated installs (Bun/pnpm stores do not link
+// transitive packages at the application's node_modules). For a declared
+// node_modules/<pkg>/... tail, take the segments after the last node_modules/
+// segment, locate <pkg>/package.json through Node lookup from the app root and
+// then from the declaring package's own directory (reaching its parent store or
+// nested node_modules), and join the remaining suffix. Remaining edge:
+// validation still precedes same-name/product dedup, so a losing declaration
+// whose path is genuinely absent from every lookup still rejects.
+const installedPath=(projectDir,declared,ownerDir)=>{
+ const tail=declared.split('/').lastIndexOf('node_modules');
+ if(tail<0)return;
+ const rest=declared.split('/').slice(tail+1).filter(Boolean);
+ const count=rest[0]!==undefined&&rest[0].startsWith('@')?2:1;
+ const name=rest.slice(0,count).join('/');
+ const suffix=rest.slice(count);
+ if(!name)return;
+ for(const base of [projectDir,ownerDir]){
+  if(!base)continue;
+  try{
+   const manifest=createRequire(path.join(base,'package.json')).resolve(name+'/package.json');
+   return fs.realpathSync(path.join(path.dirname(manifest),...suffix));
+  }catch{}
+ }
+};
+exports.local=(projectDir,declaration,read,ownerDir)=>{
  let directory;
- try{directory=fs.realpathSync(path.resolve(projectDir,declaration.path));}catch{fail('invalid_input');}
+ try{directory=fs.realpathSync(path.resolve(projectDir,declaration.path));}catch{directory=installedPath(projectDir,declaration.path,ownerDir);}
+ if(directory===undefined)fail('invalid_input');
  const manifest=path.join(directory,'Package.swift');
  if(!fs.statSync(directory).isDirectory()||!fs.existsSync(manifest)||!fs.lstatSync(manifest).isFile())fail('invalid_input');
  const hash=folder=>{for(const entry of fs.readdirSync(folder,{withFileTypes:true})){

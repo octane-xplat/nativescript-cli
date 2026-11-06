@@ -122,7 +122,7 @@ async function resolve({ projectDir }) {
       const origin=configNames.map(name=>path.join(dir,name)).find(fs.existsSync);
       for(const spm of declared){
         let manifest=origin;
-        if(spm.path){try{manifest=swiftPackages.local(root,spm,read);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','Local Swift packages require an existing ordinary Package.swift and supported source tree at the app-relative path');}}
+        if(spm.path){try{manifest=swiftPackages.local(root,spm,read,dir);}catch(e){fail(e.code==='unavailable'?'unavailable':'invalid_input','Local Swift packages require an existing ordinary Package.swift and supported source tree at the app-relative path');}}
         contributions.push({packageDirectory:owner,platform:'ios',kind:spm.path?'spm':'spm-remote',path:manifest,spm});
       }
     }
@@ -215,7 +215,12 @@ async function resolve({ projectDir }) {
         contributions.push({ packageDirectory: owner, platform, kind, path: real });
       }
     }
-    for (const platform of ['ios', 'android']) walk(path.join(dir, 'platforms', platform), platform);
+    // The application's own top-level platforms/ is generated preparation
+    // output (ns clean material), never authored input; it contributes nothing
+    // and cannot invalidate resolution. Installed packages own their published
+    // platforms/ trees, including the platform-root native-api-usage.json
+    // inventory keyed by folder === platformRoot below.
+    for (const platform of ['ios', 'android']) if (dir !== root) walk(path.join(dir, 'platforms', platform), platform);
     if (resources) {
       walk(path.join(resources, 'iOS'), 'ios');
       walk(path.join(resources, 'Android'), 'android');
