@@ -60,7 +60,11 @@ platform-specific `.ios`/`.android` modules before generic modules, and defines
 NativeScript's platform/development flags. `~/` resolves within the selected app
 path. `~/package.json` uses the authored app package when present and otherwise a
 virtual runtime entry manifest, so importing core does not require an extra
-source manifest. No installed package files are edited or upstream CLI spawned.
+source manifest. Core's package `sideEffects` omits its globals polyfill
+imports, so native bundles keep side effects for modules inside the resolved
+`@nativescript/core` package (matching the upstream engine); otherwise the
+XMLHttpRequest/FormData/Blob/File/FileReader globals are dropped and core Http
+fails. No installed package files are edited or upstream CLI spawned.
 The existing emitted `bundle.js` contract remains unchanged; downloaded canonical
 OTA archives have their own entry/package contract.
 

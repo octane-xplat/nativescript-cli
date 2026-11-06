@@ -15,6 +15,27 @@ module.exports = async function bundle(p, emit) {
   if (!/^7\./.test(vite.version)) throw fail('unavailable');
   if(p.platform && (!['ios','android'].includes(p.platform)||!path.isAbsolute(p.appPath||'')||!['debug','release'].includes(p.configuration))) throw fail('invalid_input');
   const runtimePackage={main:'bundle.js',...(p.android?{id:p.applicationID,android:p.android}:{})};
+  // Core's package sideEffects omits its globals polyfill imports; keep side
+  // effects for every module inside the resolved core package or
+  // XMLHttpRequest/FormData/Blob/File/FileReader globals are dropped.
+  const coreSideEffects=(()=>{
+    if(!p.platform)return null;
+    let core;
+    try{core=fs.realpathSync(path.dirname(req.resolve('@nativescript/core/package.json')));}catch{return null;}
+    return {
+      name:'xplat-core-side-effects',
+      enforce:'pre',
+      async resolveId(source,importer,options){
+        const r=await this.resolve(source,importer,{...options,skipSelf:true});
+        if(r&&!r.external){
+          let file=r.id.split('?')[0];
+          try{file=fs.realpathSync(file);}catch{}
+          if(file===core||file.startsWith(core+path.sep))return {...r,moduleSideEffects:true};
+        }
+        return r;
+      },
+    };
+  })();
   let server, watcher;
   let latest;
   let failWatch;
@@ -58,7 +79,7 @@ module.exports = async function bundle(p, emit) {
       // Core's native modules read these at startup; this adapter emits an ESM-derived IIFE.
       define: { 'global.isIOS': String(p.platform==='ios'), 'global.isAndroid': String(p.platform==='android'), '__IOS__': String(p.platform==='ios'), '__ANDROID__': String(p.platform==='android'), '__APPLE__': String(p.platform==='ios'), '__VISIONOS__': 'false', '__COMMONJS__': 'false', '__DEV__': String(p.configuration==='debug') },
     } : {}),
-    plugins: [manifest],
+    plugins: coreSideEffects?[manifest,coreSideEffects]:[manifest],
     build: { outDir: p.directory, emptyOutDir: false, minify: false,
       lib: { entry: p.entry, formats: ['iife'], name: 'NativeScriptApp', fileName: () => 'bundle.js' },
       watch: p.mode === 'watch' ? {} : null,

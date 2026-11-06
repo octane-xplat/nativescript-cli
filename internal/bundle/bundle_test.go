@@ -398,6 +398,63 @@ func TestNativePackageAndPlatformResolution(t *testing.T) {
 	}
 }
 
+// Native bundles must keep side effects for modules inside the resolved
+// @nativescript/core package: its package.json sideEffects list omits the
+// globals polyfill imports, so naive tree-shaking drops XMLHttpRequest/FormData
+// registration and core Http fails at runtime. Other packages keep their own
+// declared sideEffects semantics.
+func TestCoreSideEffectsSurviveNativeBundling(t *testing.T) {
+	for _, platform := range []string{"ios", "android"} {
+		t.Run(platform, func(t *testing.T) {
+			a, r, p, _ := fixture(t)
+			modules := filepath.Join(r.Directory, "node_modules")
+			vite, e := filepath.EvalSymlinks(filepath.Join(modules, "vite"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e = os.Remove(modules); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.MkdirAll(modules, 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.Symlink(vite, filepath.Join(modules, "vite")); e != nil {
+				t.Fatal(e)
+			}
+			fake := func(name, marker string) {
+				dir := filepath.Join(modules, name)
+				if e := os.MkdirAll(filepath.Join(dir, "globals/polyfills"), 0700); e != nil {
+					t.Fatal(e)
+				}
+				write(t, filepath.Join(dir, "package.json"), `{"name":"`+name+`","type":"module","main":"index.js","sideEffects":["./globals/index.js"]}`)
+				write(t, filepath.Join(dir, "index.js"), `import './globals/index.js'; export const exported=1;`)
+				write(t, filepath.Join(dir, "globals/index.js"), `import './polyfills/polyfill-xhr.js';`)
+				write(t, filepath.Join(dir, "globals/polyfills/polyfill-xhr.js"), `globalThis.`+marker+`='installed';`)
+			}
+			fake("@nativescript/core", "coreFormData")
+			fake("side-control", "controlFormData")
+			write(t, filepath.Join(r.Config.AppPath, "app.js"), `import {exported} from '@nativescript/core';import {exported as control} from 'side-control';globalThis.sideResult=[exported,control,globalThis.coreFormData,globalThis.controlFormData];`)
+			q := Request{ProjectDir: r.Directory, Directory: p.BundleDir, Entry: filepath.Join(r.Config.AppPath, "app.js"), Mode: "bundle", Platform: platform, AppPath: r.Config.AppPath, Configuration: "release"}
+			m, e := a.call(context.Background(), q, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			data, e := os.ReadFile(m.Entry)
+			if e != nil {
+				t.Fatal(e)
+			}
+			out, e := exec.Command("node", "-e", string(data)+`;console.log(JSON.stringify(globalThis.sideResult));`).CombinedOutput()
+			if e != nil {
+				t.Fatal(e, string(out))
+			}
+			expected := `[1,1,"installed",null]`
+			if strings.TrimSpace(string(out)) != expected {
+				t.Fatalf("%s != %s", out, expected)
+			}
+		})
+	}
+}
+
 // Independent callers must retain separate helper, server and bundle ownership.
 // This exercises real Vite and F1/F2 without claiming native HMR/device behavior.
 func TestIndependentWatchersRetainOwnership(t *testing.T) {
