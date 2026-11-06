@@ -1,4 +1,10 @@
-> Note: the earlier -14/-15 installer passes exercised the removed Vite 7 fallback bundler. Requalification on the official @nativescript/vite engine is pending the next device run.
+> Note: staged fixtures build through the official `@nativescript/vite` engine
+> with an authored `vite.config.mts` that adds the `native` export condition.
+> The canonical SDK publishes its iOS/Android entry under `native`; the engine's
+> preset alone resolves its web entry, an updater that reports unsupported.
+> Xplat apps get the condition from the `xplatNative` preset. The earlier
+> `ota-installer-ios-20261105-14/-15` passes used the removed Vite 7 fallback;
+> `ota-installer-ios-official-20261105-3/-4` requalified the installer.
 
 # NativeScript 9.1 runtime guard qualification
 
