@@ -180,6 +180,17 @@ func jsonFile(dir, name string, v any) error {
 	}
 	return write(dir, name, b)
 }
+func readJSONFile(path string) (map[string]any, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	v := map[string]any{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
 func groovy(s string) string {
 	return "'" + strings.NewReplacer("\\", "\\\\", "'", "\\'", "\n", "\\n", "\r", "\\r").Replace(s) + "'"
 }
@@ -202,7 +213,7 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 		s := strings.ReplaceAll(string(b), "$rootDir/../../", "$rootDir")
 		s = strings.ReplaceAll(s, "${rootProject.projectDir}/../..", "${rootProject.projectDir}")
 		s = strings.ReplaceAll(s, "$rootDir/../..", "$rootDir")
-		s = strings.ReplaceAll(s, "__PROJECT_NAME__", "NativeScriptApp")
+		s = strings.ReplaceAll(s, "__PROJECT_NAME__", projectNameFromID(r.ApplicationID))
 		if e = write(dir, name, []byte(s)); e != nil {
 			return e
 		}
@@ -218,18 +229,57 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 	if err = write(dir, "gradle.properties", props); err != nil {
 		return err
 	}
-	if err = jsonFile(dir, "package.json", map[string]any{"nativescript": map[string]string{"id": r.ApplicationID}}); err != nil {
+	// USER_PROJECT_ROOT/package.json is the application's manifest for the
+	// runtime scripts and for plugin Gradle files that read it (for example
+	// dependencies["@akylas/nativescript"] lookups in include.gradle). Keep the
+	// real document and add only the identity our build stage reads back.
+	pkg, err := readJSONFile(filepath.Join(r.Directory, "package.json"))
+	if err != nil {
+		return err
+	}
+	nativescript, _ := pkg["nativescript"].(map[string]any)
+	if nativescript == nil {
+		nativescript = map[string]any{}
+	}
+	nativescript["id"] = r.ApplicationID
+	pkg["nativescript"] = nativescript
+	if err = jsonFile(dir, "package.json", pkg); err != nil {
 		return err
 	}
 	// Retain the effective settings for compiler consumers outside bundle output.
 	if err = jsonFile(dir, "runtime-config.json", r.Config.Android); err != nil {
 		return err
 	}
-	if err = jsonFile(dir, "app/src/main/assets/app/package.json", map[string]any{"main": "bundle.mjs", "id": r.ApplicationID, "android": map[string]string{"v8Flags": r.Config.Android.V8Flags, "markingMode": r.Config.Android.MarkingMode}}); err != nil {
+	// Upstream copies the application package.json into the bundled assets and
+	// overlays the runtime fields; the bundler's entry name is ours.
+	assetsPkg, err := readJSONFile(filepath.Join(r.Directory, "package.json"))
+	if err != nil {
+		return err
+	}
+	androidFields, _ := assetsPkg["android"].(map[string]any)
+	if androidFields == nil {
+		androidFields = map[string]any{}
+	}
+	androidFields["v8Flags"] = r.Config.Android.V8Flags
+	androidFields["markingMode"] = r.Config.Android.MarkingMode
+	assetsPkg["android"] = androidFields
+	assetsPkg["main"] = "bundle.mjs"
+	assetsPkg["id"] = r.ApplicationID
+	if err = jsonFile(dir, "app/src/main/assets/app/package.json", assetsPkg); err != nil {
 		return err
 	}
 	contributions := append([]project.Contribution(nil), r.Contributions...)
 	sort.Slice(contributions, func(i, j int) bool { return contributions[i].Path < contributions[j].Path })
+	owners := map[string]string{}
+	for _, c := range contributions {
+		if c.Platform != "android" || c.PackageDirectory == r.Directory {
+			continue
+		}
+		if owners[c.PackageDirectory] == "" {
+			owners[c.PackageDirectory] = "contributions/" + ownerKey(c.PackageDirectory) + "/platforms/android"
+		}
+	}
+	comp := planComposition(r, owners)
 	manifests := map[string][]byte{}
 	namespaces := map[string]string{}
 	for _, c := range contributions {
@@ -255,21 +305,25 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 			return fmt.Errorf("Android library manifest: %w", e)
 		}
 		manifests[c.Path] = b
-		// Match the source-set selection below when both layouts are present.
-		if _, exists := namespaces[c.PackageDirectory]; !exists || rel != "AndroidManifest.xml" {
+		// Upstream reads only the root manifest for the library namespace; the
+		// src/main layout is the fallback when no root manifest contributes.
+		if rel == "AndroidManifest.xml" {
+			namespaces[c.PackageDirectory] = namespace
+		} else if _, exists := namespaces[c.PackageDirectory]; !exists {
 			namespaces[c.PackageDirectory] = namespace
 		}
 	}
-	type dependency struct {
-		Name      string `json:"name"`
-		Directory string `json:"directory"`
+	for _, plan := range comp.modules {
+		plan.namespace = namespaces[plan.owner]
+		if plan.namespace == "" {
+			plan.namespace = "org.nativescript." + plan.short
+		}
 	}
-	deps := []dependency{}
-	owners := map[string]string{}
 	settings := "\n"
 	app := "\n"
 	metadata := []project.Contribution{}
 	filters := map[string][]byte{}
+	ownScopes := map[string][]string{}
 	for _, c := range contributions {
 		if c.Platform != "android" {
 			continue
@@ -323,26 +377,17 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 		if !isApp {
 			dst = owners[c.PackageDirectory]
 			if dst == "" {
-				h := sha256.Sum256([]byte(c.PackageDirectory))
-				key := hex.EncodeToString(h[:8])
-				root := "contributions/" + key
-				dst = root + "/platforms/android"
-				owners[c.PackageDirectory] = dst
-				if e = jsonFile(dir, root+"/package.json", map[string]string{"name": key}); e != nil {
+				return workflow.ErrHandoff
+			}
+			root := filepath.Dir(filepath.Dir(dst))
+			if _, e := os.Stat(filepath.Join(dir, root, "package.json")); os.IsNotExist(e) {
+				// dep.directory/package.json is the real plugin manifest for
+				// the runtime scripts (useV8Symbols and friends).
+				b, e := os.ReadFile(filepath.Join(c.PackageDirectory, "package.json"))
+				if e != nil {
 					return e
 				}
-				deps = append(deps, dependency{Name: key, Directory: root})
-				settings += "include ':native" + key + "'\nproject(':native" + key + "').projectDir = file(" + groovy(root) + ")\n"
-				app += "dependencies { implementation project(':native" + key + "') }\n"
-				namespace := namespaces[c.PackageDirectory]
-				if namespace == "" {
-					namespace = "org.nativescript.contrib.p" + key
-				}
-				script := "apply plugin: 'com.android.library'\napply plugin: 'kotlin-android'\nandroid { namespace " + groovy(namespace) + "; compileSdk rootProject.ext.NS_DEFAULT_COMPILE_SDK_VERSION.toInteger(); defaultConfig { minSdk rootProject.ext.NS_DEFAULT_MIN_SDK_VERSION.toInteger() }; sourceSets.main { java.srcDirs = ['platforms/android']; res.srcDirs = ['platforms/android/res', 'platforms/android/src/main/res']; assets.srcDirs = ['platforms/android/assets', 'platforms/android/src/main/assets']; jniLibs.srcDirs = ['platforms/android/libs', 'platforms/android/src/main/jniLibs']; manifest.srcFile file('platforms/android/src/main/AndroidManifest.xml').exists() ? 'platforms/android/src/main/AndroidManifest.xml' : 'platforms/android/AndroidManifest.xml' }; compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }; kotlinOptions { jvmTarget = '17' } }\ndependencies { compileOnly fileTree(dir: 'platforms/android', include: ['**/*.jar']); compileOnly files(rootProject.file('app/libs/runtime-libs/nativescript-regular.aar')) }\n"
-				if e = write(dir, root+"/build.gradle", []byte(script)); e != nil {
-					return e
-				}
-				if e = write(dir, dst+"/AndroidManifest.xml", []byte(`<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>`)); e != nil {
+				if e = write(dir, root+"/package.json", b); e != nil {
 					return e
 				}
 			}
@@ -356,6 +401,13 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 		}
 		if manifest, ok := manifests[c.Path]; ok {
 			b = manifest
+		}
+		if !isApp && rel == "include.gradle" {
+			// The module consumes only the file's repositories/dependencies
+			// scopes (upstream addCompileDependencies) and reads them before
+			// the productFlavors migration upstream applies afterwards.
+			ownScopes[c.PackageDirectory] = includeGradleScopes(string(b))
+			b = migrateIncludeGradle(b)
 		}
 		if e = write(dir, filepath.Join(dst, rel), b); e != nil {
 			return e
@@ -390,18 +442,56 @@ func materialize(ctx context.Context, r project.Resolved, dir string) error {
 			return err
 		}
 	}
-	for _, owner := range sortedKeys(owners) {
+	for _, owner := range comp.order {
+		plan := comp.modules[owner]
+		if plan == nil || !plan.build {
+			continue
+		}
 		module := filepath.Dir(filepath.Dir(owners[owner]))
-		name := filepath.Join(module, "build.gradle")
-		b, e := os.ReadFile(filepath.Join(dir, name))
+		settings += "include ':" + plan.name + "'\nproject(':" + plan.name + "').projectDir = file(" + groovy(module) + ")\n"
+		app += "dependencies { implementation project(':" + plan.name + "') }\n"
+		if !plan.manifest {
+			// Upstream writes a default manifest when the plugin ships none.
+			if err = write(dir, filepath.Join(owners[owner], "AndroidManifest.xml"), []byte(`<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>`)); err != nil {
+				return err
+			}
+		}
+		if err = write(dir, filepath.Join(module, "build.gradle"), []byte(moduleScript(r, comp, plan, ownScopes[owner]))); err != nil {
+			return err
+		}
+	}
+	for _, owner := range comp.order {
+		if owners[owner] != "" {
+			continue
+		}
+		// dependencies.json rows for packages without contributions still need
+		// <directory>/package.json: the runtime scripts read it unconditionally.
+		b, e := os.ReadFile(filepath.Join(owner, "package.json"))
 		if e != nil {
 			return e
 		}
-		if e = write(dir, name, append(b, []byte(libraryDependencies(r, owner, owners))...)); e != nil {
+		if e = write(dir, comp.names[owner]+"/package.json", b); e != nil {
 			return e
 		}
 	}
-	if err = jsonFile(dir, "dependencies.json", deps); err != nil {
+	// USER_PROJECT_ROOT/node_modules/<name> mirrors the application's installed
+	// view for plugin Gradle files that resolve sibling packages by path (for
+	// example $USER_PROJECT_ROOT/node_modules/@nativescript/core). The links
+	// stay inside the generated snapshot.
+	for _, owner := range comp.order {
+		link := filepath.Join(dir, "node_modules", filepath.FromSlash(comp.nativeByDir[owner]))
+		target, e := filepath.Rel(filepath.Dir(link), filepath.Join(dir, comp.names[owner]))
+		if e != nil {
+			return e
+		}
+		if e = os.MkdirAll(filepath.Dir(link), 0700); e != nil {
+			return e
+		}
+		if e = os.Symlink(target, link); e != nil {
+			return e
+		}
+	}
+	if err = jsonFile(dir, "dependencies.json", comp.deps); err != nil {
 		return err
 	}
 	if err = jsonFile(dir, "metadata-inputs.json", metadata); err != nil {
