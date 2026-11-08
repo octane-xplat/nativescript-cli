@@ -228,6 +228,9 @@ async function resolve({ projectDir }) {
   }
   const root = fs.realpathSync(projectDir);
   const app = json(path.join(root, 'package.json'));
+  // Upstream walks production dependencies breadth-first from each package's
+  // authored `dependencies` order; remember that declared order per directory.
+  const declared = new Map([[root, Object.keys(app.dependencies || {})]]);
   const cfg = await config(root, true);
   if (typeof cfg.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(cfg.id)) fail('invalid_input', 'Config id must be a dotted application identifier');
   // The OTA handoff must preserve every evaluated value; JSON omission is not
@@ -272,6 +275,7 @@ async function resolve({ projectDir }) {
     const native = pkg.nativescript !== undefined;
     const item = { name: pkg.name, version: pkg.version, directory: dir, native };
     packages.set(dir, item);
+    if (!isRoot) declared.set(dir, Object.keys(pkg.dependencies || {}));
     if (!isRoot && native) {
       const core=pkg.name==='@nativescript/core';
       if(core&&!coreAdapter.supported(pkg,dir,read)) fail('unavailable','NativeScript core requires the reviewed 9.1.3 compatibility-hook contract');
@@ -316,20 +320,39 @@ async function resolve({ projectDir }) {
   // Upstream applies each native package name once: getAllProductionPlugins
   // keeps the first occurrence in breadth-first dependency order, so the
   // install resolvable closest to the app root wins and duplicate nested
-  // versions cannot contribute a second copy of the same native code.
+  // versions cannot contribute a second copy of the same native code. That
+  // order is getProductionDependencies' queue emission: the app's declared
+  // dependencies seed the queue in manifest order, each emitted package
+  // enqueues its own declared dependencies, and the first dequeue of a
+  // resolved directory wins. Peer, optional and development edges still
+  // resolve but never advance a package's upstream position.
   const order = new Map([[root, 0]]);
+  const dependencyOrder = [];
   {
-    const adjacency = new Map();
-    for (const edge of edges) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+    const adjacency = new Map(), resolvedEdge = new Map();
+    for (const edge of edges) {
+      (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+      resolvedEdge.set(`${edge.from}\0${edge.name}`, edge.directory);
+    }
     const queue = [root];
     for (let i = 0; i < queue.length; i++) for (const next of adjacency.get(queue[i]) || []) if (!order.has(next)) { order.set(next, order.size); queue.push(next); }
+    const seen = new Set(), production = [];
+    for (const name of declared.get(root) || []) production.push(resolvedEdge.get(`${root}\0${name}`));
+    for (let i = 0; i < production.length; i++) {
+      const directory = production[i];
+      if (directory === undefined || seen.has(directory)) continue;
+      seen.add(directory);
+      dependencyOrder.push(directory);
+      for (const name of declared.get(directory) || []) production.push(resolvedEdge.get(`${directory}\0${name}`));
+    }
   }
+  const productionOrder = new Map(dependencyOrder.map((directory, index) => [directory, index]));
   const winners = new Map();
   for (const item of packages.values()) {
     if (!item.native || item.directory === root) continue;
     const winner = winners.get(item.name);
-    const position = order.get(item.directory) ?? Number.MAX_SAFE_INTEGER;
-    if (!winner || position < winner.position) winners.set(item.name, { directory: item.directory, position });
+    const position = [productionOrder.get(item.directory) ?? Number.MAX_SAFE_INTEGER, order.get(item.directory) ?? Number.MAX_SAFE_INTEGER];
+    if (!winner || position[0] < winner.position[0] || (position[0] === winner.position[0] && position[1] < winner.position[1])) winners.set(item.name, { directory: item.directory, position });
   }
   const dropped = new Set([...packages.values()].filter(item => item.native && item.directory !== root && winners.get(item.name)?.directory !== item.directory).map(item => item.directory));
   const appliedContributions = contributions.filter(c => !dropped.has(c.packageDirectory));
@@ -352,7 +375,7 @@ async function resolve({ projectDir }) {
   let remote;
   try{remote=swiftPackages.merge(selectedContributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
   for(const c of remote)membership.set(JSON.stringify(['spm-remote',c.spm.repositoryURL]),c);
-  const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
+  const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, dependencyOrder, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
   const appliedGroups=nativeSourceGroups.filter(group=>!dropped.has(group.packageDirectory));
   if(appliedGroups.length)result.nativeSourceGroups=appliedGroups;
   result.revision = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');

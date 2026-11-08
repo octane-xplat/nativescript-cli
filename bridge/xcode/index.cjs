@@ -7,6 +7,7 @@ const plist = require('plist');
 const bplist = require('bplist-parser');
 const { execFileSync } = require('node:child_process');
 const swiftPackages = require('../resolve/swift-packages.cjs');
+const xcconfigs = require('./xcconfig.cjs');
 const fail = code => { throw Object.assign(new Error(), {code}); };
 const q = value => JSON.stringify(value);
 const id = value => crypto.createHash('sha256').update(`p1:${value}`).digest('hex').slice(0,24).toUpperCase();
@@ -67,39 +68,6 @@ function mergePlistKey(key, base, patch) {
   }
   if (base && typeof base === 'object' && !Array.isArray(base) && patch && typeof patch === 'object' && !Array.isArray(patch)) return mergePlist(base, patch);
   return structuredClone(patch);
-}
-// xcconfig contributions merge like upstream's XcconfigService.mergeFiles:
-// the App_Resources build.xcconfig applies first and keeps its values, plugin
-// files fill gaps, and a kept value containing $(inherited) absorbs the later
-// file's non-inherited remainder.
-const inheritedPattern = /\$\(inherited\)|\$\{inherited\}/g;
-function parseXcconfig(text) {
-  const attributes = new Map(), includes = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.split('//')[0];
-    const include = /#include\??\s*"(.+)"/.exec(line);
-    if (include) { includes.push(include[1].endsWith('.xcconfig') ? include[1] : include[1] + '.xcconfig'); continue; }
-    const assignment = /([^=\[]+(?:\[[^\]]*?(?:=[^\]]*?)?\])*)\s*=(.*)/.exec(line);
-    if (!assignment) continue;
-    const key = assignment[1].trim();
-    attributes.set(key, assignment[2].trim().replace(inheritedPattern, marker => attributes.has(key) ? attributes.get(key) : marker));
-  }
-  return { attributes, includes };
-}
-const shellsplit = value => (value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map(token => token.replace(/["']/g, ''));
-function mergeXcconfigAttributes(attributes, incoming) {
-  for (const [key, source] of incoming) {
-    const kept = attributes.get(key);
-    if (kept === undefined) { attributes.set(key, source); continue; }
-    if (!/\$\(inherited\)|\$\{inherited\}/.test(kept)) continue;
-    const appended = source.replace(inheritedPattern, '').trim();
-    if (!appended) continue;
-    const keptTokens = shellsplit(kept.trim()), sourceTokens = shellsplit(appended);
-    attributes.set(key,
-      sourceTokens.every(token => keptTokens.includes(token)) || keptTokens.slice(0, sourceTokens.length).join(' ') === sourceTokens.join(' ') ? kept.trim()
-        : sourceTokens.slice(0, keptTokens.length).join(' ') === keptTokens.join(' ') ? appended
-          : `${kept.trim()} ${appended}`);
-  }
 }
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Podfile composition matches upstream's CocoaPodsService: plugin Podfiles are
@@ -218,16 +186,13 @@ module.exports = async ({ resolved, directory, configuration }) => {
   const appIOSDirectory = resolved.config?.appResourcesPath ? path.join(real(resolved.config.appResourcesPath), 'iOS') : undefined;
   const isAppOwned = c => !c.packageDirectory || c.packageDirectory === appRoot;
   const manifestDirectory = c => isAppOwned(c) ? appIOSDirectory : path.join(c.packageDirectory, 'platforms', 'ios');
-  // Plugins apply in breadth-first dependency order upstream; the app always
-  // applies last so its manifest values win.
-  const rank = new Map([[appRoot, 0]]);
-  {
-    const adjacency = new Map();
-    for (const edge of resolved.dependencies || []) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
-    const queue = [appRoot];
-    for (let i = 0; i < queue.length; i++) for (const next of adjacency.get(queue[i]) || []) if (!rank.has(next)) { rank.set(next, rank.get(queue[i]) + 1); queue.push(next); }
-  }
-  const contributions = resolved.contributions.filter(c=>c.platform==='ios').map(c=>c.packageDirectory?{...c,packageDirectory:real(c.packageDirectory)}:c).sort((a,b)=>(isAppOwned(a)-isAppOwned(b)) || (rank.get(a.packageDirectory)??Number.MAX_SAFE_INTEGER)-(rank.get(b.packageDirectory)??Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
+  // Plugins apply in upstream's getAllProductionPlugins order: breadth-first
+  // production-dependency emission order, computed during resolve over each
+  // package's declared `dependencies`. The app always applies last so its
+  // manifest values win; packages only reachable through peer, optional or
+  // development edges keep their contribution but sort after production ones.
+  const dependencyOrder = new Map((resolved.dependencyOrder || []).map((directory, index) => [real(directory), index]));
+  const contributions = resolved.contributions.filter(c=>c.platform==='ios').map(c=>c.packageDirectory?{...c,packageDirectory:real(c.packageDirectory)}:c).sort((a,b)=>(isAppOwned(a)-isAppOwned(b)) || (dependencyOrder.get(a.packageDirectory)??Number.MAX_SAFE_INTEGER)-(dependencyOrder.get(b.packageDirectory)??Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
   for (const c of contributions) {
     if (!path.isAbsolute(c.path) || !fs.existsSync(c.path)) fail('invalid_input');
     const ext = path.extname(c.path).toLowerCase();
@@ -259,7 +224,11 @@ module.exports = async ({ resolved, directory, configuration }) => {
       try { manifest=JSON.parse(execFileSync('swift',['package','--package-path',path.dirname(c.path),'dump-package'],{encoding:'utf8',maxBuffer:4<<20,stdio:['ignore','pipe','pipe']})); }
       catch { fail('unavailable'); }
       if(c.spm?.path&&manifestDigest()!==sourceSHA256)fail('invalid_input');
-      const ref=put('XCLocalSwiftPackageReference',c.path,{relativePath:q(path.dirname(c.path))});
+      // Upstream writes the declared path resolved against the app directory,
+      // then made project-relative; the visible node_modules form survives
+      // instead of the realpath'd store location when the declaration resolves.
+      const declaredDirectory=c.spm?.path?[path.resolve(appRoot,c.spm.path),c.packageDirectory&&path.resolve(c.packageDirectory,c.spm.path)].find(p=>p&&fs.existsSync(p)):undefined;
+      const ref=put('XCLocalSwiftPackageReference',c.path,{relativePath:q(path.relative(directory,declaredDirectory||path.dirname(c.path)))});
       (root.packageReferences ||= []).push({value:ref,comment:'P1'});
       let selectedProducts=manifest.products || [];
       if(c.spm){
@@ -295,7 +264,10 @@ module.exports = async ({ resolved, directory, configuration }) => {
       else if (ext === '.plist') fail('unavailable');
     }
     const types={'.swift':'sourcecode.swift','.m':'sourcecode.c.objc','.mm':'sourcecode.cpp.objcpp','.h':'sourcecode.c.h','.c':'sourcecode.c.c','.cpp':'sourcecode.cpp.cpp','.framework':'wrapper.framework','.xcframework':'wrapper.xcframework','.a':'archive.ar','.xcconfig':'text.xcconfig','.plist':'text.plist.xml','.entitlements':'text.plist.entitlements','.xcassets':'folder.assetcatalog'};
-    const ref=put('PBXFileReference',`file:${c.path}`,{path:q(c.path),sourceTree:q('<absolute>'),lastKnownFileType:types[ext] || (fs.statSync(c.path).isDirectory()?'folder':'file')});
+    // Upstream references contributed files relative to the project inside
+    // groups without a path, so resolution lands on $(SRCROOT); a detached
+    // output keeps that contract through ordinary relative paths.
+    const ref=put('PBXFileReference',`file:${c.path}`,{explicitFileType:undefined,fileEncoding:(c.kind==='source'||['.xcconfig','.plist'].includes(ext))?4:undefined,includeInIndex:0,lastKnownFileType:types[ext] || (fs.statSync(c.path).isDirectory()?'folder':'file'),name:q(path.basename(c.path)),path:q(path.relative(directory,c.path)),sourceTree:q('<group>')});
     objects.PBXGroup[group].children.push({value:ref,comment:'P1'});
     if (ext === '.h') { headers.push(c.path); continue; }
     const phase = {source:'Sources',resource:'Resources',framework:'Frameworks'}[c.kind];
@@ -314,8 +286,10 @@ module.exports = async ({ resolved, directory, configuration }) => {
     settings.CODE_SIGN_ENTITLEMENTS=q(`${name}/${name}.entitlements`);
     // A module map's umbrella directory can contain nested include namespaces
     // (for example <SDWebImage/Header.h>), not just sibling header files.
-    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),...Array.from(new Set([...headers,...modulemaps].map(p=>q(q(path.dirname(p))))))];
-    settings.FRAMEWORK_SEARCH_PATHS=['"$(inherited)"',...Array.from(new Set(contributions.filter(c=>c.kind==='framework').map(c=>q(q(path.dirname(c.path))))))];
+    // Search paths stay $(SRCROOT)-relative like upstream's project edits;
+    // upstream emits framework roots unanchored and header roots anchored.
+    settings.HEADER_SEARCH_PATHS=['"$(inherited)"',q(q('$(SRCROOT)/internal')),q(q('$(SRCROOT)/internal/Swift-Modules')),...Array.from(new Set([...headers,...modulemaps].map(p=>q(q('$(SRCROOT)/'+path.relative(directory,path.dirname(p)))))))];
+    settings.FRAMEWORK_SEARCH_PATHS=['"$(inherited)"',...Array.from(new Set(contributions.filter(c=>c.kind==='framework').map(c=>q(q(path.relative(directory,path.dirname(c.path)))))))];
   }
   const write=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.p1-tmp';fs.writeFileSync(temp,text);fs.renameSync(temp,file);};
   // Upstream applies the application identity last so plugin manifests can
@@ -334,13 +308,22 @@ module.exports = async ({ resolved, directory, configuration }) => {
   const bridgingHeader=path.join(directory,'internal/Swift-ObjC-Bridging-Header.h');
   if(!fs.existsSync(bridgingHeader))write(bridgingHeader,'#import "TargetConditionals.h"\n\n#ifndef TARGET_OS_WATCH\n    #import "NativeScript/NativeScript.h"\n    #import "NativeScriptStart.h"\n#endif\n');
   fs.rmSync(path.join(internal,'NativeContributions'),{recursive:true,force:true});
-  const xcconfigs={attributes:new Map(),includes:[]};
+  // plugins-*.xcconfig merges contributed build.xcconfig files through the
+  // same XcconfigService.mergeFiles contract upstream applies per file: the
+  // App_Resources xcconfig first (its values win), then each plugin's in
+  // dependency order. CocoaPods keys join after pod install through the
+  // podxcconfig operation, matching upstream's mergePodXcconfigFile.
+  let mergedXcconfig='';
   for(const c of [...configs.filter(isAppOwned),...configs.filter(c=>!isAppOwned(c))]){
-    let parsed;try{parsed=parseXcconfig(fs.readFileSync(c.path,'utf8'));}catch{fail('unavailable');}
-    for(const include of parsed.includes)if(!xcconfigs.includes.includes(include))xcconfigs.includes.push(include);
-    mergeXcconfigAttributes(xcconfigs.attributes,parsed.attributes);
+    let source;try{source=fs.readFileSync(c.path,'utf8');}catch{fail('unavailable');}
+    mergedXcconfig=xcconfigs.mergeFiles(source,mergedXcconfig).text;
   }
-  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),`#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"\n`+xcconfigs.includes.map(p=>`#include ${q(p)}\n`).join('')+[...xcconfigs.attributes].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k} = ${v}\n`).join(''));
+  // Upstream adds the entitlements row when the merged config lacks it and the
+  // platform entitlements file exists (the runtime template always ships one).
+  if(fs.existsSync(path.join(directory,name,`${name}.entitlements`))&&!xcconfigs.attributes(mergedXcconfig).has('CODE_SIGN_ENTITLEMENTS')){
+    mergedXcconfig=xcconfigs.mergeFiles(`CODE_SIGN_ENTITLEMENTS = ${name}/${name}.entitlements\n`,mergedXcconfig).text;
+  }
+  for (const mode of ['debug','release']) write(path.join(directory,`plugins-${mode}.xcconfig`),mergedXcconfig);
   const ruby = value => `'${value.replaceAll('\\','\\\\').replaceAll("'","\\'")}'`;
   if(pods.length || previous.pods) {
     const appPodfile=appIOSDirectory?path.join(appIOSDirectory,'Podfile'):'';
@@ -373,7 +356,7 @@ module.exports = async ({ resolved, directory, configuration }) => {
       if(platforms.platform)addPlatformSection(platforms.platform);
       appendBlock(`# Begin Podfile - ${c.path.replace(/\+/g,'\\+')}\n${platforms.replaced}\n# End Podfile`);
     }
-    write(path.join(directory,'Podfile'),`use_frameworks!\n\ntarget "${name}" do\n${body.trim()}\nend\n`);
+    write(path.join(directory,'Podfile'),`use_frameworks!\n\ntarget "${name}" do\n${body.trim()}\nend`);
   }
   write(path.join(directory,'metadata-inputs.json'),JSON.stringify({schema:1,runtime:runtime.version,revision:resolved.revision,headers,modulemaps,frameworks:contributions.filter(c=>c.kind==='framework').map(c=>c.path),pods:pods.map(c=>c.path),packages,remotePackages},null,2)+'\n');
   write(projectFile,project.writeSync());

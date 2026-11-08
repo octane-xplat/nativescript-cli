@@ -28,7 +28,13 @@ test('runtime graph membership, stable regeneration, removal and pin preservatio
  assert.ok(Object.values(o.PBXFileReference).some(v=>v&&v.path==='app'&&v.sourceTree==='SOURCE_ROOT'));
  const sources=Object.values(o.PBXSourcesBuildPhase).filter(v=>v&&typeof v==='object');
  assert.equal(sources.length,1); assert.ok(sources.some(v=>v.files.some(f=>owned.includes(f.value))));
- const shaderRef=Object.entries(o.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(path.join(dir,'Compiled.metallib')))[0];
+ // Contributed references stay project-relative under <group> like upstream.
+ const swiftRef=Object.values(o.PBXFileReference).find(v=>v&&v.name===JSON.stringify('Binding.swift'));
+ assert.equal(swiftRef.path,JSON.stringify(path.relative(output,path.join(dir,'Binding.swift'))));
+ assert.equal(swiftRef.sourceTree,'"<group>"');
+ assert.equal(swiftRef.includeInIndex,0);
+ assert.equal(swiftRef.fileEncoding,4);
+ const shaderRef=Object.entries(o.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(path.relative(output,path.join(dir,'Compiled.metallib'))))[0];
  const shaderBuild=Object.entries(o.PBXBuildFile).find(([,v])=>v&&v.fileRef===shaderRef)[0];
  assert.ok(Object.values(o.PBXResourcesBuildPhase).some(v=>v&&typeof v==='object'&&v.files.some(f=>f.value===shaderBuild)));
  assert.equal(sources.some(v=>v.files.some(f=>f.value===shaderBuild)),false);
@@ -112,7 +118,7 @@ test('iOS XCFramework validation ignores unrelated platform slices and retains m
  const flags=fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8');assert.doesNotMatch(flags,/-fmodule-map-file/);
  const configured=xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj'));configured.parseSync();
  const targetSettings=Object.values(configured.hash.project.objects.XCBuildConfiguration).filter(v=>v&&typeof v==='object').map(v=>v.buildSettings).filter(v=>Array.isArray(v.HEADER_SEARCH_PATHS));assert.equal(targetSettings.length,2);
- for(const settings of targetSettings)assert.ok(settings.HEADER_SEARCH_PATHS.some(value=>value.includes(path.dirname(modulemap))),'module map include root must resolve nested angle-bracket imports');
+ for(const settings of targetSettings)assert.ok(settings.HEADER_SEARCH_PATHS.some(value=>value.includes(path.relative(output,path.dirname(modulemap)))),'module map include root must resolve nested angle-bracket imports');
  resolved.contributions=[];await prepare({resolved,directory:output});assert.doesNotMatch(fs.readFileSync(path.join(output,'plugins-release.xcconfig'),'utf8'),/-fmodule-map-file/);
  assert.doesNotMatch(fs.readFileSync(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj'),'utf8'),/qualified-includes/);
  resolved.contributions=[{path:framework,kind:'framework',platform:'ios',packageDirectory:dir}];fs.unlinkSync(path.join(slice,'Probe'));
@@ -166,7 +172,7 @@ test('binary property lists from installed packages merge and classify like XML'
  assert.match(manifest,/<key>CFBundleIdentifier<\/key>\s*<string>\$\(PRODUCT_BUNDLE_IDENTIFIER\)<\/string>/);
  // The binary xcmanifest classified its slice as dynamic, so it is embedded.
  const objects=(p=>{p.parseSync();return p.hash.project.objects;})(xcode.project(path.join(output,'NativeScriptApp.xcodeproj/project.pbxproj')));
- const ref=Object.entries(objects.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(framework))[0];
+ const ref=Object.entries(objects.PBXFileReference).find(([,v])=>v&&v.path===JSON.stringify(path.relative(output,framework)))[0];
  const embed=Object.entries(objects.PBXBuildFile).find(([,v])=>v&&v.fileRef===ref&&v.settings&&Array.isArray(v.settings.ATTRIBUTES))[0];
  assert.ok(Object.values(objects.PBXCopyFilesBuildPhase).some(v=>v&&Array.isArray(v.files)&&v.files.some(f=>f.value===embed)));
  // A truncated binary payload rejects before Xcode rather than parsing partially.
@@ -183,11 +189,14 @@ test('plugin Podfiles inline inside the target with re-hosted hooks and a merged
  const lower=path.join(older,'platforms','ios','Podfile');fs.writeFileSync(lower,"platform :ios, '12.0'\npod 'Older'\n");
  const resources=path.join(dir,'App_Resources','iOS');fs.mkdirSync(resources,{recursive:true});
  const appPod=path.join(resources,'Podfile');fs.writeFileSync(appPod,"post_install do |installer|\n  puts 'app'\nend\n");
- const resolved={directory:dir,applicationID:'org.example.pods',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime},{name:'@scope/plugin',version:'1.0.0',directory:plugin},{name:'older',version:'1.0.0',directory:older}],contributions:[{platform:'ios',kind:'pods',path:podfile,packageDirectory:plugin},{platform:'ios',kind:'pods',path:lower,packageDirectory:older},{platform:'ios',kind:'pods',path:appPod,packageDirectory:dir}]};
+ const resolved={directory:dir,applicationID:'org.example.pods',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime},{name:'@scope/plugin',version:'1.0.0',directory:plugin},{name:'older',version:'1.0.0',directory:older}],dependencyOrder:[older,plugin],contributions:[{platform:'ios',kind:'pods',path:podfile,packageDirectory:plugin},{platform:'ios',kind:'pods',path:lower,packageDirectory:older},{platform:'ios',kind:'pods',path:appPod,packageDirectory:dir}]};
  const out=path.join(dir,'out');await prepare({resolved,directory:out});
  const generated=fs.readFileSync(path.join(out,'Podfile'),'utf8');
  assert.match(generated,/^use_frameworks!\n\ntarget "NativeScriptApp" do\n/);
- assert.match(generated,/\nend\n$/);
+ // Upstream's footer has no trailing newline.
+ assert.match(generated,/\nend$/);
+ // Plugin blocks apply in breadth-first dependency order, not path order.
+ assert.ok(generated.indexOf(`# Begin Podfile - ${lower}`)<generated.indexOf(`# Begin Podfile - ${podfile}`));
  assert.doesNotMatch(generated,/instance_eval/);
  // Plugin bodies sit verbatim between markers; platform rows are commented and
  // the highest declared version survives as the single platform section.
@@ -243,15 +252,51 @@ test('plugin xcconfigs merge behind the app xcconfig and expose the app node_mod
  const resolved={directory:dir,applicationID:'org.example.xc',revision:'fixture',config:{appResourcesPath:path.join(dir,'App_Resources')},packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions:[{platform:'ios',kind:'configuration',path:path.join(resources,'build.xcconfig'),packageDirectory:dir},{platform:'ios',kind:'configuration',path:path.join(plugin,'platforms','ios','build.xcconfig'),packageDirectory:plugin},{platform:'ios',kind:'configuration',path:path.join(plugin,'platforms','ios','extra.xcconfig'),packageDirectory:plugin}]};
  const out=path.join(dir,'generated','platforms','ios');await prepare({resolved,directory:out});
  const merged=fs.readFileSync(path.join(out,'plugins-debug.xcconfig'),'utf8');
- assert.match(merged,/^#include\? "Pods\/Target Support Files\/Pods-NativeScriptApp\/Pods-NativeScriptApp\.debug\.xcconfig"\n/m);
+ // CocoaPods keys merge after pod install, never through an #include? row.
+ assert.doesNotMatch(merged,/#include/);
  assert.match(merged,/^OTHER_LDFLAGS = \$\(inherited\) -framework "App" -framework "Plugin"$/m);
  assert.match(merged,/^APP_ONLY = app$/m);
  assert.match(merged,/^SHARED = app$/m);
  assert.match(merged,/^PLUGIN_ONLY = -l"z"$/m);
+ // The template entitlements file earns its row like upstream's merge.
+ assert.match(merged,/^CODE_SIGN_ENTITLEMENTS = NativeScriptApp\/NativeScriptApp\.entitlements$/m);
  assert.doesNotMatch(merged,/IGNORED/);
  // $(SRCROOT)/../../node_modules resolves to the app's install even for a
  // detached output directory.
  const alias=path.join(dir,'generated','node_modules');
  assert.ok(fs.lstatSync(alias).isSymbolicLink());
  assert.equal(fs.realpathSync(alias),fs.realpathSync(path.join(dir,'node_modules')));
+});
+
+test('pod xcconfigs merge onto kept plugin values after pod install',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p1 podmerge '));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const runtime=path.resolve('internal/ios/prepare/testdata/runtime');
+ const mergePods=require('./podxcconfig.cjs');
+ const plugin=path.join(dir,'plugin');fs.mkdirSync(path.join(plugin,'platforms','ios'),{recursive:true});
+ fs.writeFileSync(path.join(plugin,'platforms','ios','build.xcconfig'),'FRAMEWORK_SEARCH_PATHS = $(inherited) "$(SRCROOT)/plugin"\nOTHER_LDFLAGS = $(inherited) -ObjC -liconv -framework "Plugin"\n');
+ const resolved={directory:dir,applicationID:'org.example.podmerge',revision:'fixture',packages:[{name:'@nativescript/ios',version:'8.9.0',directory:runtime}],contributions:[{platform:'ios',kind:'configuration',path:path.join(plugin,'platforms','ios','build.xcconfig'),packageDirectory:plugin}]};
+ const out=path.join(dir,'out');await prepare({resolved,directory:out});
+ // Without the Pods target-support directory the merge is a no-op, matching
+ // upstream's podFolder existence gate.
+ let result=await mergePods({directory:out,target:'NativeScriptApp'});
+ assert.deepEqual(result,{directory:out,merged:[]});
+ const podSupport=path.join(out,'Pods','Target Support Files','Pods-NativeScriptApp');fs.mkdirSync(podSupport,{recursive:true});
+ fs.writeFileSync(path.join(podSupport,'Pods-NativeScriptApp.debug.xcconfig'),'FRAMEWORK_SEARCH_PATHS = $(inherited) "${PODS_CONFIGURATION_BUILD_DIR}/Dep"\nOTHER_LDFLAGS = $(inherited) -l"sqlite3" -framework "Dep" -weak_framework "Weak"\nOTHER_SWIFT_FLAGS = $(inherited) -D COCOAPODS\nPODS_ROOT = ${SRCROOT}/Pods\n');
+ fs.writeFileSync(path.join(podSupport,'Pods-NativeScriptApp.release.xcconfig'),'PODS_ROOT = ${SRCROOT}/Pods\n');
+ result=await mergePods({directory:out,target:'NativeScriptApp'});
+ assert.deepEqual(result.merged.sort(),['plugins-debug.xcconfig','plugins-release.xcconfig'].map(f=>path.join(out,f)).sort());
+ const merged=fs.readFileSync(path.join(out,'plugins-debug.xcconfig'),'utf8');
+ // Kept $(inherited) values absorb the pod remainder; pod-only keys append.
+ assert.match(merged,/^FRAMEWORK_SEARCH_PATHS = \$\(inherited\) "\$\(SRCROOT\)\/plugin" "\$\{PODS_CONFIGURATION_BUILD_DIR\}\/Dep"$/m);
+ // Linker fragments dedupe and serialize through CocoaPods' flag sets.
+ assert.match(merged,/^OTHER_LDFLAGS = \$\(inherited\) -ObjC -l"iconv" -l"sqlite3" -framework "Dep" -framework "Plugin" -weak_framework "Weak"$/m);
+ assert.match(merged,/^OTHER_SWIFT_FLAGS = \$\(inherited\) -D COCOAPODS$/m);
+ assert.match(merged,/^PODS_ROOT = \$\{SRCROOT\}\/Pods$/m);
+ const release=fs.readFileSync(path.join(out,'plugins-release.xcconfig'),'utf8');
+ assert.match(release,/^PODS_ROOT = \$\{SRCROOT\}\/Pods$/m);
+ assert.doesNotMatch(release,/-D COCOAPODS/);
+ // A repeated merge is stable and leaves identical bytes untouched.
+ const before=fs.readFileSync(path.join(out,'plugins-debug.xcconfig'),'utf8');
+ await mergePods({directory:out,target:'NativeScriptApp'});
+ assert.equal(fs.readFileSync(path.join(out,'plugins-debug.xcconfig'),'utf8'),before);
 });

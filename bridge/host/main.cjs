@@ -14,6 +14,7 @@ function register(feature, operation, handler) {
 }
 register('extensions', 'otaStartup', require('../extensions/ota.cjs'));
 register('xcode', 'prepare', require('../xcode/index.cjs'));
+register('xcode', 'mergePodXcconfig', require('../xcode/podxcconfig.cjs'));
 register('vite', 'run', require('../vite/index.cjs'));
 register('resolve', 'project', require('../resolve/index.cjs'));
 register('host', 'info', async () => ({ protocol, payloadVersion }));

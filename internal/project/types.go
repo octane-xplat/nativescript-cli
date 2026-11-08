@@ -20,6 +20,7 @@ type Resolved struct {
 	Config             Config
 	Packages           []Package
 	Dependencies       []Dependency
+	DependencyOrder    []string
 	Contributions      []Contribution
 	Sources            []Source
 	Directory          string

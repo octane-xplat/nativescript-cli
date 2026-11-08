@@ -18057,6 +18057,104 @@ var require_ota = __commonJS({
   }
 });
 
+// bridge/xcode/xcconfig.cjs
+var require_xcconfig = __commonJS({
+  "bridge/xcode/xcconfig.cjs"(exports2) {
+    "use strict";
+    var inheritedPattern = /\$\(inherited\)|\$\{inherited\}/g;
+    var shellsplit = (value) => (value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map((token) => token.replace(/["']/g, ""));
+    var flagSets = () => ({ simple: /* @__PURE__ */ new Set(), libraries: /* @__PURE__ */ new Set(), frameworks: /* @__PURE__ */ new Set(), weak_frameworks: /* @__PURE__ */ new Set(), arg_files: /* @__PURE__ */ new Set(), force_load: /* @__PURE__ */ new Set() });
+    function mergeFlags(flags, value) {
+      let key2 = null;
+      for (const token of shellsplit(value).flatMap((t) => /^-l.+/.test(t) ? ["-l", t.slice(2)] : /^@.+/.test(t) ? ["@", t.slice(1)] : [t])) {
+        if (token === "-framework") key2 = "frameworks";
+        else if (token === "-weak_framework") key2 = "weak_frameworks";
+        else if (token === "-l") key2 = "libraries";
+        else if (token === "@") key2 = "arg_files";
+        else if (token === "-force_load") key2 = "force_load";
+        else if (key2) {
+          flags[key2].add(token);
+          key2 = null;
+        } else flags.simple.add(token);
+      }
+    }
+    function parse(text) {
+      const raw = /* @__PURE__ */ new Map();
+      for (const line of text.split("\n")) {
+        const uncommented = line.split("//")[0];
+        if (/#include\??\s*"(.+)"/.test(uncommented)) continue;
+        const assignment = /([^=\[]+(?:\[[^\]]*?(?:=[^\]]*?)?\])*)\s*=(.*)/.exec(uncommented);
+        if (!assignment) continue;
+        const key2 = assignment[1].trim();
+        raw.set(key2, assignment[2].trim().replace(inheritedPattern, (marker) => raw.has(key2) ? raw.get(key2) : marker));
+      }
+      const attributes = new Map(raw), flags = flagSets();
+      if (attributes.has("OTHER_LDFLAGS")) {
+        mergeFlags(flags, attributes.get("OTHER_LDFLAGS"));
+        attributes.delete("OTHER_LDFLAGS");
+      }
+      return { attributes, flags };
+    }
+    var sorted = (set) => [...set].sort();
+    var flagValue = (flags) => [
+      ...sorted(flags.simple),
+      ...sorted(flags.libraries).map((x) => `-l"${x}"`),
+      ...sorted(flags.frameworks).map((x) => `-framework "${x}"`),
+      ...sorted(flags.weak_frameworks).map((x) => `-weak_framework "${x}"`),
+      ...sorted(flags.arg_files).map((x) => `@"${x}"`),
+      ...sorted(flags.force_load).map((x) => `-force_load ${x}`)
+    ].join(" ");
+    function toHash({ attributes, flags }) {
+      const out = new Map(attributes);
+      const ldflags = flagValue(flags);
+      if (ldflags) out.set("OTHER_LDFLAGS", ldflags);
+      for (const [key2, value] of [...out]) if (typeof value !== "string" || /^\$\(inherited\)$|^\$\{inherited\}$/.test(value.trim())) out.delete(key2);
+      return out;
+    }
+    function mergeAttributes(attributes, incoming) {
+      for (const [key2, v2] of incoming) {
+        const kept = attributes.get(key2);
+        if (kept === void 0) {
+          attributes.set(key2, v2);
+          continue;
+        }
+        const v1 = kept.trim(), source = v2.trim();
+        const s1 = shellsplit(v1), s2 = shellsplit(source);
+        attributes.set(
+          key2,
+          s2.every((t) => s1.includes(t)) || s1.slice(0, s2.length).join(" ") === s2.join(" ") ? v1 : s2.slice(0, s1.length).join(" ") === s1.join(" ") ? source : `${v1} ${source}`
+        );
+      }
+    }
+    exports2.mergeFiles = (source, destination) => {
+      const user = parse(destination), existing = parse(source);
+      const conflicts = [];
+      for (const [key2, kept2] of user.attributes) {
+        if (!existing.attributes.has(key2)) continue;
+        const incoming = existing.attributes.get(key2);
+        if (/\$\(inherited\)|\$\{inherited\}/.test(kept2)) {
+          const appended = incoming.replace(inheritedPattern, "").trim();
+          if (appended) existing.attributes.set(key2, appended);
+          else existing.attributes.delete(key2);
+        } else {
+          if (incoming !== kept2) conflicts.push({ key: key2, kept: kept2, ignored: incoming });
+          existing.attributes.delete(key2);
+        }
+      }
+      const merged = { attributes: /* @__PURE__ */ new Map(), flags: flagSets() };
+      const kept = toHash({ attributes: user.attributes, flags: user.flags });
+      kept.delete("OTHER_LDFLAGS");
+      merged.attributes = kept;
+      for (const name of Object.keys(merged.flags)) for (const token of user.flags[name]) merged.flags[name].add(token);
+      mergeAttributes(merged.attributes, existing.attributes);
+      for (const name of Object.keys(merged.flags)) for (const token of existing.flags[name]) merged.flags[name].add(token);
+      return { text: exports2.serialize(merged), conflicts };
+    };
+    exports2.serialize = (config) => [...toHash(config)].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key2, value]) => `${key2} = ${value}`.trim()).join("\n") + "\n";
+    exports2.attributes = (text) => parse(text).attributes;
+  }
+});
+
 // bridge/xcode/index.cjs
 var require_xcode2 = __commonJS({
   "bridge/xcode/index.cjs"(exports2, module2) {
@@ -18069,6 +18167,7 @@ var require_xcode2 = __commonJS({
     var bplist = require_bplistParser();
     var { execFileSync } = require("node:child_process");
     var swiftPackages = require_swift_packages();
+    var xcconfigs = require_xcconfig();
     var fail = (code) => {
       throw Object.assign(new Error(), { code });
     };
@@ -18137,41 +18236,6 @@ var require_xcode2 = __commonJS({
       }
       if (base && typeof base === "object" && !Array.isArray(base) && patch && typeof patch === "object" && !Array.isArray(patch)) return mergePlist(base, patch);
       return structuredClone(patch);
-    }
-    var inheritedPattern = /\$\(inherited\)|\$\{inherited\}/g;
-    function parseXcconfig(text) {
-      const attributes = /* @__PURE__ */ new Map(), includes = [];
-      for (const raw of text.split("\n")) {
-        const line = raw.split("//")[0];
-        const include = /#include\??\s*"(.+)"/.exec(line);
-        if (include) {
-          includes.push(include[1].endsWith(".xcconfig") ? include[1] : include[1] + ".xcconfig");
-          continue;
-        }
-        const assignment = /([^=\[]+(?:\[[^\]]*?(?:=[^\]]*?)?\])*)\s*=(.*)/.exec(line);
-        if (!assignment) continue;
-        const key2 = assignment[1].trim();
-        attributes.set(key2, assignment[2].trim().replace(inheritedPattern, (marker) => attributes.has(key2) ? attributes.get(key2) : marker));
-      }
-      return { attributes, includes };
-    }
-    var shellsplit = (value) => (value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map((token) => token.replace(/["']/g, ""));
-    function mergeXcconfigAttributes(attributes, incoming) {
-      for (const [key2, source] of incoming) {
-        const kept = attributes.get(key2);
-        if (kept === void 0) {
-          attributes.set(key2, source);
-          continue;
-        }
-        if (!/\$\(inherited\)|\$\{inherited\}/.test(kept)) continue;
-        const appended = source.replace(inheritedPattern, "").trim();
-        if (!appended) continue;
-        const keptTokens = shellsplit(kept.trim()), sourceTokens = shellsplit(appended);
-        attributes.set(
-          key2,
-          sourceTokens.every((token) => keptTokens.includes(token)) || keptTokens.slice(0, sourceTokens.length).join(" ") === sourceTokens.join(" ") ? kept.trim() : sourceTokens.slice(0, keptTokens.length).join(" ") === keptTokens.join(" ") ? appended : `${kept.trim()} ${appended}`
-        );
-      }
     }
     var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     var podfileFunctionBase = (name) => "post_install" + name.replace(/_/g, "___").replace(/[^A-Za-z0-9_]/g, "_");
@@ -18310,17 +18374,8 @@ var require_xcode2 = __commonJS({
       const appIOSDirectory = resolved.config?.appResourcesPath ? path2.join(real(resolved.config.appResourcesPath), "iOS") : void 0;
       const isAppOwned = (c) => !c.packageDirectory || c.packageDirectory === appRoot;
       const manifestDirectory = (c) => isAppOwned(c) ? appIOSDirectory : path2.join(c.packageDirectory, "platforms", "ios");
-      const rank = /* @__PURE__ */ new Map([[appRoot, 0]]);
-      {
-        const adjacency = /* @__PURE__ */ new Map();
-        for (const edge of resolved.dependencies || []) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
-        const queue = [appRoot];
-        for (let i2 = 0; i2 < queue.length; i2++) for (const next of adjacency.get(queue[i2]) || []) if (!rank.has(next)) {
-          rank.set(next, rank.get(queue[i2]) + 1);
-          queue.push(next);
-        }
-      }
-      const contributions = resolved.contributions.filter((c) => c.platform === "ios").map((c) => c.packageDirectory ? { ...c, packageDirectory: real(c.packageDirectory) } : c).sort((a, b) => isAppOwned(a) - isAppOwned(b) || (rank.get(a.packageDirectory) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.packageDirectory) ?? Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
+      const dependencyOrder = new Map((resolved.dependencyOrder || []).map((directory2, index) => [real(directory2), index]));
+      const contributions = resolved.contributions.filter((c) => c.platform === "ios").map((c) => c.packageDirectory ? { ...c, packageDirectory: real(c.packageDirectory) } : c).sort((a, b) => isAppOwned(a) - isAppOwned(b) || (dependencyOrder.get(a.packageDirectory) ?? Number.MAX_SAFE_INTEGER) - (dependencyOrder.get(b.packageDirectory) ?? Number.MAX_SAFE_INTEGER) || a.path.localeCompare(b.path));
       for (const c of contributions) {
         if (!path2.isAbsolute(c.path) || !fs2.existsSync(c.path)) fail("invalid_input");
         const ext = path2.extname(c.path).toLowerCase();
@@ -18365,7 +18420,8 @@ var require_xcode2 = __commonJS({
             fail("unavailable");
           }
           if (c.spm?.path && manifestDigest() !== sourceSHA256) fail("invalid_input");
-          const ref2 = put("XCLocalSwiftPackageReference", c.path, { relativePath: q(path2.dirname(c.path)) });
+          const declaredDirectory = c.spm?.path ? [path2.resolve(appRoot, c.spm.path), c.packageDirectory && path2.resolve(c.packageDirectory, c.spm.path)].find((p) => p && fs2.existsSync(p)) : void 0;
+          const ref2 = put("XCLocalSwiftPackageReference", c.path, { relativePath: q(path2.relative(directory, declaredDirectory || path2.dirname(c.path))) });
           (root.packageReferences ||= []).push({ value: ref2, comment: "P1" });
           let selectedProducts = manifest.products || [];
           if (c.spm) {
@@ -18417,7 +18473,7 @@ var require_xcode2 = __commonJS({
           } else if (ext === ".plist") fail("unavailable");
         }
         const types = { ".swift": "sourcecode.swift", ".m": "sourcecode.c.objc", ".mm": "sourcecode.cpp.objcpp", ".h": "sourcecode.c.h", ".c": "sourcecode.c.c", ".cpp": "sourcecode.cpp.cpp", ".framework": "wrapper.framework", ".xcframework": "wrapper.xcframework", ".a": "archive.ar", ".xcconfig": "text.xcconfig", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements", ".xcassets": "folder.assetcatalog" };
-        const ref = put("PBXFileReference", `file:${c.path}`, { path: q(c.path), sourceTree: q("<absolute>"), lastKnownFileType: types[ext] || (fs2.statSync(c.path).isDirectory() ? "folder" : "file") });
+        const ref = put("PBXFileReference", `file:${c.path}`, { explicitFileType: void 0, fileEncoding: c.kind === "source" || [".xcconfig", ".plist"].includes(ext) ? 4 : void 0, includeInIndex: 0, lastKnownFileType: types[ext] || (fs2.statSync(c.path).isDirectory() ? "folder" : "file"), name: q(path2.basename(c.path)), path: q(path2.relative(directory, c.path)), sourceTree: q("<group>") });
         objects.PBXGroup[group].children.push({ value: ref, comment: "P1" });
         if (ext === ".h") {
           headers.push(c.path);
@@ -18438,8 +18494,8 @@ var require_xcode2 = __commonJS({
         const settings = objects.XCBuildConfiguration[entry.value].buildSettings;
         settings.PRODUCT_BUNDLE_IDENTIFIER = q(resolved.applicationID);
         settings.CODE_SIGN_ENTITLEMENTS = q(`${name}/${name}.entitlements`);
-        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), ...Array.from(new Set([...headers, ...modulemaps].map((p) => q(q(path2.dirname(p))))))];
-        settings.FRAMEWORK_SEARCH_PATHS = ['"$(inherited)"', ...Array.from(new Set(contributions.filter((c) => c.kind === "framework").map((c) => q(q(path2.dirname(c.path))))))];
+        settings.HEADER_SEARCH_PATHS = ['"$(inherited)"', q(q("$(SRCROOT)/internal")), q(q("$(SRCROOT)/internal/Swift-Modules")), ...Array.from(new Set([...headers, ...modulemaps].map((p) => q(q("$(SRCROOT)/" + path2.relative(directory, path2.dirname(p)))))))];
+        settings.FRAMEWORK_SEARCH_PATHS = ['"$(inherited)"', ...Array.from(new Set(contributions.filter((c) => c.kind === "framework").map((c) => q(q(path2.relative(directory, path2.dirname(c.path)))))))];
       }
       const write = (file, text) => {
         fs2.mkdirSync(path2.dirname(file), { recursive: true });
@@ -18454,21 +18510,21 @@ var require_xcode2 = __commonJS({
       const bridgingHeader = path2.join(directory, "internal/Swift-ObjC-Bridging-Header.h");
       if (!fs2.existsSync(bridgingHeader)) write(bridgingHeader, '#import "TargetConditionals.h"\n\n#ifndef TARGET_OS_WATCH\n    #import "NativeScript/NativeScript.h"\n    #import "NativeScriptStart.h"\n#endif\n');
       fs2.rmSync(path2.join(internal, "NativeContributions"), { recursive: true, force: true });
-      const xcconfigs = { attributes: /* @__PURE__ */ new Map(), includes: [] };
+      let mergedXcconfig = "";
       for (const c of [...configs.filter(isAppOwned), ...configs.filter((c2) => !isAppOwned(c2))]) {
-        let parsed;
+        let source;
         try {
-          parsed = parseXcconfig(fs2.readFileSync(c.path, "utf8"));
+          source = fs2.readFileSync(c.path, "utf8");
         } catch {
           fail("unavailable");
         }
-        for (const include of parsed.includes) if (!xcconfigs.includes.includes(include)) xcconfigs.includes.push(include);
-        mergeXcconfigAttributes(xcconfigs.attributes, parsed.attributes);
+        mergedXcconfig = xcconfigs.mergeFiles(source, mergedXcconfig).text;
       }
-      for (const mode of ["debug", "release"]) write(path2.join(directory, `plugins-${mode}.xcconfig`), `#include? "Pods/Target Support Files/Pods-${name}/Pods-${name}.${mode}.xcconfig"
-` + xcconfigs.includes.map((p) => `#include ${q(p)}
-`).join("") + [...xcconfigs.attributes].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k} = ${v}
-`).join(""));
+      if (fs2.existsSync(path2.join(directory, name, `${name}.entitlements`)) && !xcconfigs.attributes(mergedXcconfig).has("CODE_SIGN_ENTITLEMENTS")) {
+        mergedXcconfig = xcconfigs.mergeFiles(`CODE_SIGN_ENTITLEMENTS = ${name}/${name}.entitlements
+`, mergedXcconfig).text;
+      }
+      for (const mode of ["debug", "release"]) write(path2.join(directory, `plugins-${mode}.xcconfig`), mergedXcconfig);
       const ruby = (value) => `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
       if (pods.length || previous.pods) {
         const appPodfile = appIOSDirectory ? path2.join(appIOSDirectory, "Podfile") : "";
@@ -18522,8 +18578,7 @@ ${platforms.replaced}
 
 target "${name}" do
 ${body.trim()}
-end
-`);
+end`);
       }
       write(path2.join(directory, "metadata-inputs.json"), JSON.stringify({ schema: 1, runtime: runtime.version, revision: resolved.revision, headers, modulemaps, frameworks: contributions.filter((c) => c.kind === "framework").map((c) => c.path), pods: pods.map((c) => c.path), packages, remotePackages }, null, 2) + "\n");
       write(projectFile, project.writeSync());
@@ -18550,6 +18605,50 @@ end
         }
       }
       return { directory, projectFile, pods: pods.length > 0 || !!previous.pods, spm: runtime.version === "9.1.0" || packages.length > 0 || remotePackages.length > 0 || !!previous.spm, target: name, localSwiftPackages };
+    };
+  }
+});
+
+// bridge/xcode/podxcconfig.cjs
+var require_podxcconfig = __commonJS({
+  "bridge/xcode/podxcconfig.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var xcconfig = require_xcconfig();
+    var fail = (code) => {
+      throw Object.assign(new Error(), { code });
+    };
+    module2.exports = async ({ directory, target }) => {
+      if (!path2.isAbsolute(directory || "") || typeof target !== "string" || !target || target.includes("/") || target.includes("\\")) fail("invalid_input");
+      const merged = [];
+      const podFolder = path2.join(directory, "Pods", "Target Support Files", `Pods-${target}`);
+      if (!fs2.existsSync(podFolder)) return { directory, merged };
+      for (const mode of ["debug", "release"]) {
+        const source = path2.join(podFolder, `Pods-${target}.${mode}.xcconfig`);
+        if (!fs2.lstatSync(source, { throwIfNoEntry: false })?.isFile()) continue;
+        const destination = path2.join(directory, `plugins-${mode}.xcconfig`);
+        let destinationText = "";
+        try {
+          destinationText = fs2.readFileSync(destination, "utf8");
+        } catch {
+          fail("unavailable");
+        }
+        let sourceText;
+        try {
+          sourceText = fs2.readFileSync(source, "utf8");
+        } catch {
+          fail("unavailable");
+        }
+        const { text } = xcconfig.mergeFiles(sourceText, destinationText);
+        if (text !== destinationText) {
+          const temp = destination + ".p1-tmp";
+          fs2.writeFileSync(temp, text);
+          fs2.renameSync(temp, destination);
+        }
+        merged.push(destination);
+      }
+      return { directory, merged };
     };
   }
 });
@@ -19460,33 +19559,33 @@ var require_resolve = __commonJS({
       function inactiveApple(value, platform) {
         if (value === void 0) return void 0;
         keys(value, ["SPMPackages", "discardUncaughtJsExceptions"], platform + " declaration");
-        const declared = {};
+        const declared2 = {};
         if (value.discardUncaughtJsExceptions !== void 0) {
           if (typeof value.discardUncaughtJsExceptions !== "boolean") fail("invalid_input", platform + " discardUncaughtJsExceptions must be boolean");
-          declared.discardUncaughtJsExceptions = value.discardUncaughtJsExceptions;
+          declared2.discardUncaughtJsExceptions = value.discardUncaughtJsExceptions;
         }
         if (value.SPMPackages !== void 0) {
           try {
-            declared.spmPackages = swiftPackages.parse(value.SPMPackages);
+            declared2.spmPackages = swiftPackages.parse(value.SPMPackages);
           } catch {
             fail("invalid_input", platform + " Swift package declaration is invalid");
           }
         }
-        return declared;
+        return declared2;
       }
       function collect(dir, owner, cfg2, resources, metadata = /* @__PURE__ */ new Set()) {
         keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android", "visionos", "tvos", "cli", "bundler", "bundlerConfigPath"], "config");
         if (dir !== root && ["cli", "bundler", "bundlerConfigPath"].some((key2) => cfg2[key2] !== void 0)) fail("unavailable", "Bundler and CLI configuration belongs to the application");
         if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource", "SPMPackages"], "iOS config");
         if (cfg2.ios?.SPMPackages !== void 0) {
-          let declared;
+          let declared2;
           try {
-            declared = swiftPackages.parse(cfg2.ios.SPMPackages);
+            declared2 = swiftPackages.parse(cfg2.ios.SPMPackages);
           } catch (e) {
             fail(e.code === "unavailable" ? "unavailable" : "invalid_input", "SPMPackages require named local paths or HTTPS repositories with supported requirements and library products");
           }
           const origin = configNames.map((name) => path2.join(dir, name)).find(fs2.existsSync);
-          for (const spm of declared) {
+          for (const spm of declared2) {
             let manifest = origin;
             if (spm.path) {
               try {
@@ -19618,6 +19717,7 @@ var require_resolve = __commonJS({
       }
       const root = fs2.realpathSync(projectDir);
       const app = json(path2.join(root, "package.json"));
+      const declared = /* @__PURE__ */ new Map([[root, Object.keys(app.dependencies || {})]]);
       const cfg = await config(root, true);
       if (typeof cfg.id !== "string" || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(cfg.id)) fail("invalid_input", "Config id must be a dotted application identifier");
       function serializable(value) {
@@ -19666,6 +19766,7 @@ var require_resolve = __commonJS({
         const native = pkg.nativescript !== void 0;
         const item = { name: pkg.name, version: pkg.version, directory: dir, native };
         packages.set(dir, item);
+        if (!isRoot) declared.set(dir, Object.keys(pkg.dependencies || {}));
         if (!isRoot && native) {
           const core = pkg.name === "@nativescript/core";
           if (core && !coreAdapter.supported(pkg, dir, read)) fail("unavailable", "NativeScript core requires the reviewed 9.1.3 compatibility-hook contract");
@@ -19715,21 +19816,35 @@ var require_resolve = __commonJS({
       }
       await visit(root, app, true);
       const order = /* @__PURE__ */ new Map([[root, 0]]);
+      const dependencyOrder = [];
       {
-        const adjacency = /* @__PURE__ */ new Map();
-        for (const edge of edges) (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+        const adjacency = /* @__PURE__ */ new Map(), resolvedEdge = /* @__PURE__ */ new Map();
+        for (const edge of edges) {
+          (adjacency.get(edge.from) || adjacency.set(edge.from, []).get(edge.from)).push(edge.directory);
+          resolvedEdge.set(`${edge.from}\0${edge.name}`, edge.directory);
+        }
         const queue = [root];
         for (let i2 = 0; i2 < queue.length; i2++) for (const next of adjacency.get(queue[i2]) || []) if (!order.has(next)) {
           order.set(next, order.size);
           queue.push(next);
         }
+        const seen = /* @__PURE__ */ new Set(), production = [];
+        for (const name of declared.get(root) || []) production.push(resolvedEdge.get(`${root}\0${name}`));
+        for (let i2 = 0; i2 < production.length; i2++) {
+          const directory2 = production[i2];
+          if (directory2 === void 0 || seen.has(directory2)) continue;
+          seen.add(directory2);
+          dependencyOrder.push(directory2);
+          for (const name of declared.get(directory2) || []) production.push(resolvedEdge.get(`${directory2}\0${name}`));
+        }
       }
+      const productionOrder = new Map(dependencyOrder.map((directory2, index) => [directory2, index]));
       const winners = /* @__PURE__ */ new Map();
       for (const item of packages.values()) {
         if (!item.native || item.directory === root) continue;
         const winner = winners.get(item.name);
-        const position = order.get(item.directory) ?? Number.MAX_SAFE_INTEGER;
-        if (!winner || position < winner.position) winners.set(item.name, { directory: item.directory, position });
+        const position = [productionOrder.get(item.directory) ?? Number.MAX_SAFE_INTEGER, order.get(item.directory) ?? Number.MAX_SAFE_INTEGER];
+        if (!winner || position[0] < winner.position[0] || position[0] === winner.position[0] && position[1] < winner.position[1]) winners.set(item.name, { directory: item.directory, position });
       }
       const dropped = new Set([...packages.values()].filter((item) => item.native && item.directory !== root && winners.get(item.name)?.directory !== item.directory).map((item) => item.directory));
       const appliedContributions = contributions.filter((c) => !dropped.has(c.packageDirectory));
@@ -19757,7 +19872,7 @@ var require_resolve = __commonJS({
         fail("invalid_input", "Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository");
       }
       for (const c of remote) membership.set(JSON.stringify(["spm-remote", c.spm.repositoryURL]), c);
-      const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
+      const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, dependencyOrder, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
       const appliedGroups = nativeSourceGroups.filter((group) => !dropped.has(group.packageDirectory));
       if (appliedGroups.length) result.nativeSourceGroups = appliedGroups;
       result.revision = crypto.createHash("sha256").update(JSON.stringify(result)).digest("hex");
@@ -19789,6 +19904,7 @@ function register(feature, operation, handler) {
 }
 register("extensions", "otaStartup", require_ota());
 register("xcode", "prepare", require_xcode2());
+register("xcode", "mergePodXcconfig", require_podxcconfig());
 register("vite", "run", require_vite());
 register("resolve", "project", require_resolve());
 register("host", "info", async () => ({ protocol, payloadVersion }));

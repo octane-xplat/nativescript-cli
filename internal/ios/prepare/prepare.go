@@ -132,6 +132,33 @@ func (a Adapter) Prepare(ctx context.Context, r project.Resolved, lease workspac
 			if err = run("pod", "install"); err != nil {
 				return err
 			}
+			// Upstream folds the generated Pods xcconfig into the plugin
+			// xcconfigs after pod install (mergePodXcconfigFile), so pod keys
+			// append onto kept $(inherited) plugin values instead of needing an
+			// #include indirection.
+			mergePayload, _ := json.Marshal(struct {
+				Directory string `json:"directory"`
+				Target    string `json:"target"`
+			}{dir, result.Target})
+			mergeFrame, mergeErr := h.Call(ctx, jsbridge.Request{Version: jsbridge.ProtocolVersion, ID: "prepare-ios-pods", Feature: "xcode", Operation: "mergePodXcconfig", Payload: mergePayload}, nil)
+			if mergeErr != nil {
+				var remote *jsbridge.RemoteError
+				if errors.As(mergeErr, &remote) {
+					if remote.Failure.Code == "unavailable" {
+						return workflow.ErrUnavailable
+					}
+					if remote.Failure.Code == "invalid_input" {
+						return workflow.ErrInvalid
+					}
+				}
+				return mergeErr
+			}
+			var merged struct {
+				Directory string
+			}
+			if json.Unmarshal(mergeFrame.Payload, &merged) != nil || merged.Directory != dir {
+				return workflow.ErrHandoff
+			}
 		}
 		if result.SPM {
 			args := []string{"-resolvePackageDependencies", "-skipPackageUpdates", "-scheme", result.Target}

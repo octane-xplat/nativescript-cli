@@ -26,4 +26,25 @@ test('duplicate installed plugin versions contribute only the app-root-resolvabl
  // The nested copy stays in the resolved graph but contributes nothing.
  assert.ok(result.packages.some(p=>p.directory===nested&&p.version==='1.0.0'));
  assert.ok(ios.every(c=>c.packageDirectory===top&&c.path.startsWith(top)));
+ // Upstream's production-dependency emission order puts the app's declared
+ // dependencies in manifest order before nested ones.
+ assert.deepEqual(result.dependencyOrder,[top,parent,nested]);
+});
+
+test('production dependency order follows authored dependency keys, not sorted edge order',async t=>{
+ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'dependency-order-')));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({name:'app',version:'1.0.0',dependencies:{zeta:'1.0.0',alpha:'1.0.0'}}));
+ fs.writeFileSync(path.join(root,'nativescript.config.js'),'module.exports={id:"org.example.order"}');
+ fs.mkdirSync(path.join(root,'app'));fs.mkdirSync(path.join(root,'App_Resources'));
+ const pkg=(dir,name,dependencies)=>{
+  fs.mkdirSync(dir,{recursive:true});
+  fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({name,version:'1.0.0',nativescript:{platforms:{ios:'9.0.0'}},dependencies}));
+ };
+ const zeta=path.join(root,'node_modules','zeta'),alpha=path.join(root,'node_modules','alpha'),child=path.join(root,'node_modules','child');
+ pkg(zeta,'zeta',{child:'1.0.0'});pkg(alpha,'alpha');pkg(child,'child');
+ // Manifest order seeds the queue: zeta emits before alphabetically-earlier
+ // alpha, and zeta's child follows both depth-zero packages (BFS).
+ const result=await resolve({projectDir:root});
+ assert.deepEqual(result.dependencyOrder,[zeta,alpha,child]);
 });
