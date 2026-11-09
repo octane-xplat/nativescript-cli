@@ -203,7 +203,7 @@ func TestLaunchOwnershipFailuresAndCancellation(t *testing.T) {
 	for _, line := range s.LogBuffer.Logs() {
 		foundUnified = foundUnified || strings.Contains(line.Text, "fixture unified application diagnostic")
 	}
-	if !foundUnified || !strings.Contains(strings.Join(f.calls, "\n"), "spawn exact log stream --level debug --style ndjson --predicate processIdentifier == 2147483647") {
+	if !foundUnified || !strings.Contains(strings.Join(f.calls, "\n"), `spawn exact log stream --level debug --style ndjson --predicate processIdentifier == 2147483647 AND (senderImagePath ENDSWITH "/NativeScript.framework/NativeScript" OR logType == "error" OR logType == "fault")`) {
 		t.Fatal("missing PID-scoped simulator diagnostics", f.calls)
 	}
 	if err = s.Close(context.Background()); !errors.Is(err, context.Canceled) {
