@@ -29,6 +29,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.startup_timeout <= 900:
         parser.error('startup-timeout must be between1 and900 seconds')
+    if os.environ.get('XPLAT_DOCS_DEMOS'):
+        raise RuntimeError('XPLAT_DOCS_DEMOS overrides the probe application identity; unset it before qualification')
     root = args.consumer.resolve()
     if not (root / '.git').is_file():
         raise RuntimeError('consumer must be an isolated Git worktree')

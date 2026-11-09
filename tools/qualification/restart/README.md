@@ -5,6 +5,8 @@ executable against the full `apps/mobile` application in an explicitly selected
 isolated worktree. They use only the prescribed existing device; they never
 create/clone devices or capture images. Initialize the pinned backend submodule, install frozen dependencies,
 build the project Vite packages and build the Go CLI before running it.
+Both runners reject `XPLAT_DOCS_DEMOS`: that app configuration overrides the
+probe application ID, so it cannot safely share this fixture's ownership guard.
 
 Run from this repository under one reservation covering compilation and the
 retained simulator: their lifetimes overlap during the active native edit cycle.
