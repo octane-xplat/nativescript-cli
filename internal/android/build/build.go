@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -121,14 +122,28 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if err != nil || json.Unmarshal(data, &pkg) != nil || pkg.NativeScript.ID == "" {
 		return nil, workflow.ErrHandoff
 	}
-	outputs := filepath.Join(p.NativeDir, "app/build/outputs")
+	owner, ok := l.(*workspace.Ownership)
+	if !ok {
+		return nil, workflow.ErrHandoff
+	}
+	// The published native project is per-generation; Gradle keeps its project
+	// state in a stable per-target mirror, synced write-if-changed.
+	root := filepath.Join(owner.Layout().GeneratedRoot, workspace.MirrorName("android-build", t))
+	native := filepath.Join(root, "native")
+	if err = os.MkdirAll(native, 0700); err != nil {
+		return nil, err
+	}
+	if err = workspace.SyncDir(native, p.NativeDir, nil); err != nil {
+		return nil, err
+	}
+	outputs := filepath.Join(native, "app/build/outputs")
 	// Remove only owned compilation output so stale metadata cannot satisfy a new build.
 	if err = os.RemoveAll(outputs); err != nil {
 		return nil, err
 	}
 	if o.Format == "aab" {
 		task = ":app:xplatBundleMetadata"
-		script := filepath.Join(p.NativeDir, "xplat-bundle.init.gradle")
+		script := filepath.Join(native, "xplat-bundle.init.gradle")
 		if err = os.WriteFile(script, []byte(bundleMetadata), 0600); err != nil {
 			return nil, err
 		}
@@ -139,14 +154,10 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if runner == nil {
 		runner = process.Runner{}
 	}
-	owner, ok := l.(*workspace.Ownership)
-	if !ok {
-		return nil, workflow.ErrHandoff
-	}
 	var exit process.Exit
 	var diagnostic bytes.Buffer
 	err = owner.RunHelper(ctx, func(ctx context.Context) error {
-		h, e := runner.Start(ctx, process.Command{Executable: filepath.Join(p.NativeDir, "gradlew"), Args: args, Dir: p.NativeDir, Environment: env, Output: func(_ context.Context, _ process.Stream, data []byte) error {
+		h, e := runner.Start(ctx, process.Command{Executable: filepath.Join(native, "gradlew"), Args: args, Dir: native, Environment: env, Output: func(_ context.Context, _ process.Stream, data []byte) error {
 			// Release diagnostics may contain Gradle signing values; never retain them.
 			if variant == "debug" && diagnostic.Len() < 1<<20 {
 				diagnostic.Write(data[:min(len(data), (1<<20)-diagnostic.Len())])
@@ -170,7 +181,33 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if err != nil {
 		return nil, err
 	}
-	return []project.Artifact{{Identity: p.Identity, Path: path, Kind: o.Format, ApplicationID: pkg.NativeScript.ID}}, nil
+	// Report the artifact inside the published generation, as the mirror is
+	// internal build state.
+	rel, relErr := filepath.Rel(native, path)
+	if relErr != nil || rel == "" || strings.HasPrefix(rel, "..") {
+		return nil, ErrArtifact
+	}
+	target := filepath.Join(p.NativeDir, rel)
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return nil, err
+	}
+	in, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer in.Close()
+	out, err := os.Create(target)
+	if err != nil {
+		return nil, err
+	}
+	_, copyErr := io.Copy(out, in)
+	if err := out.Close(); err != nil {
+		return nil, err
+	}
+	if copyErr != nil {
+		return nil, copyErr
+	}
+	return []project.Artifact{{Identity: p.Identity, Path: target, Kind: o.Format, ApplicationID: pkg.NativeScript.ID}}, nil
 }
 
 // AGP exposes no standard APK-style metadata for bundles. Record the producer's

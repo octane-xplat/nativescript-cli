@@ -151,17 +151,29 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if !filepath.IsAbs(clang) || strings.ContainsAny(clang, "\n\r") {
 		return nil, process.ErrStart
 	}
-	// Each invocation owns a fresh output namespace: stale products cannot pass.
-	root, err := os.MkdirTemp(lease.Layout().GeneratedRoot, "xcode-")
-	if err != nil {
+	// The published native project lives in a per-generation directory, so a
+	// stable per-target mirror keeps the xcodeproj path and DerivedData valid
+	// across builds; stale products are removed before each build.
+	root := filepath.Join(lease.Layout().GeneratedRoot, workspace.MirrorName("xcode", t))
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return nil, err
+	}
+	native := filepath.Join(root, "native")
+	if err := workspace.SyncDir(native, p.NativeDir, nil); err != nil {
+		return nil, err
+	}
+	if err := os.RemoveAll(filepath.Join(root, "products")); err != nil {
+		return nil, err
+	}
+	if err := os.RemoveAll(filepath.Join(root, "NativeScriptApp.xcarchive")); err != nil {
 		return nil, err
 	}
 	args := []string{"-scheme", "NativeScriptApp", "-configuration", strings.ToUpper(t.Configuration[:1]) + t.Configuration[1:]}
 	selector := "-project"
-	container := filepath.Join(p.NativeDir, "NativeScriptApp.xcodeproj")
-	if st, e := os.Stat(filepath.Join(p.NativeDir, "NativeScriptApp.xcworkspace")); e == nil && st.IsDir() {
+	container := filepath.Join(native, "NativeScriptApp.xcodeproj")
+	if st, e := os.Stat(filepath.Join(native, "NativeScriptApp.xcworkspace")); e == nil && st.IsDir() {
 		selector = "-workspace"
-		container = filepath.Join(p.NativeDir, "NativeScriptApp.xcworkspace")
+		container = filepath.Join(native, "NativeScriptApp.xcworkspace")
 	}
 	args = append(args, selector, container)
 	sdk, platform := "iphoneos", "iOS"
@@ -186,7 +198,7 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 		args = append(args, "-archivePath", archive, "archive")
 		app = filepath.Join(archive, "Products", "Applications", "NativeScriptApp.app")
 	}
-	if err = run(o.Action, "xcodebuild", args...); err != nil {
+	if err := run(o.Action, "xcodebuild", args...); err != nil {
 		return nil, err
 	}
 	// Convert only a copy; Xcode products are not edited during discovery.
@@ -273,6 +285,29 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Successful build: remove legacy random xcode-* namespaces; hash-shaped
+	// names are live per-target mirrors and are never touched.
+	if entries, e := os.ReadDir(lease.Layout().GeneratedRoot); e == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if !entry.IsDir() || !strings.HasPrefix(name, "xcode-") {
+				continue
+			}
+			if len(name) == len("xcode-")+16 {
+				hexName := true
+				for _, c := range name[len("xcode-"):] {
+					if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+						hexName = false
+						break
+					}
+				}
+				if hexName {
+					continue
+				}
+			}
+			os.RemoveAll(filepath.Join(lease.Layout().GeneratedRoot, name))
+		}
 	}
 	return []project.Artifact{artifact}, nil
 }

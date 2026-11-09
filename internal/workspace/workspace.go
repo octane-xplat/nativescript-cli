@@ -390,6 +390,15 @@ func (s *Stage) Commit(ctx context.Context) (State, error) {
 	}
 	s.done = true
 	o.stage = false
+	// The new generation is now the last good one; remove prior published
+	// generations inside this root (bounded: gen-* names only).
+	if entries, e := os.ReadDir(o.layout.GeneratedRoot); e == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "gen-") && entry.Name() != generation {
+				os.RemoveAll(filepath.Join(o.layout.GeneratedRoot, entry.Name()))
+			}
+		}
+	}
 	return state, nil
 }
 
