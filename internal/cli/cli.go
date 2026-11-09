@@ -44,6 +44,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newClient factory) int {
 	var structured bool
 	var hmr bool
+	var watch bool
 	var hmrPort int
 	var project, output, platform, kind, id, arch, configuration, file, cache string
 	root := &cobra.Command{Use: "xplat-ns", Version: ns.Version, Short: "NativeScript project and device tooling", SilenceErrors: true, SilenceUsage: true, Args: cobra.NoArgs}
@@ -95,6 +96,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 		}
 		if name == "run" {
 			command.Flags().BoolVar(&hmr, "hmr", false, "Use the installed NativeScript Vite HMR engine (debug simulators/emulators)")
+			command.Flags().BoolVar(&watch, "watch", false, "Restart-mode dev loop: rebuild and cold-relaunch on source changes")
 			command.Flags().IntVar(&hmrPort, "hmr-port", 0, "Strict native HMR server port (zero selects an available port)")
 		}
 		command.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -115,11 +117,8 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 				}
 			}
 			if operation == "prepare" || operation == "build" || operation == "run" {
-				if kind != "simulator" && kind != "device" {
+				if kind != "" && kind != "simulator" && kind != "device" {
 					return invalid("--destination must be simulator or device")
-				}
-				if id == "" || arch == "" {
-					return invalid("--device and --arch are required")
 				}
 				if configuration != "debug" && configuration != "release" {
 					return invalid("--configuration must be debug or release")
@@ -139,12 +138,50 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 					return invalid("--cache is required")
 				}
 			}
-			if operation == "run" && (hmrPort < 0 || hmrPort > 65535 || (!hmr && hmrPort != 0) || (hmr && (configuration != "debug" || kind != "simulator"))) {
-				return invalid("--hmr requires debug simulator/emulator output; --hmr-port requires --hmr and a port from 0 to 65535")
+			if operation == "run" && (hmrPort < 0 || hmrPort > 65535 || (!hmr && hmrPort != 0) || (hmr && configuration != "debug") || (hmr && watch) || (watch && hmrPort != 0)) {
+				return invalid("--hmr requires debug simulator/emulator output; --watch and --hmr are mutually exclusive; --hmr-port requires --hmr")
 			}
 			c, err := client()
 			if err != nil {
 				return err
+			}
+			// Exact --device always wins. When omitted on run (or a simulator
+			// build), select the single running/booted simulator/emulator and
+			// fill destination kind and architecture from it; never boot.
+			if id == "" && (operation == "run" || (operation == "build" && kind != "device")) {
+				devices, derr := c.Devices(ctx, ns.DeviceQuery{Platform: ns.Platform(platform)})
+				if derr != nil {
+					return derr
+				}
+				var candidates []ns.Device
+				for _, d := range devices {
+					if d.Kind == ns.Simulator && d.State != "Shutdown" {
+						candidates = append(candidates, d)
+					}
+				}
+				if len(candidates) != 1 {
+					var list strings.Builder
+					for _, d := range candidates {
+						fmt.Fprintf(&list, " %s (%s, %s)", d.ID, d.Name, d.State)
+					}
+					return invalid(fmt.Sprintf("--device omitted and %d running simulators/emulators exist:%s", len(candidates), list.String()))
+				}
+				d := candidates[0]
+				id = d.ID
+				if kind == "" {
+					kind = string(d.Kind)
+				}
+				if arch == "" {
+					arch = d.Architecture
+				}
+			}
+			if operation == "prepare" || operation == "build" || operation == "run" {
+				if kind == "" || id == "" || arch == "" {
+					return invalid("--destination, --device and --arch are required")
+				}
+				if operation == "run" && hmr && kind != "simulator" {
+					return invalid("--hmr requires simulator/emulator output")
+				}
 			}
 			request := ns.BuildRequest{ProjectDir: project, OutputDir: output, Target: ns.Target{Platform: ns.Platform(platform), Configuration: ns.Configuration(configuration), Destination: ns.Destination{Kind: ns.DestinationKind(kind), ID: id, Architecture: arch}}}
 			switch operation {
@@ -163,6 +200,9 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 				run := ns.RunRequest{Build: request, DeviceID: id}
 				if hmr {
 					run.Development = &ns.DevelopmentOptions{Port: hmrPort}
+				}
+				if watch {
+					run.Development = &ns.DevelopmentOptions{Mode: ns.Restart}
 				}
 				session, err = c.Run(ctx, run)
 				if err == nil {

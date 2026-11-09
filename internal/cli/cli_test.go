@@ -21,6 +21,7 @@ type fakeLibrary struct {
 	operation string
 	options   ns.Options
 	err       error
+	devices   []ns.Device
 }
 
 func (f *fakeLibrary) note(op string, r any) error {
@@ -43,7 +44,8 @@ func (f *fakeLibrary) Build(_ context.Context, r ns.BuildRequest) (ns.BuildResul
 	return ns.BuildResult{Artifacts: []ns.Artifact{{Kind: "app", Path: "app path"}}}, f.note("build", r)
 }
 func (f *fakeLibrary) Devices(_ context.Context, r ns.DeviceQuery) ([]ns.Device, error) {
-	return []ns.Device{{ID: "exact", Name: "Fixture"}}, f.note("devices", r)
+	f.note("devices", r)
+	return f.devices, nil
 }
 func (f *fakeLibrary) Run(_ context.Context, r ns.RunRequest) (*ns.Session, error) {
 	return &ns.Session{}, f.note("run", r)
@@ -316,5 +318,44 @@ func TestHumanErrorUsesOnlyStderr(t *testing.T) {
 	code := Execute(context.Background(), []string{"resolve"}, &out, &diag)
 	if code != 2 || out.Len() != 0 || !strings.Contains(diag.String(), "check the selected project") {
 		t.Fatalf("%d %s %s", code, &out, &diag)
+	}
+}
+
+func TestRunDeviceDefaulting(t *testing.T) {
+	base := []string{"run", "--platform", "ios", "--output", "generated path", "--configuration", "debug"}
+	sim := ns.Device{ID: "SIM1", Name: "iPhone", Platform: "ios", Kind: ns.Simulator, Architecture: "arm64", State: "Booted"}
+	sim2 := ns.Device{ID: "SIM2", Name: "iPhone2", Platform: "ios", Kind: ns.Simulator, Architecture: "arm64", State: "Booted"}
+	shut := ns.Device{ID: "SHUT", Name: "Off", Platform: "ios", Kind: ns.Simulator, Architecture: "arm64", State: "Shutdown"}
+	physical := ns.Device{ID: "PHYS", Name: "Phone", Platform: "ios", Kind: ns.PhysicalDevice, Architecture: "arm64", State: "connected"}
+
+	// Single running simulator fills id, kind and arch.
+	f := &fakeLibrary{devices: []ns.Device{sim, shut, physical}}
+	var out, diag bytes.Buffer
+	if code := execute(context.Background(), base, &out, &diag, factoryFor(f)); code != 0 {
+		t.Fatal(code, diag.String())
+	}
+	r := f.request.(ns.RunRequest)
+	if r.DeviceID != "SIM1" || r.Build.Target.Destination.ID != "SIM1" || r.Build.Target.Destination.Kind != ns.Simulator || r.Build.Target.Destination.Architecture != "arm64" {
+		t.Fatalf("default not applied: %+v", r.Build.Target.Destination)
+	}
+	// Explicit --device wins without calling Devices.
+	f2 := &fakeLibrary{}
+	args := append([]string{"run"}, targetArgs...)
+	out.Reset()
+	diag.Reset()
+	if code := execute(context.Background(), args, &out, &diag, factoryFor(f2)); code != 0 {
+		t.Fatal(code, diag.String())
+	}
+	if f2.request.(ns.RunRequest).DeviceID != "exact" {
+		t.Fatal("explicit device lost")
+	}
+	// Zero or multiple candidates reject with a listing.
+	for _, ds := range [][]ns.Device{{shut}, {sim, sim2}} {
+		f3 := &fakeLibrary{devices: ds}
+		out.Reset()
+		diag.Reset()
+		if code := execute(context.Background(), base, &out, &diag, factoryFor(f3)); code != 2 || f3.operation != "devices" {
+			t.Fatalf("expected invalid-input after discovery, got %d %s", code, f3.operation)
+		}
 	}
 }
