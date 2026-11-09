@@ -487,8 +487,10 @@ func TestAndroidPublicPrepareRegenerationRemoval(t *testing.T) {
 	if strings.Contains(readAndroid(t, p3.NativeDir, "settings.gradle"), "include ':native") {
 		t.Fatal("stale module")
 	}
-	if _, e = os.Stat(filepath.Join(p.NativeDir, "metadata-inputs.json")); e != nil {
-		t.Fatal("previous generation destroyed", e)
+	// Successful preparation retires old generations; the new one remains
+	// readable and carries the current metadata inventory.
+	if _, e = os.Stat(filepath.Join(p3.NativeDir, "metadata-inputs.json")); e != nil {
+		t.Fatal("current generation missing", e)
 	}
 }
 func TestAndroidFailureAndCancellationPreserveState(t *testing.T) {

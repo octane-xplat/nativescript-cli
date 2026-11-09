@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/octane-xplat/nativescript-cli/internal/workspace"
 )
 
 func TestRealWrapperCancellationRetiresBeforeLeaseRelease(t *testing.T) {
@@ -20,7 +22,7 @@ func TestRealWrapperCancellationRetiresBeforeLeaseRelease(t *testing.T) {
 		t.Skip("Unix wrapper fixture")
 	}
 	p, b, l := fixture(t)
-	pidFile := filepath.Join(p.NativeDir, "child.pid")
+	pidFile := filepath.Join(l.Layout().GeneratedRoot, workspace.MirrorName("android-build", p.Identity.Target), "native", "child.pid")
 	script := "#!/bin/sh\nsleep 60 &\necho $! > child.pid\nwait\n"
 	if e := os.WriteFile(filepath.Join(p.NativeDir, "gradlew"), []byte(script), 0700); e != nil {
 		t.Fatal(e)

@@ -185,7 +185,7 @@ func TestPublicStageOrderingAndConversions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			expected := map[string][]string{"resolve": {"resolve"}, "prepare": {"resolve", "prepare"}, "build": {"resolve", "prepare", "bundle", "compile"}, "devices": {"devices"}, "run": {"devices", "resolve", "prepare", "bundle", "compile", "launch"}}
+			expected := map[string][]string{"resolve": {"resolve"}, "prepare": {"resolve", "prepare"}, "build": {"resolve", "prepare", "bundle", "compile"}, "devices": {"devices"}, "run": {"devices", "resolve", "prepare", "bundle", "compile", "launch", "terminate"}}
 			if !reflect.DeepEqual(f.calls, expected[op]) {
 				t.Fatal(f.calls)
 			}
