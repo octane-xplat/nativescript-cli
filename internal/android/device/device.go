@@ -357,10 +357,13 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 	if err != nil {
 		return nil, err
 	}
+	if !strings.Contains(string(b), "Status: ok") && !strings.Contains(string(b), "Status: timeout") {
+		return nil, workflow.ErrHandoff
+	}
 	if !strings.Contains(string(b), "Status: ok") {
 		// `am start -W` reports "Status: timeout" when the first frame exceeds
-		// its wait on a slow emulator; the app still launches. Only treat it as
-		// a failure when the process is absent.
+		// its wait on a slow emulator; the app still launches. Only accept it
+		// when the process is live.
 		p, e := a.adb(ctx, d.ID, "shell", "pidof", art.ApplicationID)
 		if e != nil {
 			return nil, e

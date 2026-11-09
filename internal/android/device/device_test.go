@@ -55,7 +55,7 @@ type fake struct {
 	calls                      []string
 	fail, badging              string
 	running, forward, conflict bool
-	timeout                    bool
+	timeout, errstatus         bool
 }
 type handle struct {
 	err  error
@@ -124,10 +124,13 @@ func (f *fake) Start(ctx context.Context, c process.Command) (process.Handle, er
 	case strings.Contains(s, "am start"):
 		if f.timeout {
 			out = "Status: timeout\nLaunchState: UNKNOWN (-1)\nWaitTime: 24711\nComplete"
+			f.running = true
+		} else if f.errstatus {
+			out = "Error: Activity not started, unable to resolve Intent"
 		} else {
 			out = "Status: ok"
+			f.running = true
 		}
-		f.running = true
 	case strings.Contains(s, "force-stop"):
 		f.running = false
 	case strings.Contains(s, "logcat"):
@@ -190,6 +193,14 @@ func TestLaunchStatusTimeoutStillRuns(t *testing.T) {
 	s.Close(context.Background())
 	if f.running || f.forward {
 		t.Fatal("owned resources leaked")
+	}
+}
+func TestLaunchStatusErrorRejected(t *testing.T) {
+	art, d := fixture(t)
+	f := &fake{errstatus: true}
+	a := Adapter{Executor: f, Reverse: []Reverse{{5173, 5173}}}
+	if _, e := a.Launch(context.Background(), art, d); e == nil {
+		t.Fatal("error status accepted")
 	}
 }
 func TestRejectsBeforeInstall(t *testing.T) {
