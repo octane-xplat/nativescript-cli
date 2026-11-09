@@ -129,8 +129,8 @@ export default async ({mode,command})=>{
 		if configuration == "release" && (!strings.Contains(string(proof), `"mode":"production"`) || !strings.Contains(string(proof), `"debug":null`)) {
 			t.Fatal("release inherited debug mode", string(proof))
 		}
-		if configuration == "debug" && !strings.Contains(string(proof), `"mode":"development"`) {
-			t.Fatal(string(proof))
+		if configuration == "debug" && (!strings.Contains(string(proof), `"mode":"development"`) || !strings.Contains(string(proof), `"debug":"caller-debug"`)) {
+			t.Fatal("caller environment not visible to engine config", string(proof))
 		}
 		var emitted strings.Builder
 		for _, file := range result.Files {
