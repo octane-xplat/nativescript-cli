@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -540,5 +541,18 @@ func TestRunSessionFailureCarriesBoundedAdvice(t *testing.T) {
 	var rop *OperationError
 	if !errors.As(rich, &rop) || rop.Advice != "bundling failed: engine detail" {
 		t.Fatalf("advice replaced: %q", rop.Advice)
+	}
+}
+
+func TestLaunchObserverMetadataAndFailureRetirement(t *testing.T) {
+	c, f, r := fixture(t)
+	rejected := errors.New("launch observer rejected")
+	var seen Launch
+	_, err := c.Run(context.Background(), RunRequest{Build: r, DeviceID: "exact", Launched: func(l Launch) error { seen = l; return rejected }})
+	if !errors.Is(err, rejected) || seen.ApplicationID != "org.test.app" || seen.DeviceID != "exact" || seen.Identity.Revision != "source" {
+		t.Fatal(seen, err)
+	}
+	if !slices.Contains(f.calls, "terminate") {
+		t.Fatal("rejected launch was left running", f.calls)
 	}
 }

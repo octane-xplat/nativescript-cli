@@ -11,17 +11,20 @@ type Log struct {
 	Text   string
 }
 
-// LogBuffer retains at most the latest 1 MiB without calling application code.
-// Observer, if set, is called per Append in capture order before Append returns;
-// it must return promptly and is cleared by the owner during teardown.
+// LogBuffer retains at most the latest 1 MiB. Observe attaches serialized
+// delivery, including already captured startup output. Observers must return
+// promptly and must not append, replace the observer, or close their session.
 type LogBuffer struct {
+	dispatch sync.Mutex
 	mu       sync.Mutex
 	entries  []Log
 	size     int
-	Observer func(Log)
+	observer func(Log)
 }
 
 func (b *LogBuffer) Append(_ context.Context, s process.Stream, data []byte) error {
+	b.dispatch.Lock()
+	defer b.dispatch.Unlock()
 	b.mu.Lock()
 	if len(data) > 1<<20 {
 		data = data[len(data)-(1<<20):]
@@ -33,7 +36,7 @@ func (b *LogBuffer) Append(_ context.Context, s process.Stream, data []byte) err
 		b.size -= len(b.entries[0].Text)
 		b.entries = b.entries[1:]
 	}
-	observer := b.Observer
+	observer := b.observer
 	b.mu.Unlock()
 	if observer != nil {
 		observer(entry)
@@ -47,4 +50,23 @@ func (b *LogBuffer) Logs() []Log {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]Log(nil), b.entries...)
+}
+
+// Observe replays retained logs before delivering new appends. Clearing waits
+// for any in-flight callback, so teardown cannot return with one still running.
+func (b *LogBuffer) Observe(observer func(Log)) {
+	if b == nil {
+		return
+	}
+	b.dispatch.Lock()
+	defer b.dispatch.Unlock()
+	b.mu.Lock()
+	b.observer = observer
+	entries := append([]Log(nil), b.entries...)
+	b.mu.Unlock()
+	if observer != nil {
+		for _, entry := range entries {
+			observer(entry)
+		}
+	}
 }

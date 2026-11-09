@@ -98,6 +98,8 @@ const (
 	// HotReload runs the installed Vite dev server and hot-swaps modules.
 	HotReload DevelopmentMode = "hmr"
 	// Restart rebuilds through the official engine and cold-relaunches on change.
+	// JS-only edits sync into the installed debug simulator app; native-input
+	// changes rebuild and install. New Android Java bindings need a native build.
 	Restart DevelopmentMode = "restart"
 )
 
@@ -108,12 +110,23 @@ type DevelopmentOptions struct {
 	Mode DevelopmentMode
 }
 
+// Launch is authoritative metadata for a successfully launched application.
+type Launch struct {
+	Identity      Identity
+	ApplicationID string
+	DeviceID      string
+}
+
 type RunRequest struct {
+	// Launched runs after each successful cold launch, including development
+	// restarts. An error closes and rejects that launch. It must not
+	// Wait/Close the same session or change caller-owned request data.
+	Launched       func(Launch) error
 	Development    *DevelopmentOptions
 	AndroidReverse []AndroidReverse
 	// Log receives application console output in capture order, in addition to
-	// the bounded Logs snapshot. It runs on a library goroutine, must return
-	// promptly, must not Wait/Close the same session, and is never called after
+	// the bounded Logs snapshot. Attachment replays retained startup output;
+	// live output is synchronous with capture. It must return promptly, must not Wait/Close the same session, and is never called after
 	// Wait returns.
 	Log func(SessionLog)
 	// Artifact bypasses compilation; only compatible existing app products install.

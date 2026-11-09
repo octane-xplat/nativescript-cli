@@ -109,9 +109,25 @@ func Resolve(ctx context.Context, s Stages, dir string, notify Notify) (r projec
 
 // Native keeps a single F2 lease through preparation, bundle and compilation.
 // Adapters receive the lease explicitly and must retire children before return.
-func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Request, build bool, notify Notify) (p project.Prepared, a []project.Artifact, err error) {
-	err = stage(ctx, notify, "native", func() (err error) {
-		if s.Preparer == nil || (build && (s.Bundler == nil || s.Compiler == nil)) {
+func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Request, build bool, notify Notify) (project.Prepared, []project.Artifact, error) {
+	p, _, a, err := e.native(ctx, s, r, q, build, false, notify)
+	return p, a, err
+}
+
+// Bundle prepares and bundles without invoking a native compiler. The caller
+// must establish that the installed native inputs have not changed.
+func (e Engine) Bundle(ctx context.Context, s Stages, r project.Resolved, q Request, notify Notify) (project.Prepared, project.Bundle, error) {
+	p, b, _, err := e.native(ctx, s, r, q, true, true, notify)
+	return p, b, err
+}
+
+func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Request, build, bundleOnly bool, notify Notify) (p project.Prepared, b project.Bundle, a []project.Artifact, err error) {
+	name := "native"
+	if bundleOnly {
+		name = "bundle"
+	}
+	err = stage(ctx, notify, name, func() (err error) {
+		if s.Preparer == nil || (build && (s.Bundler == nil || (!bundleOnly && s.Compiler == nil))) {
 			return ErrUnavailable
 		}
 		if validator, ok := s.Preparer.(interface {
@@ -186,7 +202,7 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err = ctx.Err(); err != nil || !build {
 			return err
 		}
-		b, err := s.Bundler.Bundle(ctx, r, p, lease)
+		b, err = s.Bundler.Bundle(ctx, r, p, lease)
 		if err != nil {
 			return err
 		}
@@ -195,6 +211,9 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		}
 		if err = ctx.Err(); err != nil {
 			return err
+		}
+		if bundleOnly {
+			return nil
 		}
 		if s.OTA != nil {
 			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
@@ -228,6 +247,7 @@ func (e Engine) Native(ctx context.Context, s Stages, r project.Resolved, q Requ
 	})
 	if err != nil {
 		p = project.Prepared{}
+		b = project.Bundle{}
 		a = nil
 	}
 	return

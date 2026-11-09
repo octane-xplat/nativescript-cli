@@ -263,3 +263,36 @@ func TestSerialLeaseAndParentCancellation(t *testing.T) {
 		t.Fatal("parent cancellation leaked")
 	}
 }
+
+// Contract evidence: full sync uses NativeScript's debug-runtime staging area,
+// bypasses install, and retires its staging files on Close or transfer failure.
+func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
+	for _, failure := range []string{"", " push "} {
+		t.Run("transfer-"+failure, func(t *testing.T) {
+			art, d := fixture(t)
+			f := &fake{fail: failure}
+			a := Adapter{Executor: f, BundleDirectory: t.TempDir()}
+			session, err := a.Launch(context.Background(), art, d)
+			if failure == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = session.Close(context.Background())
+			} else if err == nil {
+				t.Fatal("transfer failure accepted")
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			calls := strings.Join(f.calls, "\n")
+			if strings.Contains(calls, "install -r") {
+				t.Fatal("sync reinstalled APK")
+			}
+			if !strings.Contains(calls, "/fullsync") || !strings.Contains(calls, "push ") {
+				t.Fatal(calls)
+			}
+			if strings.Count(calls, "shell rm -rf /data/local/tmp/org.example.app/fullsync") != 2 {
+				t.Fatal("staging not retired", calls)
+			}
+		})
+	}
+}

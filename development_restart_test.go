@@ -182,3 +182,31 @@ func TestRestartDevelopmentIterations(t *testing.T) {
 		t.Fatal("missing launches")
 	}
 }
+
+// Bundle-only work retains the writer lease and validates handoffs, but never
+// requires or invokes a compiler. A rejected bundle cannot escape to a device.
+func TestRestartBundleOnlyWorkflow(t *testing.T) {
+	for _, stale := range []string{"", "bundle"} {
+		t.Run("identity-"+stale, func(t *testing.T) {
+			c, f, r := fixture(t)
+			f.stale = stale
+			s := c.stages()
+			s.Compiler = nil
+			resolved, err := s.Resolver.Resolve(context.Background(), r.ProjectDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, b, err := c.engine.Bundle(context.Background(), s, resolved, internalRequest(r), nil)
+			if stale != "" {
+				if err == nil || b.Directory != "" || p.NativeDir != "" {
+					t.Fatal("stale bundle escaped", err)
+				}
+			} else if err != nil || !p.Identity.Compatible(b.Identity) {
+				t.Fatal(err)
+			}
+			if slices.Contains(f.calls, "compile") || f.held.Load() {
+				t.Fatal("compiler called or lease retained", f.calls)
+			}
+		})
+	}
+}

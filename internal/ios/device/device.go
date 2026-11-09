@@ -26,6 +26,9 @@ import (
 )
 
 type Adapter struct {
+	// BundleDirectory replaces only the installed simulator app payload; no install.
+	BundleDirectory string
+
 	Executor            process.Executor
 	Environment         map[string]string
 	AllowBoot           bool
@@ -168,6 +171,9 @@ func Compatible(a project.Artifact, d project.Device) bool {
 	return a.Kind == "app" && filepath.IsAbs(a.Path) && a.ApplicationID != "" && a.Identity.Schema == 1 && a.Identity.Revision != "" && filepath.IsAbs(a.Identity.ProjectDir) && t.Platform == "ios" && d.Platform == "ios" && t.DestinationKind == d.Kind && (t.DestinationID == d.ID || t.DestinationID == "generic") && t.Architecture == d.Architecture
 }
 func (a Adapter) Launch(ctx context.Context, artifact project.Artifact, selected project.Device) (session *workflow.Session, err error) {
+	if a.BundleDirectory != "" && selected.Kind != "simulator" {
+		return nil, workflow.ErrInvalid
+	}
 	if !Compatible(artifact, selected) {
 		return nil, workflow.ErrHandoff
 	}
@@ -283,7 +289,23 @@ func (a Adapter) Launch(ctx context.Context, artifact project.Artifact, selected
 		if simulatorRunning(data, artifact.ApplicationID) {
 			return nil, workspace.ErrBusy
 		}
-		if _, err = a.run(ctx, root, "simctl", "install", d.ID, artifact.Path); err != nil {
+		if a.BundleDirectory != "" {
+			if artifact.Identity.Target.Configuration != "debug" {
+				return nil, workflow.ErrInvalid
+			}
+			data, e := a.run(ctx, root, "simctl", "get_app_container", d.ID, artifact.ApplicationID, "app")
+			if e != nil {
+				return nil, e
+			}
+			installed := strings.TrimSpace(string(data))
+			if !filepath.IsAbs(installed) || filepath.Ext(installed) != ".app" {
+				return nil, workflow.ErrHandoff
+			}
+			// The serial lease and running-process preflight cover replacement.
+			if err = workspace.SyncDir(filepath.Join(installed, "app"), a.BundleDirectory, func(string) bool { return false }); err != nil {
+				return nil, err
+			}
+		} else if _, err = a.run(ctx, root, "simctl", "install", d.ID, artifact.Path); err != nil {
 			return nil, err
 		}
 	} else {

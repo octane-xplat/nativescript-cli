@@ -233,15 +233,18 @@ func (c *Client) Prepare(ctx context.Context, r PrepareRequest) (PreparedProject
 	return prepared(p), nil
 }
 func (c *Client) build(ctx context.Context, r BuildRequest, s workflow.Stages, n workflow.Notify) (BuildResult, error) {
+	resolved, err := workflow.Resolve(ctx, s, r.ProjectDir, n)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	return c.buildResolved(ctx, r, s, n, resolved)
+}
+func (c *Client) buildResolved(ctx context.Context, r BuildRequest, s workflow.Stages, n workflow.Notify, resolved project.Resolved) (BuildResult, error) {
 	if r.Target.Platform == IOS && s.Compiler == nil {
 		s.Compiler = iosbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: iosbuild.Options{Action: r.IOS.Action, SigningMode: r.IOS.SigningMode, TeamID: r.IOS.TeamID, Identity: r.IOS.Identity, ProvisioningProfile: r.IOS.ProvisioningProfile, ExportOptionsPlist: r.IOS.ExportOptionsPlist}}
 	}
 	if r.Target.Platform == Android && s.Compiler == nil {
 		s.Compiler = androidbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: androidbuild.Options{Format: r.Android.Format, Keystore: r.Android.Keystore, Alias: r.Android.Alias, StorePasswordEnv: r.Android.StorePasswordEnv, KeyPasswordEnv: r.Android.KeyPasswordEnv}}
-	}
-	resolved, err := workflow.Resolve(ctx, s, r.ProjectDir, n)
-	if err != nil {
-		return BuildResult{}, err
 	}
 	p, a, err := c.engine.Native(ctx, s, resolved, internalRequest(r), true, n)
 	if err != nil {
@@ -340,15 +343,35 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	for _, v := range result.Artifacts {
 		a = append(a, project.Artifact{Identity: project.Identity{Schema: v.Identity.Schema, Revision: v.Identity.Revision, ProjectDir: v.Identity.ProjectDir, Target: internalTarget(v.Identity.Target)}, Path: v.Path, Kind: v.Kind, ApplicationID: v.ApplicationID})
 	}
-	owned, err := workflow.Launch(ctx, s, a, *selected, n)
+	owned, err := c.launch(ctx, r, s, a, *selected, n)
 	if err != nil {
 		return nil, operationError("run", err)
 	}
 	if r.Log != nil && owned != nil && owned.LogBuffer != nil {
-		owned.LogBuffer.Observer = func(l workflow.Log) { r.Log(SessionLog(l)) }
+		owned.LogBuffer.Observe(func(l workflow.Log) { r.Log(SessionLog(l)) })
 	}
 	return &Session{owned: owned}, nil
 }
+
+// launch delivers typed identity outside workflow stage notifications. A
+// rejected observer must retire the newly launched session before returning.
+func (c *Client) launch(ctx context.Context, r RunRequest, s workflow.Stages, artifacts []project.Artifact, d project.Device, n workflow.Notify) (*workflow.Session, error) {
+	app, err := workflow.Launch(ctx, s, artifacts, d, n)
+	if err != nil || r.Launched == nil {
+		return app, err
+	}
+	for _, a := range artifacts {
+		t := a.Identity.Target
+		if t.Platform == d.Platform && (t.DestinationID == d.ID || t.DestinationID == "generic") && t.DestinationKind == d.Kind && t.Architecture == d.Architecture {
+			if err := r.Launched(Launch{Identity: publicIdentity(a.Identity), ApplicationID: a.ApplicationID, DeviceID: d.ID}); err != nil {
+				return nil, errors.Join(err, filterDevelopmentTeardown(app.Close(context.Background()), true))
+			}
+			return app, nil
+		}
+	}
+	return nil, errors.Join(workflow.ErrHandoff, filterDevelopmentTeardown(app.Close(context.Background()), true))
+}
+
 func validBuild(r BuildRequest) bool {
 	t := r.Target
 	return filepath.IsAbs(r.ProjectDir) && filepath.IsAbs(r.OutputDir) && (t.Platform == IOS || t.Platform == Android) && (t.Configuration == Debug || t.Configuration == Release) && (t.Destination.Kind == Simulator || t.Destination.Kind == PhysicalDevice) && t.Destination.ID != "" && t.Destination.Architecture != ""
@@ -381,9 +404,10 @@ func (p platformPreparer) Prepare(ctx context.Context, r project.Resolved, l wor
 
 // platformDevices dispatches native-only operations without starting the helper.
 type platformDevices struct {
-	env            map[string]string
-	boot, physical bool
-	reverse        []AndroidReverse
+	bundleDirectory string
+	env             map[string]string
+	boot, physical  bool
+	reverse         []AndroidReverse
 }
 
 func (p platformDevices) Discover(ctx context.Context, platform string) ([]project.Device, error) {
@@ -398,7 +422,7 @@ func (p platformDevices) Launch(ctx context.Context, a project.Artifact, d proje
 		for _, r := range p.reverse {
 			rs = append(rs, androiddevice.Reverse{DevicePort: r.DevicePort, HostPort: r.HostPort})
 		}
-		return (androiddevice.Adapter{Environment: p.env, AllowPhysicalDevice: p.physical, Reverse: rs}).Launch(ctx, a, d)
+		return (androiddevice.Adapter{Environment: p.env, AllowPhysicalDevice: p.physical, Reverse: rs, BundleDirectory: p.bundleDirectory}).Launch(ctx, a, d)
 	}
-	return (iosdevice.Adapter{Environment: p.env, AllowBoot: p.boot, AllowPhysicalDevice: p.physical}).Launch(ctx, a, d)
+	return (iosdevice.Adapter{Environment: p.env, AllowBoot: p.boot, AllowPhysicalDevice: p.physical, BundleDirectory: p.bundleDirectory}).Launch(ctx, a, d)
 }

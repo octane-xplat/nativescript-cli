@@ -24,13 +24,19 @@ xplat-ns build --project ./app --output ./generated --platform ios \
 `run` requires the same target and retains the library session until completion.
 SIGINT and SIGTERM cancel its context and close only that session, waiting for
 owned cleanup. Signal registration and process exit live exclusively in `main`.
-No device is automatically selected or booted by the adapter.
+If `--device` is omitted, the adapter selects exactly one suitable device and
+fails on ambiguity. It never creates or automatically boots a device.
 
 `run --hmr` selects the installed NativeScript Vite development engine for debug
 simulators/emulators. `--hmr-port PORT` selects a strict server port; zero selects
 an available port. The library owns the server, app and Android reverse forwarding,
 and rebuilds/relaunches after native input/config changes. See
 [development support and evidence](../../docs/design/bundling.md).
+
+`run --watch` bundles and cold-relaunches after source edits. Unchanged native
+inputs allow syncing JS into the installed debug simulator/emulator app without
+native compilation. Native changes rebuild and reinstall. Stop and restart the
+session after adding Java-backed classes in JS, so Android bindings regenerate.
 
 ## Output contract
 

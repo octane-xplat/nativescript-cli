@@ -23,6 +23,9 @@ import (
 
 type Reverse struct{ DevicePort, HostPort int }
 type Adapter struct {
+	// BundleDirectory stages a full runtime sync instead of reinstalling the APK.
+	BundleDirectory string
+
 	Executor            process.Executor
 	Environment         map[string]string
 	AllowPhysicalDevice bool
@@ -262,6 +265,8 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 	}
 	var forwards []Reverse
 	launched := false
+	syncStaged := false
+	syncRemote := "/data/local/tmp/" + art.ApplicationID + "/fullsync"
 	transferred := false
 	cleanup := func() error {
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -269,6 +274,10 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 		var result error
 		if launched {
 			_, e := a.adb(c, d.ID, "shell", "am", "force-stop", art.ApplicationID)
+			result = errors.Join(result, e)
+		}
+		if syncStaged {
+			_, e := a.adb(c, d.ID, "shell", "rm", "-rf", syncRemote)
 			result = errors.Join(result, e)
 		}
 		for _, r := range forwards {
@@ -331,12 +340,32 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 			return nil, err
 		}
 	}
-	b, err = a.adb(ctx, d.ID, "install", "-r", art.Path)
-	if err != nil {
-		return nil, err
-	}
-	if !strings.Contains(string(b), "Success") {
-		return nil, workflow.ErrHandoff
+	if a.BundleDirectory != "" {
+		if d.Kind != "simulator" || art.Identity.Target.Configuration != "debug" || !appID.MatchString(art.ApplicationID) {
+			return nil, workflow.ErrInvalid
+		}
+		remote := syncRemote
+		syncStaged = true // A cancelled transfer may have created partial files.
+		if _, err = a.adb(ctx, d.ID, "shell", "rm", "-rf", remote); err != nil {
+			return nil, err
+		}
+		if _, err = a.adb(ctx, d.ID, "shell", "mkdir", "-p", remote); err != nil {
+			return nil, err
+		}
+		if _, err = a.adb(ctx, d.ID, "push", filepath.Clean(a.BundleDirectory)+string(filepath.Separator)+".", remote); err != nil {
+			return nil, err
+		}
+		if _, err = a.adb(ctx, d.ID, "shell", "chmod", "-R", "777", "/data/local/tmp/"+art.ApplicationID); err != nil {
+			return nil, err
+		}
+	} else {
+		b, err = a.adb(ctx, d.ID, "install", "-r", art.Path)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.Contains(string(b), "Success") {
+			return nil, workflow.ErrHandoff
+		}
 	}
 	b, err = a.adb(ctx, d.ID, "shell", "cmd", "package", "resolve-activity", "--brief", art.ApplicationID)
 	if err != nil {

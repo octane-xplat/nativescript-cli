@@ -54,12 +54,24 @@ servers are not implemented by this path and fail explicitly.
 `DevelopmentOptions.Mode = Restart` (the `run --watch` CLI flag) runs no dev
 server or HMR client. The session fingerprints the resolved source set and
 native-input roots, and a confirmed change (two consecutive polls agreeing)
-triggers a full official-engine rebuild, install and cold relaunch. The new
-artifact builds while the last good app keeps running; a failed rebuild emits a
+triggers an official-engine rebuild and cold relaunch. When the resolved native
+identity is unchanged, the built-in simulator/emulator launcher syncs the new
+bundle without compiling or reinstalling: iOS replaces the installed `.app/app`
+tree; Android uses its debug runtime's `fullsync` staging area. Removed bundle
+files are removed on both paths. Native-input changes, registered public
+extensions, and OTA preparation use the full native build/install path. New
+Java-backed classes introduced in JS need a fresh native build to regenerate
+Android bindings; restart the development session for that build.
+
+The new bundle or artifact builds while the last good app keeps running; a failed rebuild emits a
 bounded `Diagnostic` event, leaves the current app up, and retries only when the
 fingerprint changes again. `--watch` is mutually exclusive with `--hmr`, and a
 port is invalid in restart mode. `RunRequest.Log` streams each captured app log
-line in order during any session; `Session.Logs()` keeps the bounded snapshot.
+chunk in capture order during any session, replaying retained startup output
+when attached. `Session.Logs()` keeps the bounded snapshot, including restart
+history. `RunRequest.Launched` receives typed application/device/identity metadata
+after each successful launch; an observer error closes and rejects that launch.
+Embedders can record identity without parsing upstream CLI text.
 
 The helper uses its own process environment/argv for the engine and owns a
 private content directory under the NativeScript CLI cache. It binds loopback,

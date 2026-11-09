@@ -75,6 +75,7 @@ type fakeExecutor struct {
 	mu            sync.Mutex
 	calls         []string
 	fail, running string
+	installed     string
 	physical      bool
 	booted        bool
 	console       chan struct{}
@@ -132,6 +133,8 @@ func (f *fakeExecutor) Start(ctx context.Context, c process.Command) (process.Ha
 			xml = strings.ReplaceAll(xml, "iPhoneSimulator", "iPhoneOS")
 		}
 		os.WriteFile(c.Args[3], []byte(xml), 0600)
+	case strings.Contains(args, "get_app_container"):
+		output = f.installed
 	case strings.Contains(args, "launchctl list"):
 		output = f.running
 	case strings.Contains(args, "launch --stdout="):
@@ -312,5 +315,37 @@ func TestSimulatorLogReaderFailureRetiresOwnedBoot(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "shutdown exact") {
 		t.Fatal("log-reader failure retained owned simulator boot", f.calls)
+	}
+}
+
+func TestBundleSyncReplacesPayloadWithoutInstall(t *testing.T) {
+	art := fixtureArtifact(t)
+	installed := filepath.Join(t.TempDir(), "installed.app")
+	payload := filepath.Join(installed, "app")
+	os.MkdirAll(payload, 0700)
+	os.WriteFile(filepath.Join(payload, "removed.js"), []byte("old"), 0600)
+	bundle := t.TempDir()
+	os.WriteFile(filepath.Join(bundle, "bundle.mjs"), []byte("new"), 0600)
+	f := &fakeExecutor{installed: installed}
+	a := Adapter{Executor: f, AllowBoot: true, BundleDirectory: bundle}
+	d := project.Device{ID: "exact", Kind: "simulator", Platform: "ios", Architecture: "arm64"}
+	session, err := a.Launch(context.Background(), art, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = session.Close(context.Background())
+	b, err := os.ReadFile(filepath.Join(payload, "bundle.mjs"))
+	if err != nil || string(b) != "new" {
+		t.Fatal(string(b), err)
+	}
+	if _, err := os.Stat(filepath.Join(payload, "removed.js")); !os.IsNotExist(err) {
+		t.Fatal("removed bundle file retained", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, call := range f.calls {
+		if strings.Contains(call, "simctl install") {
+			t.Fatal("sync reinstalled app")
+		}
 	}
 }

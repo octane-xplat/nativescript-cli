@@ -61,7 +61,9 @@ func (s *developmentState) use(iteration *developmentIteration) {
 	s.address = DevelopmentEndpoint{}
 	if iteration != nil {
 		s.app = iteration.app
-		s.address = DevelopmentEndpoint(iteration.server.Ready.Endpoint)
+		if iteration.server != nil {
+			s.address = DevelopmentEndpoint(iteration.server.Ready.Endpoint)
+		}
 	}
 }
 
@@ -189,12 +191,12 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 	for _, v := range result.Artifacts {
 		artifacts = append(artifacts, project.Artifact{Identity: project.Identity{Schema: v.Identity.Schema, Revision: v.Identity.Revision, ProjectDir: v.Identity.ProjectDir, Target: internalTarget(v.Identity.Target)}, Path: v.Path, Kind: v.Kind, ApplicationID: v.ApplicationID})
 	}
-	app, err := workflow.Launch(iterationCtx, stages, artifacts, device, notify)
+	app, err := c.launch(iterationCtx, request, stages, artifacts, device, notify)
 	if err != nil {
 		return fail(err)
 	}
 	if request.Log != nil && app != nil && app.LogBuffer != nil {
-		app.LogBuffer.Observer = func(l workflow.Log) { request.Log(SessionLog(l)) }
+		app.LogBuffer.Observe(func(l workflow.Log) { request.Log(SessionLog(l)) })
 	}
 	appDone := make(chan error, 1)
 	go func() { appDone <- app.Wait() }()
@@ -315,8 +317,9 @@ func restartMarksSame(a, b map[string]int64) bool {
 }
 
 // runRestart is the Restart-mode session: no dev server; a resolved-source or
-// native-input change produces a full official-engine rebuild, install and cold
-// relaunch. The new artifact builds while the last good app keeps running; a
+// native-input change produces an official-engine rebuild and cold relaunch.
+// Unchanged native identity allows syncing the new bundle without compilation;
+// changed native inputs require a full build and install. The new artifact builds while the last good app keeps running; a
 // failed rebuild emits a Diagnostic, leaves the current app up, and retries
 // only when the fingerprint changes again.
 func (c *Client) runRestart(ctx context.Context, request RunRequest, stages workflow.Stages, notify workflow.Notify, device project.Device) (*Session, error) {
@@ -338,9 +341,15 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 		}
 		return truncateDiagnostic(strings.Join(lines, "\n"))
 	}
-	// build resolves inputs and compiles the artifact; it never touches the
-	// running iteration.
+	var installed project.Resolved
+	var installedArtifacts []project.Artifact
+	var syncDirectory string
+	var candidate project.Resolved
+	var candidateArtifacts []project.Artifact
+	// A native-input identity match permits bundling without compilation only
+	// for the built-in simulator launcher and without dynamic extensions/OTA.
 	build := func(ctx context.Context) (project.Resolved, []project.Artifact, error) {
+		syncDirectory = ""
 		resolved, err := workflow.Resolve(ctx, stages, request.Build.ProjectDir, notify)
 		if err != nil {
 			return project.Resolved{}, nil, err
@@ -350,27 +359,49 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 				return project.Resolved{}, nil, workflow.ErrUnavailable
 			}
 		}
-		result, err := c.build(ctx, request.Build, stages, notify)
+		_, canSync := stages.Launcher.(platformDevices)
+		if canSync && installed.Revision != "" && resolved.Revision == installed.Revision &&
+			len(stages.Extensions) == 0 && stages.OTA == nil && resolved.ApplicationID == installed.ApplicationID {
+			_, b, err := c.engine.Bundle(ctx, stages, resolved, internalRequest(request.Build), notify)
+			if err != nil {
+				return project.Resolved{}, nil, err
+			}
+			candidate, candidateArtifacts = resolved, installedArtifacts
+			syncDirectory = b.Directory
+			return resolved, installedArtifacts, nil
+		}
+		result, err := c.buildResolved(ctx, request.Build, stages, notify, resolved)
 		if err != nil {
+			// A failed compiler may have replaced the stable build product.
+			// Keep the running app, but require a fresh native build next time.
+			installed = project.Resolved{}
 			return project.Resolved{}, nil, err
 		}
 		var artifacts []project.Artifact
 		for _, v := range result.Artifacts {
 			artifacts = append(artifacts, project.Artifact{Identity: project.Identity{Schema: v.Identity.Schema, Revision: v.Identity.Revision, ProjectDir: v.Identity.ProjectDir, Target: internalTarget(v.Identity.Target)}, Path: v.Path, Kind: v.Kind, ApplicationID: v.ApplicationID})
 		}
+		candidate, candidateArtifacts = resolved, artifacts
 		return resolved, artifacts, nil
 	}
 	// launch installs and cold-starts a successful build; ownership is identical
 	// to the HMR iteration.
 	launch := func(ctx context.Context, artifacts []project.Artifact) (*workflow.Session, chan error, context.CancelFunc, error) {
 		ictx, icancel := context.WithCancel(ctx)
-		app, err := workflow.Launch(ictx, stages, artifacts, device, notify)
+		launchStages := stages
+		if launcher, ok := stages.Launcher.(platformDevices); ok {
+			launcher.bundleDirectory = syncDirectory
+			launchStages.Launcher = launcher
+		}
+		app, err := c.launch(ictx, request, launchStages, artifacts, device, notify)
 		if err != nil {
+			installed = project.Resolved{}
 			icancel()
 			return nil, nil, nil, err
 		}
+		installed, installedArtifacts = candidate, candidateArtifacts
 		if request.Log != nil && app != nil && app.LogBuffer != nil {
-			app.LogBuffer.Observer = func(l workflow.Log) { request.Log(SessionLog(l)) }
+			app.LogBuffer.Observe(func(l workflow.Log) { request.Log(SessionLog(l)) })
 		}
 		done := make(chan error, 1)
 		go func() { done <- app.Wait() }()
@@ -387,7 +418,7 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 			return nil
 		}
 		if it.app.LogBuffer != nil {
-			it.app.LogBuffer.Observer = nil
+			it.app.LogBuffer.Observe(nil)
 		}
 		return filterDevelopmentTeardown(it.app.Close(context.Background()), true)
 	}
@@ -402,6 +433,8 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 		return nil, operationError("run", err)
 	}
 	current := &iteration{app: app, cancel: icancel, resolved: resolved, marks: restartMarks(resolved), done: done}
+	state := &developmentState{}
+	state.use(&developmentIteration{app: app})
 	// failed remembers the fingerprint of the last rejected rebuild; pending is
 	// the debounce candidate that must survive one tick unchanged.
 	var failed, pending map[string]int64
@@ -411,6 +444,7 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 			if cerr := closeIteration(current); cerr != nil {
 				err = errors.Join(err, cerr)
 			}
+			state.use(nil)
 			err = operationError("run", err)
 		}()
 		tick := time.NewTicker(750 * time.Millisecond)
@@ -450,6 +484,7 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 					if cerr := closeIteration(current); cerr != nil {
 						return cerr
 					}
+					state.use(nil)
 					current = nil
 					app, done, icancel, err := launch(ctx, nextArtifacts)
 					if err != nil {
@@ -461,10 +496,11 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 						continue
 					}
 					current = &iteration{app: app, cancel: icancel, resolved: nextResolved, marks: marks, done: done}
+					state.use(&developmentIteration{app: app})
 					failed = nil
 				}
 			}
 		}
 	})
-	return &Session{owned: owned}, nil
+	return &Session{owned: owned, development: state}, nil
 }
