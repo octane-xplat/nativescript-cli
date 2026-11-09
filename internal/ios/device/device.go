@@ -541,7 +541,7 @@ func (a Adapter) launchSimulator(ctx context.Context, root string, artifact proj
 			if !readerExited {
 				<-readerDone
 			}
-			result = errors.Join(result, readerErr)
+			result = errors.Join(result, readerCleanupError(readerErr))
 			if alive() {
 				result = errors.Join(result, stop())
 			}

@@ -72,19 +72,21 @@ func fixtureArtifact(t *testing.T) project.Artifact {
 }
 
 type fakeExecutor struct {
-	mu            sync.Mutex
-	calls         []string
-	fail, running string
-	installed     string
-	physical      bool
-	booted        bool
-	console       chan struct{}
-	logReader     *fakeHandle
+	mu             sync.Mutex
+	calls          []string
+	fail, running  string
+	installed      string
+	physical       bool
+	booted         bool
+	console        chan struct{}
+	logReader      *fakeHandle
+	readerCloseErr error
 }
 type fakeHandle struct {
-	err  error
-	done chan struct{}
-	once sync.Once
+	err      error
+	closeErr error
+	done     chan struct{}
+	once     sync.Once
 }
 
 func (h *fakeHandle) Wait() (process.Exit, error) {
@@ -99,7 +101,7 @@ func (h *fakeHandle) Close(context.Context) error {
 			close(h.done)
 		}
 	})
-	return nil
+	return h.closeErr
 }
 func (f *fakeExecutor) Start(ctx context.Context, c process.Command) (process.Handle, error) {
 	f.mu.Lock()
@@ -155,7 +157,7 @@ func (f *fakeExecutor) Start(ctx context.Context, c process.Command) (process.Ha
 		if c.Output != nil {
 			c.Output(ctx, process.Stdout, []byte("fixture unified application diagnostic\n"))
 		}
-		f.logReader = &fakeHandle{done: make(chan struct{})}
+		f.logReader = &fakeHandle{done: make(chan struct{}), closeErr: f.readerCloseErr}
 		return f.logReader, nil
 	}
 	if c.Output != nil {
