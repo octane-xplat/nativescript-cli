@@ -269,10 +269,11 @@ func TestSerialLeaseAndParentCancellation(t *testing.T) {
 	}
 }
 
-// Contract evidence: full sync uses NativeScript's debug-runtime staging area,
-// bypasses install, and retires its staging files on Close or transfer failure.
+// Contract evidence: full sync stages the bundle on the device, copies it into
+// the app payload via run-as, bypasses install, and retires its staging files
+// on Close or transfer failure.
 func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
-	for _, failure := range []string{"", " push "} {
+	for _, failure := range []string{"", " push ", "run-as"} {
 		t.Run("transfer-"+failure, func(t *testing.T) {
 			art, d := fixture(t)
 			f := &fake{fail: failure, installed: true}
@@ -294,6 +295,21 @@ func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
 			}
 			if !strings.Contains(calls, "/fullsync") || !strings.Contains(calls, "push ") {
 				t.Fatal(calls)
+			}
+			if failure == "" {
+				script := "shell run-as org.example.app sh -c 'rm -rf files/app.xplat-next && mkdir files/app.xplat-next && cp -R /data/local/tmp/org.example.app/fullsync/. files/app.xplat-next/ && rm -rf files/app && mv files/app.xplat-next files/app'"
+				if !strings.Contains(calls, script) {
+					t.Fatal("payload copy missing", calls)
+				}
+				push := strings.Index(calls, "push ")
+				runas := strings.Index(calls, "run-as org.example.app")
+				start := strings.Index(calls, "am start")
+				if !(push < runas && runas < start) {
+					t.Fatal("payload copy out of order", calls)
+				}
+			}
+			if failure == "run-as" && strings.Contains(calls, "am start") {
+				t.Fatal("launched after payload copy failure", calls)
 			}
 			if strings.Count(calls, "shell rm -rf /data/local/tmp/org.example.app/fullsync") != 2 {
 				t.Fatal("staging not retired", calls)
@@ -337,7 +353,7 @@ func TestBundleSyncRejectsWhenAppNotInstalled(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	calls := strings.Join(f.calls, "\n")
-	if strings.Contains(calls, "push ") || strings.Contains(calls, "install -r") || strings.Contains(calls, "dump badging") {
+	if strings.Contains(calls, "push ") || strings.Contains(calls, "run-as") || strings.Contains(calls, "install -r") || strings.Contains(calls, "dump badging") {
 		t.Fatal("mutation before installed check", calls)
 	}
 }

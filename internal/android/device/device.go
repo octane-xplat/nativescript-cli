@@ -25,7 +25,9 @@ type Reverse struct{ DevicePort, HostPort int }
 type Adapter struct {
 	Install func(context.Context, bool) error
 
-	// BundleDirectory stages a full runtime sync instead of reinstalling the APK.
+	// BundleDirectory replaces the installed debuggable app's files/app payload
+	// via run-as instead of reinstalling the APK. Runtime 9.1 does not consume
+	// /data/local/tmp fullsync staging.
 	BundleDirectory string
 
 	Executor            process.Executor
@@ -378,6 +380,15 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 			return nil, err
 		}
 		if _, err = a.adb(ctx, d.ID, "shell", "chmod", "-R", "777", "/data/local/tmp/"+art.ApplicationID); err != nil {
+			return nil, err
+		}
+		// Runtime 9.1 ignores the fullsync staging directory, so copy the staged
+		// bundle into the private payload as the app itself: run-as lands in the
+		// package data directory. adb shell joins arguments into a remote command
+		// line, so the single-quoted script reaches sh -c as one argument; appID
+		// is regexp-validated above and remote derives from it.
+		script := "rm -rf files/app.xplat-next && mkdir files/app.xplat-next && cp -R " + remote + "/. files/app.xplat-next/ && rm -rf files/app && mv files/app.xplat-next files/app"
+		if _, err = a.adb(ctx, d.ID, "shell", "run-as", art.ApplicationID, "sh", "-c", "'"+script+"'"); err != nil {
 			return nil, err
 		}
 	} else {

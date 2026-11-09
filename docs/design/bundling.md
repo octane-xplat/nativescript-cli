@@ -57,7 +57,9 @@ native-input roots, and a confirmed change (two consecutive polls agreeing)
 triggers an official-engine rebuild and cold relaunch. When the resolved native
 identity is unchanged, the built-in simulator/emulator launcher syncs the new
 bundle without compiling or reinstalling: iOS replaces the installed `.app/app`
-tree; Android uses its debug runtime's `fullsync` staging area. Removed bundle
+tree; Android stages the bundle under `/data/local/tmp` and replaces the
+debuggable app's private `files/app` payload via `run-as` (runtime 9.1 does not
+consume `fullsync` staging). Removed bundle
 files are removed on both paths. Native-input changes, registered public
 extensions, and OTA preparation use the full native build/install path. New
 Java-backed classes introduced in JS need a fresh native build to regenerate
