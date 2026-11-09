@@ -55,6 +55,7 @@ type fake struct {
 	calls                      []string
 	fail, badging              string
 	running, forward, conflict bool
+	timeout                    bool
 }
 type handle struct {
 	err  error
@@ -121,7 +122,11 @@ func (f *fake) Start(ctx context.Context, c process.Command) (process.Handle, er
 	case strings.Contains(s, "resolve-activity"):
 		out = "org.example.app/com.tns.NativeScriptActivity"
 	case strings.Contains(s, "am start"):
-		out = "Status: ok"
+		if f.timeout {
+			out = "Status: timeout\nLaunchState: UNKNOWN (-1)\nWaitTime: 24711\nComplete"
+		} else {
+			out = "Status: ok"
+		}
 		f.running = true
 	case strings.Contains(s, "force-stop"):
 		f.running = false
@@ -166,6 +171,25 @@ func TestLifecycleFailuresAndCleanup(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+func TestLaunchStatusTimeoutStillRuns(t *testing.T) {
+	art, d := fixture(t)
+	f := &fake{timeout: true}
+	a := Adapter{Executor: f, Reverse: []Reverse{{5173, 5173}}}
+	s, e := a.Launch(context.Background(), art, d)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(s.LogBuffer.Logs()) == 0 {
+		t.Fatal("missing logs")
+	}
+	if e = s.Close(context.Background()); !errors.Is(e, context.Canceled) {
+		t.Fatal(e)
+	}
+	s.Close(context.Background())
+	if f.running || f.forward {
+		t.Fatal("owned resources leaked")
 	}
 }
 func TestRejectsBeforeInstall(t *testing.T) {
