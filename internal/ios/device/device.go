@@ -26,6 +26,8 @@ import (
 )
 
 type Adapter struct {
+	Install func(context.Context, bool) error
+
 	// BundleDirectory replaces only the installed simulator app payload; no install.
 	BundleDirectory string
 
@@ -305,8 +307,20 @@ func (a Adapter) Launch(ctx context.Context, artifact project.Artifact, selected
 			if err = workspace.SyncDir(filepath.Join(installed, "app"), a.BundleDirectory, func(string) bool { return false }); err != nil {
 				return nil, err
 			}
-		} else if _, err = a.run(ctx, root, "simctl", "install", d.ID, artifact.Path); err != nil {
-			return nil, err
+		} else {
+			if a.Install != nil {
+				if err = a.Install(ctx, true); err != nil {
+					return nil, err
+				}
+			}
+			if _, err = a.run(ctx, root, "simctl", "install", d.ID, artifact.Path); err != nil {
+				return nil, err
+			}
+			if a.Install != nil {
+				if err = a.Install(ctx, false); err != nil {
+					return nil, err
+				}
+			}
 		}
 	} else {
 		data, e := a.run(ctx, root, "devicectl", "device", "info", "processes", "--device", d.ID, "--json-output", "-")
@@ -325,8 +339,18 @@ func (a Adapter) Launch(ctx context.Context, artifact project.Artifact, selected
 		if exists {
 			return nil, workspace.ErrBusy
 		}
+		if a.Install != nil {
+			if err = a.Install(ctx, true); err != nil {
+				return nil, err
+			}
+		}
 		if _, err = a.run(ctx, root, "devicectl", "device", "install", "app", "--device", d.ID, artifact.Path, "--json-output", "-"); err != nil {
 			return nil, err
+		}
+		if a.Install != nil {
+			if err = a.Install(ctx, false); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if d.Kind == "simulator" {

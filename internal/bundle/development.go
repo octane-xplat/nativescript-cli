@@ -94,7 +94,7 @@ func developmentRequest(r project.Resolved, target project.Target, settings Requ
 		BundlerConfigPath: r.Config.BundlerConfigPath,
 		Configuration:     target.Configuration, ApplicationID: r.ApplicationID, Mode: "native", Port: port,
 		HMRHost: settings.HMRHost, Directory: filepath.Join(root, "bundle"), CacheDirectory: filepath.Join(root, "cache")}
-	q.NativeInputs = []string{r.Config.AppResourcesPath}
+	q.NativeInputs = []string{r.Config.AppResourcesPath, filepath.Join(canonical, "hooks")}
 	if target.Platform == "ios" {
 		q.NativeSourceGroups = append([]project.NativeSourceGroup(nil), r.NativeSourceGroups...)
 	}

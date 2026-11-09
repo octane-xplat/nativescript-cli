@@ -122,6 +122,11 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 	if err != nil {
 		return nil, err
 	}
+	resolved, err = c.engine.SourceHooks(ctx, stages, resolved, internalRequest(request.Build), notify)
+	if err != nil {
+		return nil, err
+	}
+	stages.SourceHooksDone = true
 	for _, pkg := range resolved.Packages {
 		if pkg.Name == "@nativescript/"+string(request.Build.Target.Platform) && !project.RuntimeSatisfies(pkg.Version, "9.1.0") {
 			return nil, workflow.ErrUnavailable
@@ -288,10 +293,10 @@ func restartMarks(resolved project.Resolved) map[string]int64 {
 	for _, s := range resolved.Sources {
 		add(s.Path)
 	}
-	for _, name := range []string{"package.json", "nativescript.config.cjs", "nativescript.config.js", "nativescript.config.mjs", "nativescript.config.ts"} {
+	for _, name := range []string{"package.json", "nativescript.config.cjs", "nativescript.config.js", "nativescript.config.mjs", "nativescript.config.ts", "nativescript.config.json"} {
 		add(filepath.Join(resolved.Directory, name))
 	}
-	for _, root := range []string{resolved.Config.AppPath, resolved.Config.AppResourcesPath} {
+	for _, root := range []string{resolved.Config.AppPath, resolved.Config.AppResourcesPath, filepath.Join(resolved.Directory, "hooks")} {
 		if root != "" {
 			filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 				if err == nil && info != nil && !info.IsDir() {
@@ -361,7 +366,7 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 		}
 		_, canSync := stages.Launcher.(platformDevices)
 		if canSync && installed.Revision != "" && resolved.Revision == installed.Revision &&
-			len(stages.Extensions) == 0 && stages.OTA == nil && resolved.ApplicationID == installed.ApplicationID {
+			len(stages.Extensions) == 0 && stages.OTA == nil && len(resolved.Hooks) == 0 && resolved.ApplicationID == installed.ApplicationID {
 			_, b, err := c.engine.Bundle(ctx, stages, resolved, internalRequest(request.Build), notify)
 			if err != nil {
 				return project.Resolved{}, nil, err

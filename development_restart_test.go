@@ -210,3 +210,19 @@ func TestRestartBundleOnlyWorkflow(t *testing.T) {
 		})
 	}
 }
+
+func TestRestartMarksDetectHookRegistrationMembership(t *testing.T) {
+	root := t.TempDir()
+	resolved := project.Resolved{Directory: root}
+	before := restartMarks(resolved)
+	dir := filepath.Join(root, "hooks/after-prepare")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.cjs"), []byte("module.exports=()=>{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if restartMarksSame(before, restartMarks(resolved)) {
+		t.Fatal("new registered hook was invisible to restart mode")
+	}
+}

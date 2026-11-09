@@ -58,6 +58,8 @@ independent of command parsing, private helper messages and third-party parser
 types. Native runtime templates, metadata generators, Vite and platform tools
 remain the intended underlying engines.
 
+Registered NativeScript project hooks use the [bounded lifecycle contract](docs/design/hooks.md). Plugin declarations remain installation metadata; the public extension SDK is independent.
+
 ## License
 
 [MIT](LICENSE).

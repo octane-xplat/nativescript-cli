@@ -83,21 +83,34 @@ module.exports = async function native(p, emit) {
     // Vite intentionally ignores node_modules. Native plugin inputs can live
     // there, so monitor them independently instead of silently missing edits.
     const directories = new Map();
+    const hookRoot=path.join(p.projectDir,'hooks');
+    const addWatch=(dir,recursive,input)=>{
+      const entry=directories.get(dir)??{recursive:false,inputs:new Set()};
+      entry.recursive ||= recursive;
+      entry.inputs.add(input);
+      directories.set(dir,entry);
+    };
     for (const input of p.nativeInputs) {
-      const recursive = fs.existsSync(input) && fs.statSync(input).isDirectory();
-      const dir = recursive ? input : path.dirname(input);
-      directories.set(dir,recursive || directories.get(dir) || false);
+      const exists=fs.existsSync(input);
+      const directory=exists&&fs.statSync(input).isDirectory();
+      // An absent hook root needs a recursive parent watcher: registration can
+      // create it empty, then add scripts later without another parent event.
+      addWatch(directory?input:path.dirname(input),directory||!exists&&input===hookRoot,input);
     }
-    for(const group of sourceGroups)directories.set(group.root,true);
+    for(const group of sourceGroups)addWatch(group.root,true,group.root);
     for(const file of configs.dependencies.keys()){
       let dir=path.dirname(file),recursive=false;
       while(!fs.existsSync(dir)){recursive=true;const parent=path.dirname(dir);if(parent===dir)break;dir=parent;}
-      directories.set(dir,recursive||directories.get(dir)||false);
+      addWatch(dir,recursive,file);
     }
-    for (const [dir,recursive] of directories) {
+    for (const [dir,{recursive,inputs}] of directories) {
       if (!fs.existsSync(dir)) continue;
+      const watched=[...inputs];
       const watcher = fs.watch(dir,{recursive},(_event,name) => {
         const file = name && path.resolve(dir,String(name));
+        // A parent watcher may cover generated build/cache output. Filter it
+        // against only this watcher's intended roots before comparing digests.
+        if(file&&!watched.some(input=>file===input||file.startsWith(input+path.sep)||input.startsWith(file+path.sep)))return;
         try { if (configs.changed() || nativeChanged(file)) rejectLifetime(fail('restart_required')); }
         catch { rejectLifetime(fail('restart_required')); }
       });

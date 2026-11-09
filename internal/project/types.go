@@ -16,7 +16,14 @@ type Identity struct {
 	ProjectDir string
 	Target     Target
 }
+type Hook struct {
+	Name   string `json:"name"`
+	Script string `json:"script"`
+	Digest string `json:"digest"`
+}
+
 type Resolved struct {
+	Hooks              []Hook
 	Config             Config
 	Packages           []Package
 	Dependencies       []Dependency

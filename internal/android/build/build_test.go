@@ -206,3 +206,20 @@ func TestReleaseRejectsMissingSigningBeforeLaunch(t *testing.T) {
 		t.Fatal("launched without signing")
 	}
 }
+
+func TestHookTransformsActualGradleArguments(t *testing.T) {
+	p, b, l := fixture(t)
+	f := &tool{format: "apk"}
+	adapter := Adapter{Executor: f, Arguments: func(ctx context.Context, actual project.Prepared, args []string, lease workspace.Lease) ([]string, error) {
+		if actual.NativeDir == p.NativeDir || lease != l {
+			t.Fatal("wrong build-mirror context")
+		}
+		return append(args, "--offline"), nil
+	}}
+	if _, err := adapter.Compile(context.Background(), p, b, l); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.cmd.Args, "--offline") {
+		t.Fatal("hook arguments discarded", f.cmd.Args)
+	}
+}

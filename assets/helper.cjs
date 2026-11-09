@@ -19306,12 +19306,19 @@ var require_native = __commonJS({
             server.httpServer.on("close", () => rejectLifetime(fail("server_closed")));
             server.httpServer.on("error", rejectLifetime);
             const directories = /* @__PURE__ */ new Map();
+            const hookRoot = path2.join(p.projectDir, "hooks");
+            const addWatch = (dir, recursive, input) => {
+              const entry = directories.get(dir) ?? { recursive: false, inputs: /* @__PURE__ */ new Set() };
+              entry.recursive ||= recursive;
+              entry.inputs.add(input);
+              directories.set(dir, entry);
+            };
             for (const input of p.nativeInputs) {
-              const recursive = fs2.existsSync(input) && fs2.statSync(input).isDirectory();
-              const dir = recursive ? input : path2.dirname(input);
-              directories.set(dir, recursive || directories.get(dir) || false);
+              const exists = fs2.existsSync(input);
+              const directory = exists && fs2.statSync(input).isDirectory();
+              addWatch(directory ? input : path2.dirname(input), directory || !exists && input === hookRoot, input);
             }
-            for (const group of sourceGroups) directories.set(group.root, true);
+            for (const group of sourceGroups) addWatch(group.root, true, group.root);
             for (const file of configs.dependencies.keys()) {
               let dir = path2.dirname(file), recursive = false;
               while (!fs2.existsSync(dir)) {
@@ -19320,12 +19327,14 @@ var require_native = __commonJS({
                 if (parent === dir) break;
                 dir = parent;
               }
-              directories.set(dir, recursive || directories.get(dir) || false);
+              addWatch(dir, recursive, file);
             }
-            for (const [dir, recursive] of directories) {
+            for (const [dir, { recursive, inputs }] of directories) {
               if (!fs2.existsSync(dir)) continue;
+              const watched = [...inputs];
               const watcher = fs2.watch(dir, { recursive }, (_event, name) => {
                 const file = name && path2.resolve(dir, String(name));
+                if (file && !watched.some((input) => file === input || file.startsWith(input + path2.sep) || input.startsWith(file + path2.sep))) return;
                 try {
                   if (configs.changed() || nativeChanged(file)) rejectLifetime(fail("restart_required"));
                 } catch {
@@ -19396,6 +19405,111 @@ var require_core = __commonJS({
   }
 });
 
+// bridge/resolve/hooks.cjs
+var require_hooks = __commonJS({
+  "bridge/resolve/hooks.cjs"(exports2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    var supported = /* @__PURE__ */ new Set([
+      "before-prepare",
+      "after-prepare",
+      "before-prepareNativeApp",
+      "after-prepareNativeApp",
+      "before-buildIOS",
+      "after-buildIOS",
+      "before-buildAndroid",
+      "after-buildAndroid",
+      "before-build-task-args",
+      "before-install",
+      "after-install"
+    ]);
+    var coreCheck = "97baeb497a77db8909e7fd39f58dd5f3390516aadf9cb85bd30db58009c7bdd7";
+    var label = (value) => String(value).replace(/[^a-zA-Z0-9_.-]/g, "?").slice(0, 120);
+    exports2.plugin = (dir, descriptors, read, fail) => {
+      if (descriptors === void 0) return;
+      if (!Array.isArray(descriptors)) fail("invalid_input", "Plugin nativescript.hooks must be an array");
+      for (const hook of descriptors) {
+        if (!hook || typeof hook !== "object" || Array.isArray(hook) || Object.keys(hook).some((key2) => !["name", "type", "script", "inject"].includes(key2)) || typeof hook.type !== "string" || !/^[a-zA-Z][a-zA-Z0-9-]*$/.test(hook.type) || typeof hook.script !== "string" || !hook.script || path2.isAbsolute(hook.script) || hook.name !== void 0 && typeof hook.name !== "string" || hook.inject !== void 0 && typeof hook.inject !== "boolean") {
+          fail("invalid_input", "Plugin hook declarations require type/script and optional name/inject");
+        }
+        const file = path2.resolve(dir, hook.script);
+        const relative = path2.relative(dir, file);
+        if (relative === ".." || relative.startsWith(".." + path2.sep) || !fs2.statSync(file).isFile()) {
+          fail("invalid_input", "Plugin hook script must name an existing package file");
+        }
+        read(file);
+      }
+    };
+    exports2.inventory = (dir, read, fail) => {
+      const seen = /* @__PURE__ */ new Set();
+      function walk(folder) {
+        if (!fs2.existsSync(folder)) return;
+        if (fail && fs2.lstatSync(folder).isSymbolicLink()) fail("unavailable", "Registered project hook trees require copied ordinary files");
+        const real = fs2.realpathSync(folder);
+        if (seen.has(real)) return;
+        seen.add(real);
+        for (const name of fs2.readdirSync(folder).sort()) {
+          const file = path2.join(folder, name);
+          if (fail && fs2.lstatSync(file).isSymbolicLink()) fail("unavailable", "Registered project hook trees require copied ordinary files");
+          const stat = fs2.statSync(file);
+          if (stat.isDirectory()) walk(file);
+          else if (stat.isFile()) read(file);
+        }
+      }
+      walk(path2.join(dir, "hooks"));
+    };
+    exports2.project = (root, configured, read, fail) => {
+      const hooks = [], seen = /* @__PURE__ */ new Set();
+      exports2.inventory(root, read, fail);
+      function add(name, script) {
+        const file = fs2.realpathSync(script);
+        if (!fs2.statSync(file).isFile() || !/\.[cm]?js$/.test(file)) {
+          fail("unavailable", `Hook ${label(name)} requires a JavaScript, CommonJS or ESM file`);
+        }
+        const source = read(file);
+        const digest = crypto.createHash("sha256").update(source).digest("hex");
+        if (name === "before-checkForChanges" && digest === coreCheck) return;
+        if (!supported.has(name)) fail("unavailable", `Unsupported project hook ${label(name)}; use a supported lifecycle point or the public extension SDK`);
+        const key2 = name + "\0" + file;
+        if (!seen.has(key2)) hooks.push({ name, script: file, digest });
+        seen.add(key2);
+      }
+      const folder = path2.join(root, "hooks");
+      if (fs2.existsSync(folder)) {
+        for (const name of fs2.readdirSync(folder).sort()) {
+          const file = path2.join(folder, name);
+          if (name.startsWith(".") || /^(?:README|LICENSE)(?:\.[^.]+)?$/i.test(name)) {
+            if (fs2.statSync(file).isFile()) read(file);
+            continue;
+          }
+          if (fs2.statSync(file).isDirectory()) {
+            for (const child of fs2.readdirSync(file).sort()) {
+              const script = path2.join(file, child);
+              if (child.startsWith(".") || /^(?:README|LICENSE)(?:\.[^.]+)?$/i.test(child)) {
+                if (fs2.statSync(script).isFile()) read(script);
+                continue;
+              }
+              add(name, script);
+            }
+          } else add(name.replace(/\.[cm]?js$/, ""), file);
+        }
+      }
+      if (configured !== void 0) {
+        if (!Array.isArray(configured)) fail("invalid_input", "Config hooks must be an array");
+        for (const hook of configured) {
+          if (!hook || typeof hook !== "object" || Array.isArray(hook) || Object.keys(hook).some((key2) => !["type", "script"].includes(key2)) || typeof hook.type !== "string" || typeof hook.script !== "string" || !hook.script) {
+            fail("invalid_input", "Config hooks require type and script");
+          }
+          add(hook.type, path2.resolve(root, hook.script));
+        }
+      }
+      return hooks;
+    };
+  }
+});
+
 // bridge/resolve/mason.cjs
 var require_mason = __commonJS({
   "bridge/resolve/mason.cjs"(exports2, module2) {
@@ -19457,6 +19571,7 @@ var require_resolve = __commonJS({
     var crypto = require("node:crypto");
     var { stripTypeScriptTypes, createRequire: createRequire2 } = require("node:module");
     var coreAdapter = require_core();
+    var legacyHooks = require_hooks();
     var expandNativeSources = require_native_sources();
     var swiftPackages = require_swift_packages();
     var masonMetadata = require_mason();
@@ -19574,8 +19689,8 @@ var require_resolve = __commonJS({
         return declared2;
       }
       function collect(dir, owner, cfg2, resources, metadata = /* @__PURE__ */ new Set()) {
-        keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android", "visionos", "tvos", "cli", "bundler", "bundlerConfigPath"], "config");
-        if (dir !== root && ["cli", "bundler", "bundlerConfigPath"].some((key2) => cfg2[key2] !== void 0)) fail("unavailable", "Bundler and CLI configuration belongs to the application");
+        keys(cfg2, ["id", "appPath", "appResourcesPath", "buildPath", "ios", "android", "visionos", "tvos", "cli", "bundler", "bundlerConfigPath", "hooks"], "config");
+        if (dir !== root && ["cli", "bundler", "bundlerConfigPath", "hooks"].some((key2) => cfg2[key2] !== void 0)) fail("unavailable", "Bundler and CLI configuration belongs to the application");
         if (cfg2.ios !== void 0) keys(cfg2.ios, ["NativeSource", "SPMPackages"], "iOS config");
         if (cfg2.ios?.SPMPackages !== void 0) {
           let declared2;
@@ -19614,7 +19729,7 @@ var require_resolve = __commonJS({
         }
         if (cfg2.android !== void 0) keys(cfg2.android, ["v8Flags", "markingMode"], "Android config");
         for (const key2 of ["v8Flags", "markingMode"]) if (cfg2.android?.[key2] !== void 0 && typeof cfg2.android[key2] !== "string") fail("invalid_input", "Android runtime settings must be strings");
-        if (fs2.existsSync(path2.join(dir, "hooks"))) fail("unavailable", "Legacy package hooks are unsupported; migrate to the extension SDK before preparing");
+        if (dir !== root) legacyHooks.inventory(dir, read);
         function walk(folder, platform) {
           if (!fs2.existsSync(folder)) return;
           const usageFile = path2.join(folder, "native-api-usage.json");
@@ -19759,6 +19874,7 @@ var require_resolve = __commonJS({
         normalized.bundlerConfigPath = fs2.realpathSync(file);
         read(normalized.bundlerConfigPath);
       }
+      const hooks = legacyHooks.project(root, cfg.hooks, read, fail);
       collect(root, root, cfg, normalized.appResourcesPath);
       async function visit(dir, pkg, isRoot = false) {
         if (packages.has(dir)) return;
@@ -19770,7 +19886,8 @@ var require_resolve = __commonJS({
         if (!isRoot && native) {
           const core = pkg.name === "@nativescript/core";
           if (core && !coreAdapter.supported(pkg, dir, read)) fail("unavailable", "NativeScript core requires the reviewed 9.1.3 compatibility-hook contract");
-          keys(pkg.nativescript, core ? ["platforms", "hooks"] : ["platforms"], "package nativescript metadata");
+          keys(pkg.nativescript, ["platforms", "hooks"], "package nativescript metadata");
+          legacyHooks.plugin(dir, pkg.nativescript.hooks, read, fail);
           if (pkg.nativescript.platforms) {
             keys(pkg.nativescript.platforms, ["ios", "android", "windows"], "package platforms");
             for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== "string") fail("invalid_input", "Native platform versions must be strings");
@@ -19873,6 +19990,7 @@ var require_resolve = __commonJS({
       }
       for (const c of remote) membership.set(JSON.stringify(["spm-remote", c.spm.repositoryURL]), c);
       const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a, b) => a.directory.localeCompare(b.directory)), dependencies: edges, dependencyOrder, contributions: [...membership.values()], sources: [...sources].map(([path3, digest]) => ({ path: path3, digest })).sort((a, b) => a.path.localeCompare(b.path)) };
+      if (hooks.length) result.hooks = hooks;
       const appliedGroups = nativeSourceGroups.filter((group) => !dropped.has(group.packageDirectory));
       if (appliedGroups.length) result.nativeSourceGroups = appliedGroups;
       result.revision = crypto.createHash("sha256").update(JSON.stringify(result)).digest("hex");
@@ -19885,6 +20003,100 @@ var require_resolve = __commonJS({
         if (safeFailures.has(error)) throw error;
         fail("invalid_input", "Cannot read project resolution inputs; check config and installed native package files");
       }
+    };
+  }
+});
+
+// bridge/hooks/index.cjs
+var require_hooks2 = __commonJS({
+  "bridge/hooks/index.cjs"(exports2, module2) {
+    "use strict";
+    var fs2 = require("node:fs");
+    var path2 = require("node:path");
+    var crypto = require("node:crypto");
+    var { pathToFileURL } = require("node:url");
+    var safe = (text) => String(text).replace(/[^a-zA-Z0-9_.$-]/g, "?").slice(0, 120);
+    var ownedFailures = /* @__PURE__ */ new WeakSet();
+    function failure(code, text) {
+      const error = Object.assign(new Error(), { code, detail: text });
+      ownedFailures.add(error);
+      return error;
+    }
+    function freeze(value) {
+      if (value && typeof value === "object") {
+        for (const child of Object.values(value)) freeze(child);
+        Object.freeze(value);
+      }
+      return value;
+    }
+    function parameters(fn, name) {
+      const text = Function.prototype.toString.call(fn).replace(/\/\*[\s\S]*?\*\//g, "").trim();
+      const match = /^(?:async\s+)?(?:(?:function(?:\s+[\w$]+)?|[\w$]+)\s*)?\(([^)]*)\)/.exec(text) || /^(?:async\s+)?([\w$]+)\s*=>/.exec(text);
+      if (!match) throw failure("unavailable", `Hook ${name} requires a function with named injection parameters`);
+      const names = match[1].trim() ? match[1].split(",").map((s) => s.trim()) : [];
+      for (const parameter of names) {
+        if (!["hookArgs", "$logger", "$projectData"].includes(parameter)) {
+          throw failure("unavailable", `Hook ${name} requests unsupported injection ${safe(parameter)}`);
+        }
+      }
+      return names;
+    }
+    module2.exports = async (p) => {
+      if (!path2.isAbsolute(p.projectDir || "") || !Array.isArray(p.hooks) || typeof p.name !== "string") throw failure("invalid_input", "Invalid hook invocation");
+      const hooks = p.hooks.filter((h) => h.name === p.name);
+      const projectData = freeze({
+        projectDir: p.projectDir,
+        projectName: p.projectName,
+        nsConfig: p.nativeConfig,
+        ...p.platformsDir ? { platformsDir: p.platformsDir } : {}
+      });
+      const args = [...p.arguments || []];
+      const hookArgs = {
+        projectDir: p.projectDir,
+        platform: p.target.Platform,
+        configuration: p.target.Configuration,
+        projectData,
+        prepareData: { platform: p.target.Platform, release: p.target.Configuration === "release" },
+        buildData: { platform: p.target.Platform, release: p.target.Configuration === "release" },
+        platformData: { platformName: p.target.Platform, projectRoot: p.nativeDir },
+        nativeDir: p.nativeDir,
+        bundleDir: p.bundleDir,
+        artifactPath: p.artifactPath,
+        deviceIdentifier: p.deviceID,
+        ...p.name === "before-build-task-args" ? { args } : {}
+      };
+      for (const [key2, value] of Object.entries(hookArgs)) if (key2 !== "args") freeze(value);
+      Object.freeze(hookArgs);
+      const logger = freeze(Object.fromEntries(["trace", "debug", "info", "warn", "error", "out"].map((name) => [name, () => {
+      }])));
+      for (const hook of hooks) {
+        const name = `${safe(hook.name)} (${safe(path2.basename(hook.script || ""))})`;
+        const verify = () => {
+          if (!path2.isAbsolute(hook.script || "") || !/^[a-f0-9]{64}$/.test(hook.digest || "") || crypto.createHash("sha256").update(fs2.readFileSync(hook.script)).digest("hex") !== hook.digest) {
+            throw failure("invalid_input", `Hook ${name} changed since resolution; resolve again`);
+          }
+        };
+        try {
+          verify();
+          const module3 = await import(pathToFileURL(hook.script).href);
+          const entry = module3.default?.default ?? module3.default;
+          let result;
+          if (typeof entry === "function") {
+            const inject = parameters(entry, name);
+            const values = { hookArgs, $projectData: projectData, $logger: logger };
+            result = await entry(...inject.map((key2) => values[key2]));
+          } else if (entry && entry.name === p.name && typeof entry.run === "function") {
+            result = await entry.run({ hookName: p.name, hookArgs, projectData });
+          } else throw failure("unavailable", `Hook ${name} must export one function or a matching name/run definition`);
+          if (typeof result === "function") throw failure("unavailable", `Hook ${name} returned unsupported lifecycle middleware`);
+          verify();
+        } catch (error) {
+          if (ownedFailures.has(error)) throw error;
+          throw failure("operation_failed", `Hook ${name} failed; its raw output was withheld`);
+        }
+      }
+      if (args.some((value) => typeof value !== "string" || /[\r\n\0]/.test(value)) || args.length > 256) throw failure("invalid_input", `Hook ${safe(p.name)} produced invalid build arguments`);
+      return { arguments: args };
     };
   }
 });
@@ -19907,6 +20119,7 @@ register("xcode", "prepare", require_xcode2());
 register("xcode", "mergePodXcconfig", require_podxcconfig());
 register("vite", "run", require_vite());
 register("resolve", "project", require_resolve());
+register("hooks", "invoke", require_hooks2());
 register("host", "info", async () => ({ protocol, payloadVersion }));
 register("host", "resolveDependency", async ({ projectDir, name }) => {
   if (!path.isAbsolute(projectDir || "") || typeof name !== "string" || !name || name.startsWith(".") || path.isAbsolute(name)) {

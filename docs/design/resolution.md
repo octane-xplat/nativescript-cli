@@ -146,8 +146,9 @@ invalidate the revision.
 
 Supported categories include iOS source, frameworks, Podfile/podspec, Package.swift,
 configuration and resources; Android source, AAR/JAR, Gradle/manifest and resources.
-Unrecognized files, unsupported metadata/settings, legacy hooks and symlinks within
-native trees fail with remediation. Linked package roots are supported. Resolution
+Unrecognized files, unsupported metadata/settings and symlinks within native
+trees fail with remediation. Registered project hooks have a separate
+[bounded execution contract](hooks.md). Linked package roots are supported. Resolution
 describes Pods/SPM/native files without executing or validating their native tools.
 Platform preparation owns the next stage and may reject inputs it cannot consume.
 
@@ -227,8 +228,9 @@ The published `@nativescript/core` 9.1.3 package has one explicitly migrated hoo
 SHA-256 must match. The hook is read/fingerprinted but never executed: it only
 checks upstream CLI/Angular-webpack versions, while this backend owns its exact
 runtime matrix and Vite contract. Other core versions, altered scripts/descriptors
-and arbitrary package hooks remain unavailable. This is not legacy-hook execution
-support or Angular/webpack interoperability.
+remain unavailable. Other packages may declare fingerprinted hook-installation
+metadata; registered project scripts execute only at the supported lifecycle
+points in the [hook contract](hooks.md). This adds no Angular/webpack interoperability.
 
 For this pinned core package, native API-use inventories and iOS declaration
 files are hashed inputs rather than runtime resources. Metadata generation remains

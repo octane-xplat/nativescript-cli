@@ -23,6 +23,8 @@ import (
 
 type Reverse struct{ DevicePort, HostPort int }
 type Adapter struct {
+	Install func(context.Context, bool) error
+
 	// BundleDirectory stages a full runtime sync instead of reinstalling the APK.
 	BundleDirectory string
 
@@ -359,12 +361,22 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 			return nil, err
 		}
 	} else {
+		if a.Install != nil {
+			if err = a.Install(ctx, true); err != nil {
+				return nil, err
+			}
+		}
 		b, err = a.adb(ctx, d.ID, "install", "-r", art.Path)
 		if err != nil {
 			return nil, err
 		}
 		if !strings.Contains(string(b), "Success") {
 			return nil, workflow.ErrHandoff
+		}
+		if a.Install != nil {
+			if err = a.Install(ctx, false); err != nil {
+				return nil, err
+			}
 		}
 	}
 	b, err = a.adb(ctx, d.ID, "shell", "cmd", "package", "resolve-activity", "--brief", art.ApplicationID)

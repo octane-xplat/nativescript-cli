@@ -17,6 +17,7 @@ register('xcode', 'prepare', require('../xcode/index.cjs'));
 register('xcode', 'mergePodXcconfig', require('../xcode/podxcconfig.cjs'));
 register('vite', 'run', require('../vite/index.cjs'));
 register('resolve', 'project', require('../resolve/index.cjs'));
+register('hooks', 'invoke', require('../hooks/index.cjs'));
 register('host', 'info', async () => ({ protocol, payloadVersion }));
 register('host', 'resolveDependency', async ({ projectDir, name }) => {
   if (!path.isAbsolute(projectDir || '') || typeof name !== 'string' || !name || name.startsWith('.') || path.isAbsolute(name)) {

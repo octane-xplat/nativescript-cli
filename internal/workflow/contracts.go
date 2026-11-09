@@ -28,3 +28,18 @@ type Devices interface {
 type Launcher interface {
 	Launch(context.Context, project.Artifact, project.Device) (*Session, error)
 }
+
+// HookInvocation exposes only the stage data the compatibility adapter owns.
+// Arguments is mutable only at before-build-task-args; other fields are inputs.
+type HookInvocation struct {
+	Name                   string
+	Project                project.Resolved
+	Prepared               project.Prepared
+	Target                 project.Target
+	Arguments              []string
+	ArtifactPath, DeviceID string
+}
+type Hooks interface {
+	Current() project.Resolved
+	Run(context.Context, HookInvocation, workspace.Lease) ([]string, error)
+}

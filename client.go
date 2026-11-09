@@ -5,8 +5,10 @@ import (
 	"errors"
 	"github.com/octane-xplat/nativescript-cli/extension"
 	"github.com/octane-xplat/nativescript-cli/internal/extensions"
+	"github.com/octane-xplat/nativescript-cli/internal/hooks"
 	"io/fs"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -43,7 +45,9 @@ func New(options Options) (*Client, error) {
 		if options.OTAStartup {
 			ota = extensions.OTAStartup{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}
 		}
-		return workflow.Stages{OTA: ota, Extensions: options.Extensions, Devices: platformDevices{env: env}, Launcher: platformDevices{env: env}, Preparer: platformPreparer{android: androidprepare.Adapter{ResolveDependencies: options.OTAStartup, Environment: env}, ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: resolver.Resolver{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}
+		host := jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}
+		hookAdapter := &hooks.Adapter{Host: host, Resolver: resolver.Resolver{Host: host}}
+		return workflow.Stages{Hooks: hookAdapter, OTA: ota, Extensions: options.Extensions, Devices: platformDevices{env: env}, Launcher: platformDevices{env: env}, Preparer: platformPreparer{android: androidprepare.Adapter{ResolveDependencies: options.OTAStartup, Environment: env}, ios: iosprepare.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}}, Bundler: bundle.Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: files}, Environment: env}}, Resolver: hookAdapter}
 	}}
 	return &Client{options: options, engine: engine}, nil
 }
@@ -99,6 +103,10 @@ func operationError(op string, err error) error {
 	}
 	if errors.Is(err, androidbuild.ErrSigning) {
 		result.Advice = androidbuild.ErrSigning.Error()
+	}
+	var hookFailure *hooks.Failure
+	if errors.As(err, &hookFailure) {
+		result.Advice = hookFailure.Message
 	}
 	var diagnostic *resolver.Diagnostic
 	if errors.As(err, &diagnostic) {
@@ -189,6 +197,9 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 	}
 	result := Project{Directory: p.Directory, Revision: p.Revision, ApplicationID: p.ApplicationID,
 		Config: ProjectConfig{AppPath: p.Config.AppPath, AppResourcesPath: p.Config.AppResourcesPath, BundlerConfigPath: p.Config.BundlerConfigPath, PackageManager: p.Config.PackageManager, Android: AndroidRuntimeConfig(p.Config.Android), VisionOS: visionOSDeclaration(p.Config.VisionOS), TVOS: tvOSDeclaration(p.Config.TVOS)}}
+	for _, h := range p.Hooks {
+		result.Hooks = append(result.Hooks, ProjectHook{Name: h.Name, Script: h.Script, Digest: h.Digest})
+	}
 	for _, v := range p.Packages {
 		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS), TVOS: tvOSDeclaration(v.TVOS)})
 	}
@@ -244,7 +255,12 @@ func (c *Client) buildResolved(ctx context.Context, r BuildRequest, s workflow.S
 		s.Compiler = iosbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: iosbuild.Options{Action: r.IOS.Action, SigningMode: r.IOS.SigningMode, TeamID: r.IOS.TeamID, Identity: r.IOS.Identity, ProvisioningProfile: r.IOS.ProvisioningProfile, ExportOptionsPlist: r.IOS.ExportOptionsPlist}}
 	}
 	if r.Target.Platform == Android && s.Compiler == nil {
-		s.Compiler = androidbuild.Adapter{Environment: maps.Clone(c.options.Environment), Options: androidbuild.Options{Format: r.Android.Format, Keystore: r.Android.Keystore, Alias: r.Android.Alias, StorePasswordEnv: r.Android.StorePasswordEnv, KeyPasswordEnv: r.Android.KeyPasswordEnv}}
+		s.Compiler = androidbuild.Adapter{Arguments: func(ctx context.Context, p project.Prepared, args []string, l workspace.Lease) ([]string, error) {
+			if s.Hooks == nil {
+				return args, nil
+			}
+			return s.Hooks.Run(ctx, workflow.HookInvocation{Name: "before-build-task-args", Project: s.Hooks.Current(), Prepared: p, Target: p.Identity.Target, Arguments: args}, l)
+		}, Environment: maps.Clone(c.options.Environment), Options: androidbuild.Options{Format: r.Android.Format, Keystore: r.Android.Keystore, Alias: r.Android.Alias, StorePasswordEnv: r.Android.StorePasswordEnv, KeyPasswordEnv: r.Android.KeyPasswordEnv}}
 	}
 	p, a, err := c.engine.Native(ctx, s, resolved, internalRequest(r), true, n)
 	if err != nil {
@@ -332,6 +348,22 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	}
 	var result BuildResult
 	if r.Artifact != nil {
+		// Artifact-only consumers can omit source/config entirely. A project
+		// with hook inputs must still resolve registrations before installing.
+		if s.Hooks != nil {
+			hasConfig := false
+			for _, name := range []string{"hooks", "nativescript.config.ts", "nativescript.config.js", "nativescript.config.cjs", "nativescript.config.mjs", "nativescript.config.json"} {
+				if _, e := os.Stat(filepath.Join(r.Build.ProjectDir, name)); e == nil {
+					hasConfig = true
+					break
+				}
+			}
+			if hasConfig {
+				if _, err = workflow.Resolve(ctx, s, r.Build.ProjectDir, n); err != nil {
+					return nil, operationError("run", err)
+				}
+			}
+		}
 		result.Artifacts = []Artifact{*r.Artifact}
 	} else {
 		result, err = c.build(ctx, r.Build, s, n)
@@ -356,6 +388,26 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 // launch delivers typed identity outside workflow stage notifications. A
 // rejected observer must retire the newly launched session before returning.
 func (c *Client) launch(ctx context.Context, r RunRequest, s workflow.Stages, artifacts []project.Artifact, d project.Device, n workflow.Notify) (*workflow.Session, error) {
+	if launcher, ok := s.Launcher.(platformDevices); ok && s.Hooks != nil {
+		resolved := s.Hooks.Current()
+		if len(resolved.Hooks) > 0 {
+			launcher.install = func(ctx context.Context, before bool) error {
+				name := "after-install"
+				if before {
+					name = "before-install"
+				}
+				for _, a := range artifacts {
+					t := a.Identity.Target
+					if t.Platform == d.Platform && (t.DestinationID == d.ID || t.DestinationID == "generic") && t.DestinationKind == d.Kind && t.Architecture == d.Architecture {
+						_, err := s.Hooks.Run(ctx, workflow.HookInvocation{Name: name, Project: resolved, Target: t, ArtifactPath: a.Path, DeviceID: d.ID}, nil)
+						return err
+					}
+				}
+				return workflow.ErrHandoff
+			}
+			s.Launcher = launcher
+		}
+	}
 	app, err := workflow.Launch(ctx, s, artifacts, d, n)
 	if err != nil || r.Launched == nil {
 		return app, err
@@ -404,6 +456,7 @@ func (p platformPreparer) Prepare(ctx context.Context, r project.Resolved, l wor
 
 // platformDevices dispatches native-only operations without starting the helper.
 type platformDevices struct {
+	install         func(context.Context, bool) error
 	bundleDirectory string
 	env             map[string]string
 	boot, physical  bool
@@ -422,7 +475,7 @@ func (p platformDevices) Launch(ctx context.Context, a project.Artifact, d proje
 		for _, r := range p.reverse {
 			rs = append(rs, androiddevice.Reverse{DevicePort: r.DevicePort, HostPort: r.HostPort})
 		}
-		return (androiddevice.Adapter{Environment: p.env, AllowPhysicalDevice: p.physical, Reverse: rs, BundleDirectory: p.bundleDirectory}).Launch(ctx, a, d)
+		return (androiddevice.Adapter{Environment: p.env, AllowPhysicalDevice: p.physical, Reverse: rs, BundleDirectory: p.bundleDirectory, Install: p.install}).Launch(ctx, a, d)
 	}
-	return (iosdevice.Adapter{Environment: p.env, AllowBoot: p.boot, AllowPhysicalDevice: p.physical, BundleDirectory: p.bundleDirectory}).Launch(ctx, a, d)
+	return (iosdevice.Adapter{Environment: p.env, AllowBoot: p.boot, AllowPhysicalDevice: p.physical, BundleDirectory: p.bundleDirectory, Install: p.install}).Launch(ctx, a, d)
 }

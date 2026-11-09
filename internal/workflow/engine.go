@@ -36,7 +36,9 @@ type Request struct {
 // Stages is a per-operation set of adapters. Factory receives a private copy of
 // environment overrides; adapters must never mutate process-global state.
 type Stages struct {
-	OTA interface {
+	SourceHooksDone bool
+	Hooks           Hooks
+	OTA             interface {
 		Apply(context.Context, project.Resolved, project.Prepared, workspace.Lease) error
 	}
 	Extensions []extension.Extension
@@ -137,6 +139,17 @@ func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Requ
 				return err
 			}
 		}
+		if len(r.Hooks) > 0 && s.Hooks == nil {
+			return ErrUnavailable
+		}
+		if !s.SourceHooksDone {
+			var err error
+			r, err = e.SourceHooks(ctx, s, r, q, nil)
+			if err != nil {
+				return err
+			}
+		}
+
 		registry, err := extensions.New(ctx, s.Extensions, q.Target.Platform)
 		if err != nil {
 			return err
@@ -186,6 +199,11 @@ func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if !p.Identity.Compatible(l.Identity) || !filepath.IsAbs(p.NativeDir) || !filepath.IsAbs(p.BundleDir) {
 			return ErrHandoff
 		}
+		if s.Hooks != nil {
+			if _, err = s.Hooks.Run(ctx, HookInvocation{Name: "after-prepareNativeApp", Project: r, Prepared: p, Target: q.Target}, lease); err != nil {
+				return err
+			}
+		}
 		if s.OTA != nil && !build {
 			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
 				return err
@@ -199,7 +217,13 @@ func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err = extensions.Apply(ctx, p.NativeDir, append(collected.Files, preparedFiles.Files...)); err != nil {
 			return err
 		}
-		if err = ctx.Err(); err != nil || !build {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		if !build {
+			if s.Hooks != nil {
+				_, err = s.Hooks.Run(ctx, HookInvocation{Name: "after-prepare", Project: r, Prepared: p, Target: q.Target}, lease)
+			}
 			return err
 		}
 		b, err = s.Bundler.Bundle(ctx, r, p, lease)
@@ -212,11 +236,27 @@ func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		if err = ctx.Err(); err != nil {
 			return err
 		}
+		// A Build's prepare lifecycle includes its completed app bundle. Hooks
+		// that stamp/copy app assets must not be overwritten by bundling.
+		if s.Hooks != nil {
+			if _, err = s.Hooks.Run(ctx, HookInvocation{Name: "after-prepare", Project: r, Prepared: p, Target: q.Target}, lease); err != nil {
+				return err
+			}
+		}
 		if bundleOnly {
 			return nil
 		}
 		if s.OTA != nil {
 			if err = s.OTA.Apply(ctx, r, p, lease); err != nil {
+				return err
+			}
+		}
+		buildHook := "buildIOS"
+		if q.Target.Platform == "android" {
+			buildHook = "buildAndroid"
+		}
+		if s.Hooks != nil {
+			if _, err = s.Hooks.Run(ctx, HookInvocation{Name: "before-" + buildHook, Project: r, Prepared: p, Target: q.Target}, lease); err != nil {
 				return err
 			}
 		}
@@ -230,6 +270,15 @@ func (e Engine) native(ctx context.Context, s Stages, r project.Resolved, q Requ
 		for _, v := range a {
 			if !v.Identity.Compatible(p.Identity) || !filepath.IsAbs(v.Path) || v.Kind == "" || v.ApplicationID != r.ApplicationID {
 				return ErrHandoff
+			}
+		}
+		if s.Hooks != nil {
+			artifactPath := ""
+			if len(a) > 0 {
+				artifactPath = a[0].Path
+			}
+			if _, err = s.Hooks.Run(ctx, HookInvocation{Name: "after-" + buildHook, Project: r, Prepared: p, Target: q.Target, ArtifactPath: artifactPath}, lease); err != nil {
+				return err
 			}
 		}
 		input.Phase = extension.PostBuild

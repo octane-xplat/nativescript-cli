@@ -296,3 +296,55 @@ func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallHooksBracketInstallBeforeLaunch(t *testing.T) {
+	for _, reject := range []string{"", "before", "after"} {
+		t.Run(reject, func(t *testing.T) {
+			art, d := fixture(t)
+			f := &fake{}
+			rejected := errors.New("hook rejected")
+			a := Adapter{Executor: f, Install: func(_ context.Context, before bool) error {
+				name := "after"
+				if before {
+					name = "before"
+				}
+				f.mu.Lock()
+				f.calls = append(f.calls, "hook-"+name)
+				f.mu.Unlock()
+				if name == reject {
+					return rejected
+				}
+				return nil
+			}}
+			session, err := a.Launch(context.Background(), art, d)
+			if reject == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = session.Close(context.Background())
+			} else if !errors.Is(err, rejected) {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			calls := strings.Join(f.calls, "\n")
+			f.mu.Unlock()
+			install := strings.Index(calls, "install -r")
+			if reject == "before" {
+				if install >= 0 {
+					t.Fatal("install ran after rejection")
+				}
+				return
+			}
+			if install < strings.Index(calls, "hook-before") || strings.Index(calls, "hook-after") < install {
+				t.Fatal(calls)
+			}
+			launch := strings.Index(calls, "am start")
+			if reject == "after" && launch >= 0 {
+				t.Fatal("app launched after hook rejected")
+			}
+			if reject == "" && launch < strings.Index(calls, "hook-after") {
+				t.Fatal(calls)
+			}
+		})
+	}
+}

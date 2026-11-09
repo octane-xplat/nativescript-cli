@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
+	"github.com/octane-xplat/nativescript-cli/internal/hooks"
 	"github.com/octane-xplat/nativescript-cli/internal/jsbridge"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/project"
@@ -243,6 +244,11 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	write("package.json", `{"name":"public-dev-fixture","version":"1.0.0","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3"}}`)
 	write("nativescript.config.ts", `export default {id:'org.example.nativedev',appPath:'app',appResourcesPath:'App_Resources'};`)
 	write("app/app.ts", `export const initial = 41;`)
+	if err := os.MkdirAll(filepath.Join(dir, "hooks/before-prepare"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write("hooks/before-prepare/source.cjs", `module.exports=function(hookArgs){const fs=require('node:fs'),path=require('node:path');fs.mkdirSync(path.join(hookArgs.projectDir,'App_Resources/iOS'),{recursive:true});fs.writeFileSync(path.join(hookArgs.projectDir,'App_Resources/iOS/build.xcconfig'),'HOOK_SOURCE = YES\n');fs.appendFileSync(path.join(hookArgs.projectDir,'hook-count.txt'),'run\n');}`)
+
 	if err := os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +259,8 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	native := &developmentNativeFixture{}
 	c, _ := New(Options{Extensions: []extension.Extension{developmentNativeExtension{}}})
 	c.engine = workflow.Engine{Factory: func(map[string]string) workflow.Stages {
-		return workflow.Stages{Extensions: c.options.Extensions, Resolver: resolver.Resolver{Host: host}, Bundler: bundle.Adapter{Host: host}, Preparer: native, Compiler: native, Devices: native, Launcher: native}
+		adapter := &hooks.Adapter{Host: host, Resolver: resolver.Resolver{Host: host}}
+		return workflow.Stages{Hooks: adapter, Extensions: c.options.Extensions, Resolver: adapter, Bundler: bundle.Adapter{Host: host}, Preparer: native, Compiler: native, Devices: native, Launcher: native}
 	}}
 	settings := &DevelopmentOptions{}
 	session, err := c.Run(ctx, RunRequest{Development: settings, DeviceID: "fixture", Build: BuildRequest{ProjectDir: dir, OutputDir: filepath.Join(dir, ".generated"), Target: Target{Platform: IOS, Configuration: Debug, Destination: Destination{Kind: Simulator, ID: "fixture", Architecture: "arm64"}}}})
@@ -264,6 +271,9 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	first := session.DevelopmentEndpoint()
 	if first.URL == "" || native.compiled.Load() != 1 || native.launched.Load() != 1 {
 		t.Fatal("initial lifecycle", first)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "hook-count.txt")); err != nil || string(data) != "run\n" {
+		t.Fatal("source hooks did not run exactly once before Vite", string(data), err)
 	}
 	settings.Port = -1 // Background rebuild must retain its own request copy.
 	write("app/app.ts", `export const changed = 42;`)
@@ -294,6 +304,9 @@ func TestPublicNativeDevelopmentLifecycle(t *testing.T) {
 	}
 	if native.compiled.Load() != 2 || native.retired.Load() != 1 {
 		t.Fatal("rebuild ordering", native.compiled.Load(), native.retired.Load())
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "hook-count.txt")); err != nil || string(data) != "run\nrun\n" {
+		t.Fatal("source hooks did not run once per native iteration", string(data), err)
 	}
 	second := session.DevelopmentEndpoint()
 	if second.URL == first.URL {

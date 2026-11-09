@@ -247,3 +247,64 @@ func TestDevelopmentRequestScopesNativeIdentityToTargetPlatform(t *testing.T) {
 		})
 	}
 }
+
+// A project can register hooks after startup, including creating the hooks
+// directory empty first. The installed Vite watcher must request re-resolution.
+func TestInstalledNativeHookRegistrationInvalidation(t *testing.T) {
+	installed := os.Getenv("NS_NATIVE_VITE_DIR")
+	if installed == "" {
+		t.Skip("set NS_NATIVE_VITE_DIR for the installed official Vite engine")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "app"), 0700)
+	os.MkdirAll(filepath.Join(dir, "App_Resources"), 0700)
+	write(t, filepath.Join(dir, "package.json"), `{"name":"hook-watch-fixture","version":"1","main":"app/app.ts","dependencies":{"@nativescript/core":"9.1.3"}}`)
+	write(t, filepath.Join(dir, "nativescript.config.cjs"), `module.exports={id:'org.example.hookwatch',appPath:'app',appResourcesPath:'App_Resources'}`)
+	write(t, filepath.Join(dir, "app/app.ts"), `export const ready=true`)
+	if err = os.Symlink(filepath.Join(installed, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	a := Adapter{Host: jsbridge.Host{Payload: jsbridge.Payload{Files: os.DirFS(filepath.Join(root, "assets"))}, CacheDir: t.TempDir()}}
+	r, err := (resolver.Resolver{Host: a.Host}).Resolve(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, err := a.StartDevelopment(ctx, r, project.Target{Platform: "ios", Configuration: "debug", DestinationKind: "simulator", DestinationID: "fixture", Architecture: "arm64"}, Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dev.Session.Close(context.Background())
+	if err = os.Mkdir(filepath.Join(dir, "hooks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	response, err := http.Get(dev.Ready.Endpoint.URL + "/ns/entry")
+	if err != nil {
+		t.Fatal("empty hook folder stopped the server", err)
+	}
+	response.Body.Close()
+	if err = os.MkdirAll(filepath.Join(dir, "hooks/after-prepare"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "hooks/after-prepare/new.cjs"), `module.exports=()=>{}`)
+	done := make(chan error, 1)
+	go func() { done <- dev.Session.Wait() }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrRestart) {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("hook registration did not invalidate server", ctx.Err())
+	}
+	next, err := (resolver.Resolver{Host: a.Host}).Resolve(ctx, dir)
+	if err != nil || len(next.Hooks) != 1 {
+		t.Fatal("new registration missing after re-resolution", next.Hooks, err)
+	}
+}

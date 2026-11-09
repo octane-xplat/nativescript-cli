@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { stripTypeScriptTypes, createRequire } = require('node:module');
 const coreAdapter=require('./core.cjs');
+const legacyHooks=require('./hooks.cjs');
 const expandNativeSources=require('./native-sources.cjs');
 const swiftPackages=require('./swift-packages.cjs');
 const masonMetadata=require('./mason.cjs');
@@ -113,8 +114,8 @@ async function resolve({ projectDir }) {
     return declared;
   }
   function collect(dir, owner, cfg, resources, metadata=new Set()) {
-    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'tvos', 'cli', 'bundler', 'bundlerConfigPath'], 'config');
-    if(dir!==root && ['cli','bundler','bundlerConfigPath'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
+    keys(cfg, ['id', 'appPath', 'appResourcesPath', 'buildPath', 'ios', 'android', 'visionos', 'tvos', 'cli', 'bundler', 'bundlerConfigPath', 'hooks'], 'config');
+    if(dir!==root && ['cli','bundler','bundlerConfigPath','hooks'].some(key=>cfg[key]!==undefined))fail('unavailable','Bundler and CLI configuration belongs to the application');
     if (cfg.ios !== undefined) keys(cfg.ios, ['NativeSource','SPMPackages'], 'iOS config');
     if(cfg.ios?.SPMPackages!==undefined){
       let declared;
@@ -136,7 +137,7 @@ async function resolve({ projectDir }) {
     }
     if (cfg.android !== undefined) keys(cfg.android, ['v8Flags', 'markingMode'], 'Android config');
     for (const key of ['v8Flags', 'markingMode']) if (cfg.android?.[key] !== undefined && typeof cfg.android[key] !== 'string') fail('invalid_input', 'Android runtime settings must be strings');
-    if (fs.existsSync(path.join(dir, 'hooks'))) fail('unavailable', 'Legacy package hooks are unsupported; migrate to the extension SDK before preparing');
+    if (dir !== root) legacyHooks.inventory(dir, read);
     function walk(folder, platform) {
       if (!fs.existsSync(folder)) return;
       const usageFile = path.join(folder, 'native-api-usage.json');
@@ -268,6 +269,7 @@ async function resolve({ projectDir }) {
     normalized.bundlerConfigPath=fs.realpathSync(file);
     read(normalized.bundlerConfigPath);
   }
+  const hooks = legacyHooks.project(root, cfg.hooks, read, fail);
   collect(root, root, cfg, normalized.appResourcesPath);
   async function visit(dir, pkg, isRoot = false) {
     if (packages.has(dir)) return;
@@ -279,7 +281,8 @@ async function resolve({ projectDir }) {
     if (!isRoot && native) {
       const core=pkg.name==='@nativescript/core';
       if(core&&!coreAdapter.supported(pkg,dir,read)) fail('unavailable','NativeScript core requires the reviewed 9.1.3 compatibility-hook contract');
-      keys(pkg.nativescript, core?['platforms','hooks']:['platforms'], 'package nativescript metadata');
+      keys(pkg.nativescript, ['platforms','hooks'], 'package nativescript metadata');
+      legacyHooks.plugin(dir, pkg.nativescript.hooks, read, fail);
       if (pkg.nativescript.platforms) {
         keys(pkg.nativescript.platforms, ['ios','android','windows'], 'package platforms');
         for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== 'string') fail('invalid_input','Native platform versions must be strings');
@@ -376,6 +379,7 @@ async function resolve({ projectDir }) {
   try{remote=swiftPackages.merge(selectedContributions,root);}catch{fail('invalid_input','Conflicting Swift package repositories, identities or plugin versions; select an explicit app version for the same repository');}
   for(const c of remote)membership.set(JSON.stringify(['spm-remote',c.spm.repositoryURL]),c);
   const result = { directory: projectDir, applicationID: cfg.id, config: normalized, packages: [...packages.values()].sort((a,b)=>a.directory.localeCompare(b.directory)), dependencies: edges, dependencyOrder, contributions:[...membership.values()], sources: [...sources].map(([path,digest])=>({path,digest})).sort((a,b)=>a.path.localeCompare(b.path)) };
+  if (hooks.length) result.hooks = hooks;
   const appliedGroups=nativeSourceGroups.filter(group=>!dropped.has(group.packageDirectory));
   if(appliedGroups.length)result.nativeSourceGroups=appliedGroups;
   result.revision = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');

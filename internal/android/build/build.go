@@ -40,6 +40,8 @@ func (e *Failure) Unwrap() error { return e.Cause }
 // Password fields name environment variables, never literal credentials.
 type Options struct{ Format, Keystore, Alias, StorePasswordEnv, KeyPasswordEnv string }
 type Adapter struct {
+	Arguments func(context.Context, project.Prepared, []string, workspace.Lease) ([]string, error)
+
 	Options     Options
 	Environment map[string]string
 	Executor    process.Executor
@@ -158,6 +160,14 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 		args = append(args, "--init-script", script)
 	}
 	args = append(args, task)
+	if a.Arguments != nil {
+		actual := p
+		actual.NativeDir = native
+		args, err = a.Arguments(ctx, actual, append([]string(nil), args...), l)
+		if err != nil {
+			return nil, err
+		}
+	}
 	runner := a.Executor
 	if runner == nil {
 		runner = process.Runner{}

@@ -7,7 +7,15 @@ type Identity struct {
 	ProjectDir string
 	Target     Target
 }
+
+// ProjectHook is one active registered lifecycle script, pinned by SHA-256.
+type ProjectHook struct {
+	Name   string
+	Script string
+	Digest string
+}
 type Project struct {
+	Hooks         []ProjectHook
 	Config        ProjectConfig
 	Packages      []InstalledPackage
 	Dependencies  []InstalledDependency

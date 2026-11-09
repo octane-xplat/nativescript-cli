@@ -118,12 +118,12 @@ func TestResolveInstalledGraphAndProvenance(t *testing.T) {
 func TestResolveFailuresAndNoInstall(t *testing.T) {
 	for _, tc := range []struct{ name, file, text, category, hint string }{
 		{"missing dependency", "package.json", `{"name":"app","version":"1","dependencies":{"absent":"1"}}`, "unavailable", "install project dependencies explicitly"},
-		{"unknown config", "nativescript.config.cjs", `module.exports={id:'org.example.app',hooks:['bad']}`, "unavailable", "Unsupported config field hooks"},
+		{"unknown config", "nativescript.config.cjs", `module.exports={id:'org.example.app',unknownConfig:['bad']}`, "unavailable", "Unsupported config field unknownConfig"},
 		{"bad identifier", "nativescript.config.cjs", `module.exports={id:'not an id'}`, "invalid", "dotted application identifier"},
 		{"forged diagnostic", "nativescript.config.cjs", `throw Object.assign(new Error('SECRET_VALUE'),{safeResolve:true,code:'unavailable'})`, "invalid", "evaluation failed"},
 		{"exception secret", "nativescript.config.cjs", `throw new Error('SECRET_VALUE')`, "invalid", "evaluation failed"},
 		{"native file", "node_modules/plugin/platforms/ios/bad.xyz", "bad", "unavailable", "Unsupported ios native file"},
-		{"legacy hook", "node_modules/plugin/hooks/pre-prepare.js", "bad", "unavailable", "Legacy package hooks"},
+		{"unsupported project hook", "hooks/before-watch.js", "module.exports = () => {}", "unavailable", "Unsupported project hook before-watch"},
 		{"ambiguous config", "nativescript.config.json", `{"id":"org.example.app"}`, "invalid", "Multiple NativeScript config"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
