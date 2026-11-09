@@ -24,6 +24,22 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(output.samples[('nonce', 5)], 1)
         self.assertEqual(dict(output.counts), {})
 
+    def test_android_threadtime_pid_and_fragmented_target_output(self):
+        log = '[android] run: native stage-started\n[android] Successfully synced application app on device emulator-5554.\n'
+        log += '[android] 11-09 14:06:13.589  2255  2255 I JS      : CONSOLE LOG: nonce\n' * 3
+        log += '[ios] run: native stage-started\n'
+        log += '[android] source: console.log("nonce")\n'
+        log += '[android] 11-09 14:06:13.589 2256 2256 I OtherTag : CONSOLE LOG: nonce\n'
+        log += '[android] 11-09 14:06:13.589 2256 2256 I JS : CONSOLE LOG: nonce trailing\n'
+        log += '[android] ' + json.dumps({'processID': 2256, 'eventMessage': 'CONSOLE LOG: nonce'}) + '\n'
+        for chunk_size in (1, 7, len(log)):
+            output = Output('app', 'emulator-5554', ['nonce'], target='android')
+            for i in range(0, len(log), chunk_size):
+                output.append(log[i:i + chunk_size])
+            self.assertEqual(dict(output.counts), {'compiles': 1, 'launches': 1})
+            self.assertEqual(output.samples[('nonce', 2255)], 3)
+            self.assertEqual(output.samples[('nonce', 2256)], 0)
+
 
 if __name__ == '__main__':
     unittest.main()
