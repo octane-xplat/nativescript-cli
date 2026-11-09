@@ -2,6 +2,8 @@ package nativescript
 
 import (
 	"context"
+	"errors"
+	"github.com/octane-xplat/nativescript-cli/internal/process"
 	"github.com/octane-xplat/nativescript-cli/internal/workflow"
 )
 
@@ -32,13 +34,27 @@ func (s *Session) Wait() error {
 	if s == nil {
 		return nil
 	}
-	return s.owned.Wait()
+	return sessionError(s.owned.Wait())
 }
 func (s *Session) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	return s.owned.Close(ctx)
+	return sessionError(s.owned.Close(ctx))
+}
+
+// Device adapters return private process errors. Translate them at the facade
+// for ordinary sessions as well as development loops, without wrapping an
+// already translated development error a second time.
+func sessionError(err error) error {
+	var operation *OperationError
+	if errors.As(err, &operation) && operation.Operation == "run" {
+		if errors.Is(err, process.ErrCleanup) && !errors.Is(err, ErrCleanup) {
+			return errors.Join(err, ErrCleanup)
+		}
+		return err
+	}
+	return operationError("run", err)
 }
 
 // SessionLog is application console output. Logs returns a bounded snapshot.
