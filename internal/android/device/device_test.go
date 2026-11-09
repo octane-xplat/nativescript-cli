@@ -56,6 +56,7 @@ type fake struct {
 	fail, badging              string
 	running, forward, conflict bool
 	timeout, errstatus         bool
+	installed                  bool
 }
 type handle struct {
 	err  error
@@ -117,6 +118,10 @@ func (f *fake) Start(ctx context.Context, c process.Command) (process.Handle, er
 		}
 	case strings.Contains(s, "reverse --remove"):
 		f.forward = false
+	case strings.Contains(s, "pm path"):
+		if f.installed {
+			out = "package:/data/app/org.example.app-abc123/base.apk\n"
+		}
 	case strings.Contains(s, "install -r"):
 		out = "Success"
 	case strings.Contains(s, "resolve-activity"):
@@ -270,7 +275,7 @@ func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
 	for _, failure := range []string{"", " push "} {
 		t.Run("transfer-"+failure, func(t *testing.T) {
 			art, d := fixture(t)
-			f := &fake{fail: failure}
+			f := &fake{fail: failure, installed: true}
 			a := Adapter{Executor: f, BundleDirectory: t.TempDir()}
 			session, err := a.Launch(context.Background(), art, d)
 			if failure == "" {
@@ -294,6 +299,46 @@ func TestBundleSyncSkipsInstallAndCleansStaging(t *testing.T) {
 				t.Fatal("staging not retired", calls)
 			}
 		})
+	}
+}
+
+// Sync reuses the previously installed APK, so its local path may already be
+// pruned by workspace retention; the installed package is the precondition.
+func TestBundleSyncLaunchesWithPrunedAPK(t *testing.T) {
+	art, d := fixture(t)
+	art.Path = filepath.Join(t.TempDir(), "pruned", "app-debug.apk")
+	f := &fake{installed: true}
+	a := Adapter{Executor: f, BundleDirectory: t.TempDir()}
+	session, err := a.Launch(context.Background(), art, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = session.Close(context.Background())
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls := strings.Join(f.calls, "\n")
+	if strings.Contains(calls, "dump badging") {
+		t.Fatal("sync validated a pruned APK", calls)
+	}
+	if !strings.Contains(calls, "shell pm path org.example.app") {
+		t.Fatal("installed check not issued", calls)
+	}
+}
+
+func TestBundleSyncRejectsWhenAppNotInstalled(t *testing.T) {
+	art, d := fixture(t)
+	art.Path = filepath.Join(t.TempDir(), "pruned", "app-debug.apk")
+	f := &fake{}
+	a := Adapter{Executor: f, BundleDirectory: t.TempDir()}
+	session, err := a.Launch(context.Background(), art, d)
+	if !errors.Is(err, workflow.ErrHandoff) || session != nil {
+		t.Fatal("uninstalled sync accepted", session, err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls := strings.Join(f.calls, "\n")
+	if strings.Contains(calls, "push ") || strings.Contains(calls, "install -r") || strings.Contains(calls, "dump badging") {
+		t.Fatal("mutation before installed check", calls)
 	}
 }
 

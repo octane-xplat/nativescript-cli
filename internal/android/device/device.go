@@ -310,8 +310,13 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 			err = errors.Join(err, cleanup())
 		}
 	}()
-	if err = a.validate(ctx, art, d); err != nil {
-		return nil, err
+	// Sync launches never read art.Path: the published generation that produced
+	// the APK may already be pruned by workspace retention. The installed
+	// package checked below stands in for local artifact validation.
+	if a.BundleDirectory == "" {
+		if err = a.validate(ctx, art, d); err != nil {
+			return nil, err
+		}
 	}
 	b, err := a.adb(ctx, d.ID, "shell", "pidof", art.ApplicationID)
 	if err != nil && !errors.Is(err, process.ErrExit) {
@@ -345,6 +350,21 @@ func (a Adapter) Launch(ctx context.Context, art project.Artifact, requested pro
 	if a.BundleDirectory != "" {
 		if d.Kind != "simulator" || art.Identity.Target.Configuration != "debug" || !appID.MatchString(art.ApplicationID) {
 			return nil, workflow.ErrInvalid
+		}
+		// Sync reuses the APK installed by the earlier native launch; require
+		// the package to still be present on the device before staging files.
+		b, err = a.adb(ctx, d.ID, "shell", "pm", "path", art.ApplicationID)
+		if err != nil {
+			return nil, err
+		}
+		installed := false
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "package:") {
+				installed = true
+			}
+		}
+		if !installed {
+			return nil, workflow.ErrHandoff
 		}
 		remote := syncRemote
 		syncStaged = true // A cancelled transfer may have created partial files.
