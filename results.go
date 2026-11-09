@@ -86,13 +86,15 @@ type InstalledPackage struct {
 	AndroidRequirement string
 	// WindowsRequirement retains metadata only; Windows execution is unavailable.
 	WindowsRequirement string
-	VisionOS           *VisionOSConfig
-	TVOS               *TVOSConfig
-	Android            AndroidRuntimeConfig
-	Name               string
-	Version            string
-	Directory          string
-	Native             bool
+	// LinuxRequirement retains metadata only; Linux execution is unavailable.
+	LinuxRequirement string
+	VisionOS         *VisionOSConfig
+	TVOS             *TVOSConfig
+	Android          AndroidRuntimeConfig
+	Name             string
+	Version          string
+	Directory        string
+	Native           bool
 }
 
 // InstalledDependency retains both the lookup location and canonical target.

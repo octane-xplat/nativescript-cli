@@ -201,7 +201,7 @@ func (c *Client) Resolve(ctx context.Context, r ResolveRequest) (Project, error)
 		result.Hooks = append(result.Hooks, ProjectHook{Name: h.Name, Script: h.Script, Digest: h.Digest})
 	}
 	for _, v := range p.Packages {
-		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS), TVOS: tvOSDeclaration(v.TVOS)})
+		result.Packages = append(result.Packages, InstalledPackage{Name: v.Name, Version: v.Version, Directory: v.Directory, Native: v.Native, IOSRequirement: v.IOSRequirement, AndroidRequirement: v.AndroidRequirement, WindowsRequirement: v.WindowsRequirement, LinuxRequirement: v.LinuxRequirement, Android: AndroidRuntimeConfig(v.Android), VisionOS: visionOSDeclaration(v.VisionOS), TVOS: tvOSDeclaration(v.TVOS)})
 	}
 	for _, v := range p.Dependencies {
 		result.Dependencies = append(result.Dependencies, InstalledDependency(v))

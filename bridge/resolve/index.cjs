@@ -284,7 +284,7 @@ async function resolve({ projectDir }) {
       keys(pkg.nativescript, ['platforms','hooks'], 'package nativescript metadata');
       legacyHooks.plugin(dir, pkg.nativescript.hooks, read, fail);
       if (pkg.nativescript.platforms) {
-        keys(pkg.nativescript.platforms, ['ios','android','windows'], 'package platforms');
+        keys(pkg.nativescript.platforms, ['ios','android','windows','linux'], 'package platforms');
         for (const v of Object.values(pkg.nativescript.platforms)) if (typeof v !== 'string') fail('invalid_input','Native platform versions must be strings');
       }
       const pluginConfig = await config(dir, false);
@@ -299,6 +299,7 @@ async function resolve({ projectDir }) {
       item.iosRequirement = pkg.nativescript.platforms?.ios ?? '';
       item.androidRequirement = pkg.nativescript.platforms?.android ?? '';
       item.windowsRequirement = pkg.nativescript.platforms?.windows ?? '';
+      item.linuxRequirement = pkg.nativescript.platforms?.linux ?? '';
     }
     for (const key of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       if (pkg[key] !== undefined) object(pkg[key], key);

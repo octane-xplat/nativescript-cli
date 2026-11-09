@@ -121,11 +121,11 @@ break graph cycles and deduplicate links; distinct installations remain distinct
 even when names or versions match. Edges retain lookup and canonical paths.
 
 Packages marked with `package.json.nativescript` contribute native inputs.
-Supported metadata is `platforms.ios`/`platforms.android`/`platforms.windows`
-version requirements. WindowsRequirement is retained as declaration metadata;
-Windows preparation/build/device operations and Windows native-file collection
-remain unavailable. A plugin declaring Windows as well as iOS/Android does not
-require a Windows backend to resolve its iOS/Android inputs.
+Supported metadata is `platforms.ios`/`platforms.android`/`platforms.windows`/`platforms.linux`
+version requirements. `WindowsRequirement` and `LinuxRequirement` are retained
+as declaration metadata; their preparation/build/device operations and native-file
+collection remain unavailable. A plugin declaring these platforms alongside
+iOS/Android does not require another backend to resolve its mobile inputs.
 App/plugin `visionos.SPMPackages` and boolean `discardUncaughtJsExceptions` are
 also validated and retained in public `VisionOSConfig` declaration metadata.
 They never enter the iOS dependency graph, override iOS versions/products or

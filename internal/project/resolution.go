@@ -37,6 +37,7 @@ type Package struct {
 	IOSRequirement     string
 	AndroidRequirement string
 	WindowsRequirement string
+	LinuxRequirement   string
 	VisionOS           *VisionOSConfig
 	TVOS               *TVOSConfig
 	Android            AndroidConfig
