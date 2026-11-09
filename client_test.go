@@ -509,3 +509,28 @@ func TestErrorCategoriesPreserveCause(t *testing.T) {
 		}
 	}
 }
+
+// Run sessions surface a bounded diagnostic for otherwise silent
+// operation_failed teardown/leg failures.
+func TestRunSessionFailureCarriesBoundedAdvice(t *testing.T) {
+	err := operationError("run", errors.Join(bundle.ErrServer, errors.New("session teardown failed\x1b[31m")))
+	var op *OperationError
+	if !errors.As(err, &op) {
+		t.Fatalf("category lost: %v", err)
+	}
+	if op.Advice == "" {
+		t.Fatal("empty advice")
+	}
+	if strings.Contains(op.Advice, "\x1b") {
+		t.Fatal("control characters leaked")
+	}
+	if errors.Is(err, ErrInvalidInput) {
+		t.Fatal("session failure reclassified")
+	}
+	// Richer diagnostics are not replaced by the fallback.
+	rich := operationError("run", &bundle.Failure{Diagnostic: "engine detail", Cause: errors.New("x")})
+	var rop *OperationError
+	if !errors.As(rich, &rop) || rop.Advice != "bundling failed: engine detail" {
+		t.Fatalf("advice replaced: %q", rop.Advice)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"path/filepath"
+	"strings"
 
 	androidbuild "github.com/octane-xplat/nativescript-cli/internal/android/build"
 	androiddevice "github.com/octane-xplat/nativescript-cli/internal/android/device"
@@ -123,6 +124,15 @@ func operationError(op string, err error) error {
 		if errors.As(err, &bundling) && bundling.Diagnostic != "" {
 			result.Advice = "bundling failed: " + truncateDiagnostic(bundling.Diagnostic)
 		}
+	}
+	// Run/dev sessions surface a bounded error chain when no richer diagnostic
+	// exists, so session teardown/leg failures are not silent operation_failed.
+	if result.Advice == "" && op == "run" && kind == ErrBuild {
+		lines := strings.Split(cause.Error(), "\n")
+		for i, line := range lines {
+			lines[i] = sanitizeDiagnosticLine(line)
+		}
+		result.Advice = truncateDiagnostic(strings.Join(lines, "\n"))
 	}
 	return result
 }
