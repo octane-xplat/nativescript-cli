@@ -23,6 +23,9 @@ For Android, set `ANDROID_HOME` to the existing SDK. The runner validates and
 boots only `elegant-fir-probe`, refuses any other running emulator, checks the
 selected serial's AVD name and refuses a pre-existing fixture installation.
 It uses port5586 by default and fails if either console/ADB port is occupied.
+Its fixture ID is `org.nativescript.xplat.vlistbench`, because the app's Google
+Services Gradle task rejects IDs absent from `google-services.json`; the runner
+checks that registration before booting.
 Coordinate or wait when the AVD is already in use.
 
 ```sh

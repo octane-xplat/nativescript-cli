@@ -20,7 +20,14 @@ from cli_output import Output
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'android'))
 import existing_avd
 
-APP = 'org.example.xplatgointegration'
+APP = 'org.nativescript.xplat.vlistbench'
+
+
+def require_google_services_client(resources):
+    config = json.loads((resources / 'google-services.json').read_text())
+    names = {client['client_info']['android_client_info']['package_name'] for client in config['client']}
+    if APP not in names:
+        raise RuntimeError('google-services.json has no client for probe application ' + APP)
 
 
 def main():
@@ -44,6 +51,7 @@ def main():
     binary = root / 'research/go-cli/xplat-go-darwin-arm64-cli'
     source = app / 'src/index.ts'
     native = app / 'App_Resources/Android/app.gradle'
+    require_google_services_client(native.parent)
     if subprocess.check_output(['git', 'diff', 'HEAD', '--', str(source), str(native)], cwd=root):
         raise RuntimeError('probe source inputs must have no pre-existing edits')
     original = {p: p.read_bytes() for p in (source, native)}
