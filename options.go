@@ -92,11 +92,30 @@ type AndroidReverse struct{ DevicePort, HostPort int }
 // DevelopmentOptions enables the installed NativeScript Vite HMR engine for a
 // debug simulator/emulator session. Port zero selects an available loopback port.
 // The project supplies @nativescript/vite 8.0.21 and Vite 8; no tools are installed.
-type DevelopmentOptions struct{ Port int }
+type DevelopmentMode string
+
+const (
+	// HotReload runs the installed Vite dev server and hot-swaps modules.
+	HotReload DevelopmentMode = "hmr"
+	// Restart rebuilds through the official engine and cold-relaunches on change.
+	Restart DevelopmentMode = "restart"
+)
+
+type DevelopmentOptions struct {
+	// Port is the strict HMR port for HotReload; nonzero with Restart is invalid.
+	Port int
+	// Mode selects the development loop; the zero value behaves as HotReload.
+	Mode DevelopmentMode
+}
 
 type RunRequest struct {
 	Development    *DevelopmentOptions
 	AndroidReverse []AndroidReverse
+	// Log receives application console output in capture order, in addition to
+	// the bounded Logs snapshot. It runs on a library goroutine, must return
+	// promptly, must not Wait/Close the same session, and is never called after
+	// Wait returns.
+	Log func(SessionLog)
 	// Artifact bypasses compilation; only compatible existing app products install.
 	Artifact *Artifact
 	// AllowBoot permits booting the exact selected shutdown simulator.

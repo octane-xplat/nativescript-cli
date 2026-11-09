@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/octane-xplat/nativescript-cli/internal/bundle"
 	"github.com/octane-xplat/nativescript-cli/internal/process"
@@ -189,6 +192,9 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 	if err != nil {
 		return fail(err)
 	}
+	if request.Log != nil && app != nil && app.LogBuffer != nil {
+		app.LogBuffer.Observer = func(l workflow.Log) { request.Log(SessionLog(l)) }
+	}
 	appDone := make(chan error, 1)
 	go func() { appDone <- app.Wait() }()
 	return &developmentIteration{server: server, app: app, cancel: cancel, serverDone: serverDone, appDone: appDone}, nil
@@ -265,4 +271,158 @@ func (c *Client) runDevelopment(ctx context.Context, request RunRequest, stages 
 		}
 	})
 	return &Session{owned: owned, development: state}, nil
+}
+
+// restartMarks fingerprints the resolved source set (and native-input roots) by
+// mtime+size so a change triggers a cold restart without a dev server.
+func restartMarks(resolved project.Resolved) map[string]int64 {
+	marks := map[string]int64{}
+	add := func(path string) {
+		if info, err := os.Stat(path); err == nil {
+			marks[path] = info.ModTime().UnixNano() + info.Size()
+		}
+	}
+	for _, s := range resolved.Sources {
+		add(s.Path)
+	}
+	for _, name := range []string{"package.json", "nativescript.config.cjs", "nativescript.config.js", "nativescript.config.mjs", "nativescript.config.ts"} {
+		add(filepath.Join(resolved.Directory, name))
+	}
+	if resolved.Config.AppResourcesPath != "" {
+		filepath.Walk(resolved.Config.AppResourcesPath, func(path string, info os.FileInfo, err error) error {
+			if err == nil && info != nil && !info.IsDir() {
+				add(path)
+			}
+			return nil
+		})
+	}
+	return marks
+}
+
+func restartMarksSame(a, b map[string]int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// runRestart is the Restart-mode session: no dev server; a resolved-source or
+// native-input change produces a full official-engine rebuild, reinstall and
+// cold relaunch. A failed rebuild emits a Diagnostic and retries on the next
+// change while the session stays open.
+func (c *Client) runRestart(ctx context.Context, request RunRequest, stages workflow.Stages, notify workflow.Notify, device project.Device) (*Session, error) {
+	runCtx, cancel := context.WithCancel(ctx)
+	settings := *request.Development
+	request.Development = &settings
+	emit := &emitter{sink: c.options.Sink, operation: "run"}
+	type iteration struct {
+		app    *workflow.Session
+		cancel context.CancelFunc
+		marks  map[string]int64
+		done   chan error
+	}
+	closeIteration := func(it *iteration) error {
+		if it == nil {
+			return nil
+		}
+		it.cancel()
+		return it.app.Close(context.Background())
+	}
+	start := func(ctx context.Context) (*iteration, error) {
+		resolved, err := workflow.Resolve(ctx, stages, request.Build.ProjectDir, notify)
+		if err != nil {
+			return nil, err
+		}
+		for _, pkg := range resolved.Packages {
+			if pkg.Name == "@nativescript/"+string(request.Build.Target.Platform) && !project.RuntimeSatisfies(pkg.Version, "9.1.0") {
+				return nil, workflow.ErrUnavailable
+			}
+		}
+		ictx, icancel := context.WithCancel(ctx)
+		result, err := c.build(ictx, request.Build, stages, notify)
+		if err != nil {
+			icancel()
+			return nil, err
+		}
+		var artifacts []project.Artifact
+		for _, v := range result.Artifacts {
+			artifacts = append(artifacts, project.Artifact{Identity: project.Identity{Schema: v.Identity.Schema, Revision: v.Identity.Revision, ProjectDir: v.Identity.ProjectDir, Target: internalTarget(v.Identity.Target)}, Path: v.Path, Kind: v.Kind, ApplicationID: v.ApplicationID})
+		}
+		app, err := workflow.Launch(ictx, stages, artifacts, device, notify)
+		if err != nil {
+			icancel()
+			return nil, err
+		}
+		if request.Log != nil && app != nil && app.LogBuffer != nil {
+			app.LogBuffer.Observer = func(l workflow.Log) { request.Log(SessionLog(l)) }
+		}
+		it := &iteration{app: app, cancel: icancel, marks: restartMarks(resolved), done: make(chan error, 1)}
+		go func() { it.done <- app.Wait() }()
+		return it, nil
+	}
+	current, err := start(runCtx)
+	if err != nil {
+		cancel()
+		return nil, operationError("run", err)
+	}
+	owned := workflow.StartSession(runCtx, func(ctx context.Context) (err error) {
+		defer cancel()
+		defer func() {
+			if cerr := closeIteration(current); cerr != nil {
+				err = errors.Join(err, cerr)
+			}
+			err = operationError("run", err)
+		}()
+		tick := time.NewTicker(750 * time.Millisecond)
+		defer tick.Stop()
+		retry := time.Now()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case appErr := <-current.done:
+				return appErr
+			case <-tick.C:
+				if current == nil {
+					// A failed rebuild left the session without a running app;
+					// retry on a modest backoff until a rebuild succeeds.
+					if time.Since(retry) < 2*time.Second {
+						continue
+					}
+					next, ferr := start(ctx)
+					if ferr != nil {
+						retry = time.Now()
+						_ = emit.emit(ctx, Diagnostic, "restart")
+						continue
+					}
+					current = next
+					continue
+				}
+				resolved, err := workflow.Resolve(ctx, stages, request.Build.ProjectDir, notify)
+				if err != nil {
+					return err
+				}
+				if restartMarksSame(current.marks, restartMarks(resolved)) {
+					continue
+				}
+				if err := closeIteration(current); err != nil {
+					return err
+				}
+				current = nil
+				next, ferr := start(ctx)
+				if ferr != nil {
+					retry = time.Now()
+					_ = emit.emit(ctx, Diagnostic, "restart")
+					continue
+				}
+				current = next
+			}
+		}
+	})
+	return &Session{owned: owned}, nil
 }

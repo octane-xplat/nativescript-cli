@@ -287,7 +287,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	if !validBuild(r.Build) || r.DeviceID == "" || r.DeviceID != r.Build.Target.Destination.ID {
 		return nil, operationError("run", workflow.ErrInvalid)
 	}
-	if r.Development != nil && (r.Artifact != nil || r.Build.Target.Configuration != Debug || r.Development.Port < 0 || r.Development.Port > 65535) {
+	if r.Development != nil && (r.Artifact != nil || r.Build.Target.Configuration != Debug || r.Development.Port < 0 || r.Development.Port > 65535 ||
+		(r.Development.Mode != "" && r.Development.Mode != HotReload && r.Development.Mode != Restart) ||
+		(r.Development.Mode == Restart && r.Development.Port != 0)) {
 		return nil, operationError("run", workflow.ErrInvalid)
 	}
 	if r.Development != nil && r.Build.Target.Destination.Kind != Simulator {
@@ -320,6 +322,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 		return nil, operationError("run", workflow.ErrUnavailable)
 	}
 	if r.Development != nil {
+		if r.Development.Mode == Restart {
+			return c.runRestart(ctx, r, s, n, *selected)
+		}
 		return c.runDevelopment(ctx, r, s, n, *selected)
 	}
 	var result BuildResult
@@ -338,6 +343,9 @@ func (c *Client) Run(ctx context.Context, r RunRequest) (*Session, error) {
 	owned, err := workflow.Launch(ctx, s, a, *selected, n)
 	if err != nil {
 		return nil, operationError("run", err)
+	}
+	if r.Log != nil && owned != nil && owned.LogBuffer != nil {
+		owned.LogBuffer.Observer = func(l workflow.Log) { r.Log(SessionLog(l)) }
 	}
 	return &Session{owned: owned}, nil
 }
