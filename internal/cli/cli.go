@@ -155,7 +155,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 				}
 				var candidates []ns.Device
 				for _, d := range devices {
-					if d.Kind == ns.Simulator && d.State != "Shutdown" {
+					if d.Kind == ns.Simulator && (d.State == "Booted" || d.State == "device") {
 						candidates = append(candidates, d)
 					}
 				}

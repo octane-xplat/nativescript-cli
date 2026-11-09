@@ -31,6 +31,7 @@ type stages struct {
 	held     atomic.Bool
 	p        project.Prepared
 	d        project.Device
+	resolved project.Resolved
 }
 
 func (f *stages) step(ctx context.Context, name string) error {
@@ -50,6 +51,9 @@ func (f *stages) step(ctx context.Context, name string) error {
 }
 func (f *stages) Resolve(ctx context.Context, dir string) (project.Resolved, error) {
 	err := f.step(ctx, "resolve")
+	if f.resolved.Directory != "" {
+		return f.resolved, err
+	}
 	return project.Resolved{Directory: dir, Revision: "source", ApplicationID: "org.test.app"}, err
 }
 func (f *stages) Prepare(ctx context.Context, r project.Resolved, l workspace.Lease) (project.Prepared, error) {

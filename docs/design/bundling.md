@@ -51,6 +51,16 @@ the library never installs packages or invokes the upstream NativeScript CLI.
 Installed native runtimes older than 9.1 reject. Physical HMR and borrowed native
 servers are not implemented by this path and fail explicitly.
 
+`DevelopmentOptions.Mode = Restart` (the `run --watch` CLI flag) runs no dev
+server or HMR client. The session fingerprints the resolved source set and
+native-input roots, and a confirmed change (two consecutive polls agreeing)
+triggers a full official-engine rebuild, install and cold relaunch. The new
+artifact builds while the last good app keeps running; a failed rebuild emits a
+bounded `Diagnostic` event, leaves the current app up, and retries only when the
+fingerprint changes again. `--watch` is mutually exclusive with `--hmr`, and a
+port is invalid in restart mode. `RunRequest.Log` streams each captured app log
+line in order during any session; `Session.Logs()` keeps the bounded snapshot.
+
 The helper uses its own process environment/argv for the engine and owns a
 private content directory under the NativeScript CLI cache. It binds loopback,
 with a strict selected port. Only the completed initial output is copied into

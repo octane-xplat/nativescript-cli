@@ -34,6 +34,10 @@ type emitter struct {
 }
 
 func (e *emitter) emit(ctx context.Context, kind EventKind, stage string) error {
+	return e.emitEvent(ctx, kind, stage, "")
+}
+
+func (e *emitter) emitEvent(ctx context.Context, kind EventKind, stage, message string) error {
 	if e.failed != nil {
 		return e.failed
 	}
@@ -42,7 +46,7 @@ func (e *emitter) emit(ctx context.Context, kind EventKind, stage string) error 
 	}
 	e.sequence++
 	if e.sink != nil {
-		if err := e.sink(ctx, Event{Operation: e.operation, Sequence: e.sequence, Kind: kind, Stage: stage}); err != nil {
+		if err := e.sink(ctx, Event{Operation: e.operation, Sequence: e.sequence, Kind: kind, Stage: stage, Message: message}); err != nil {
 			e.failed = &OperationError{Operation: e.operation, Kind: ErrSink, Cause: err}
 			return e.failed
 		}
