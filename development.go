@@ -289,13 +289,15 @@ func restartMarks(resolved project.Resolved) map[string]int64 {
 	for _, name := range []string{"package.json", "nativescript.config.cjs", "nativescript.config.js", "nativescript.config.mjs", "nativescript.config.ts"} {
 		add(filepath.Join(resolved.Directory, name))
 	}
-	if resolved.Config.AppResourcesPath != "" {
-		filepath.Walk(resolved.Config.AppResourcesPath, func(path string, info os.FileInfo, err error) error {
-			if err == nil && info != nil && !info.IsDir() {
-				add(path)
-			}
-			return nil
-		})
+	for _, root := range []string{resolved.Config.AppPath, resolved.Config.AppResourcesPath} {
+		if root != "" {
+			filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+				if err == nil && info != nil && !info.IsDir() {
+					add(path)
+				}
+				return nil
+			})
+		}
 	}
 	return marks
 }
