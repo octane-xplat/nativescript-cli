@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,7 +396,9 @@ func (s *Stage) Commit(ctx context.Context) (State, error) {
 	if entries, e := os.ReadDir(o.layout.GeneratedRoot); e == nil {
 		for _, entry := range entries {
 			if entry.IsDir() && strings.HasPrefix(entry.Name(), "gen-") && entry.Name() != generation {
-				os.RemoveAll(filepath.Join(o.layout.GeneratedRoot, entry.Name()))
+				if err := os.RemoveAll(filepath.Join(o.layout.GeneratedRoot, entry.Name())); err != nil {
+					fmt.Fprintf(os.Stderr, "workspace: retention of %s failed: %v\n", entry.Name(), err)
+				}
 			}
 		}
 	}

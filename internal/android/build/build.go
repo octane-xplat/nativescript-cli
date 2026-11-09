@@ -127,13 +127,14 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 		return nil, workflow.ErrHandoff
 	}
 	// The published native project is per-generation; Gradle keeps its project
-	// state in a stable per-target mirror, synced write-if-changed.
+	// state in a stable per-target mirror of the whole generation (sibling
+	// contributions keep relative links alive), synced write-if-changed.
 	root := filepath.Join(owner.Layout().GeneratedRoot, workspace.MirrorName("android-build", t))
 	native := filepath.Join(root, "native")
 	if err = os.MkdirAll(native, 0700); err != nil {
 		return nil, err
 	}
-	if err = workspace.SyncDir(native, p.NativeDir, nil); err != nil {
+	if err = workspace.SyncDir(root, filepath.Dir(p.NativeDir), nil); err != nil {
 		return nil, err
 	}
 	outputs := filepath.Join(native, "app/build/outputs")

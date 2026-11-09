@@ -159,7 +159,10 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 		return nil, err
 	}
 	native := filepath.Join(root, "native")
-	if err := workspace.SyncDir(native, p.NativeDir, nil); err != nil {
+	own := func(rel string) bool {
+		return rel == "derived" || rel == "products" || rel == "NativeScriptApp.xcarchive"
+	}
+	if err := workspace.SyncDir(root, filepath.Dir(p.NativeDir), own); err != nil {
 		return nil, err
 	}
 	if err := os.RemoveAll(filepath.Join(root, "products")); err != nil {
