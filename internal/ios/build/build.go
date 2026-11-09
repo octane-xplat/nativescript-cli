@@ -158,11 +158,14 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	native := filepath.Join(root, "native")
+	// The project lives at the mirror root so its depth-relative references
+	// (../.. into the project's node_modules) resolve identically to the
+	// generation's layout. Tool outputs beside it are kept out of the sync.
+	native := root
 	own := func(rel string) bool {
 		return rel == "derived" || rel == "products" || rel == "NativeScriptApp.xcarchive"
 	}
-	if err := workspace.SyncDir(root, filepath.Dir(p.NativeDir), own); err != nil {
+	if err := workspace.SyncDir(root, p.NativeDir, own); err != nil {
 		return nil, err
 	}
 	if err := os.RemoveAll(filepath.Join(root, "products")); err != nil {

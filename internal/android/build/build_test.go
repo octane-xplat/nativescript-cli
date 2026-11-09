@@ -139,7 +139,7 @@ func TestVariantsSigningMetadataAndFailures(t *testing.T) {
 			if e != nil || len(artifacts) != 1 || !strings.Contains(artifacts[0].Path, "producer-chosen") {
 				t.Fatal(artifacts, e)
 			}
-			if f.cmd.Dir != p.NativeDir || f.cmd.Executable != filepath.Join(p.NativeDir, "gradlew") || !slices.Contains(f.cmd.Args, "--no-daemon") {
+			if filepath.Base(f.cmd.Dir) != "native" || !strings.Contains(f.cmd.Dir, "android-build-") || f.cmd.Executable != filepath.Join(f.cmd.Dir, "gradlew") || !slices.Contains(f.cmd.Args, "--no-daemon") {
 				t.Fatal(f.cmd)
 			}
 			if tc.release && (strings.Contains(strings.Join(f.cmd.Args, " "), "secret") || f.cmd.Environment["ORG_GRADLE_PROJECT_password"] != "secret-key") {

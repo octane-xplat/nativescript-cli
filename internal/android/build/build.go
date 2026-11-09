@@ -134,7 +134,14 @@ func (a Adapter) Compile(ctx context.Context, p project.Prepared, b project.Bund
 	if err = os.MkdirAll(native, 0700); err != nil {
 		return nil, err
 	}
-	if err = workspace.SyncDir(root, filepath.Dir(p.NativeDir), nil); err != nil {
+	src := filepath.Dir(p.NativeDir)
+	if strings.HasPrefix(filepath.Base(src), "gen-") {
+		// Generation wrapper: mirror the whole generation so sibling
+		// contributions keep relative links alive.
+		if err = workspace.SyncDir(root, src, nil); err != nil {
+			return nil, err
+		}
+	} else if err = workspace.SyncDir(native, p.NativeDir, nil); err != nil {
 		return nil, err
 	}
 	outputs := filepath.Join(native, "app/build/outputs")
