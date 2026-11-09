@@ -89,7 +89,11 @@ func (f *stages) Launch(ctx context.Context, a project.Artifact, d project.Devic
 	if err := f.step(ctx, "launch"); err != nil {
 		return nil, err
 	}
-	f.launched = workflow.StartSession(ctx, func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() })
+	f.launched = workflow.StartSession(ctx, func(ctx context.Context) error {
+		<-ctx.Done()
+		f.calls = append(f.calls, "terminate")
+		return ctx.Err()
+	})
 	return f.launched, nil
 }
 

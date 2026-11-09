@@ -380,8 +380,13 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 		if it == nil {
 			return nil
 		}
-		it.cancel()
-		if it.app != nil && it.app.LogBuffer != nil {
+		if it.cancel != nil {
+			it.cancel()
+		}
+		if it.app == nil {
+			return nil
+		}
+		if it.app.LogBuffer != nil {
 			it.app.LogBuffer.Observer = nil
 		}
 		return filterDevelopmentTeardown(it.app.Close(context.Background()), true)
@@ -434,20 +439,29 @@ func (c *Client) runRestart(ctx context.Context, request RunRequest, stages work
 					}
 					pending = nil
 					nextResolved, nextArtifacts, err := build(ctx)
-					if err == nil {
-						app, done, icancel, err = launch(ctx, nextArtifacts)
-					}
 					if err != nil {
 						failed = marks
 						_ = e.emitEvent(ctx, Diagnostic, "restart", diagnostic(err))
 						continue
 					}
-					old := current
-					current = &iteration{app: app, cancel: icancel, resolved: nextResolved, marks: marks, done: done}
-					failed = nil
-					if cerr := closeIteration(old); cerr != nil {
+					// Close the old app before launching the replacement: terminate
+					// targets the shared application ID, so a later close would kill
+					// the fresh launch.
+					if cerr := closeIteration(current); cerr != nil {
 						return cerr
 					}
+					current = nil
+					app, done, icancel, err := launch(ctx, nextArtifacts)
+					if err != nil {
+						failed = marks
+						_ = e.emitEvent(ctx, Diagnostic, "restart", diagnostic(err))
+						// No running app; a dead done channel keeps the session
+						// alive until the next confirmed change retries.
+						current = &iteration{resolved: nextResolved, marks: marks, done: make(chan error)}
+						continue
+					}
+					current = &iteration{app: app, cancel: icancel, resolved: nextResolved, marks: marks, done: done}
+					failed = nil
 				}
 			}
 		}

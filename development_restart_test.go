@@ -82,6 +82,18 @@ func TestRestartDevelopmentIterations(t *testing.T) {
 	if countCalls("launch") < 2 {
 		t.Fatalf("no relaunch after change; calls %v", f.calls)
 	}
+	var firstTerm, secondLaunch int
+	for i, c := range f.calls {
+		if c == "terminate" && firstTerm == 0 {
+			firstTerm = i
+		}
+		if c == "launch" {
+			secondLaunch = i
+		}
+	}
+	if firstTerm == 0 || firstTerm > secondLaunch {
+		t.Fatalf("old app not terminated before relaunch: %v", f.calls)
+	}
 	resolvesAfterFirst := countCalls("resolve")
 	// Failed rebuild: diagnostic emitted, session survives, old app stays up.
 	f.fail, f.cause = "bundle", errors.New("forced bundle failure")
@@ -125,6 +137,37 @@ func TestRestartDevelopmentIterations(t *testing.T) {
 	}
 	if countCalls("resolve") <= resolvesAfterFirst {
 		t.Fatal("resolve did not run per iteration")
+	}
+	// Launch failure: diagnostic, session stays open with no app; the next
+	// confirmed change rebuilds and relaunches.
+	f.fail, f.cause = "launch", errors.New("forced launch failure")
+	if err := os.WriteFile(source, []byte("four"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if v := diag.Load(); v != nil && strings.Contains(v.(string), "forced launch failure") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if v := diag.Load(); v == nil || !strings.Contains(v.(string), "forced launch failure") {
+		t.Fatalf("no launch diagnostic: %v", diag.Load())
+	}
+	if countCalls("terminate") < 2 {
+		t.Fatal("failed launch left old app running")
+	}
+	f.fail = ""
+	diag.Store("")
+	if err := os.WriteFile(source, []byte("five"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(6 * time.Second)
+	for countCalls("launch") < 4 && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if countCalls("launch") < 4 {
+		t.Fatalf("no recovery launch after launch failure; calls %v", f.calls)
 	}
 	// Teardown: session ends cleanly; no Log callbacks after Wait/Close return.
 	if err := s.Close(context.Background()); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrCleanup) {
