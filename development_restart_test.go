@@ -30,7 +30,7 @@ func TestRestartDevelopmentIterations(t *testing.T) {
 	os.MkdirAll(filepath.Join(resources, "iOS"), 0700)
 	plist := filepath.Join(resources, "iOS", "Info.plist")
 	os.WriteFile(plist, []byte("<plist/>"), 0600)
-	f.resolved = project.Resolved{Directory: dir, Revision: "source", ApplicationID: "org.test.app", Sources: []project.Source{{Path: source}}, Config: project.Config{AppResourcesPath: resources}}
+	f.resolved = project.Resolved{Directory: dir, Revision: "source", ApplicationID: "org.test.app", Config: project.Config{AppPath: app, AppResourcesPath: resources}}
 
 	var diag atomic.Value
 	var afterWait atomic.Bool
