@@ -47,7 +47,13 @@ func (f *fakeLibrary) Devices(_ context.Context, r ns.DeviceQuery) ([]ns.Device,
 	f.note("devices", r)
 	return f.devices, nil
 }
-func (f *fakeLibrary) Run(_ context.Context, r ns.RunRequest) (*ns.Session, error) {
+func (f *fakeLibrary) Run(ctx context.Context, r ns.RunRequest) (*ns.Session, error) {
+	if r.Log != nil {
+		r.Log(ns.SessionLog{Stream: "stdout", Text: "app log line\n"})
+	}
+	if f.options.Sink != nil {
+		f.options.Sink(ctx, ns.Event{Operation: "run", Kind: ns.Diagnostic, Stage: "restart", Message: "restart failure detail"})
+	}
 	return &ns.Session{}, f.note("run", r)
 }
 func (f *fakeLibrary) InspectXcode(_ context.Context, r ns.XcodeInspectionRequest) (ns.XcodeInspection, error) {
@@ -357,5 +363,34 @@ func TestRunDeviceDefaulting(t *testing.T) {
 		if code := execute(context.Background(), base, &out, &diag, factoryFor(f3)); code != 2 || f3.operation != "devices" {
 			t.Fatalf("expected invalid-input after discovery, got %d %s", code, f3.operation)
 		}
+	}
+}
+
+func TestRunStreamsLogsAndDiagnostics(t *testing.T) {
+	base := []string{"run", "--platform", "ios", "--output", "gen", "--destination", "simulator", "--device", "exact", "--arch", "arm64"}
+	// Text mode: app logs on stdout, diagnostic message on stderr.
+	f := &fakeLibrary{}
+	var out, diag bytes.Buffer
+	if code := execute(context.Background(), base, &out, &diag, factoryFor(f)); code != 0 {
+		t.Fatal(code, diag.String())
+	}
+	if !strings.Contains(out.String(), "app log line") {
+		t.Fatalf("app log not streamed to stdout: %q", out.String())
+	}
+	if !strings.Contains(diag.String(), "restart failure detail") {
+		t.Fatalf("diagnostic message missing from stderr: %q", diag.String())
+	}
+	// JSON mode keeps stdout for the envelope; the log goes to stderr.
+	f = &fakeLibrary{}
+	out.Reset()
+	diag.Reset()
+	if code := execute(context.Background(), append([]string{"--json"}, base...), &out, &diag, factoryFor(f)); code != 0 {
+		t.Fatal(code, diag.String())
+	}
+	if strings.Contains(out.String(), "app log line") {
+		t.Fatalf("app log leaked into JSON stdout: %q", out.String())
+	}
+	if !strings.Contains(diag.String(), "app log line") {
+		t.Fatalf("app log not streamed to stderr in json mode: %q", diag.String())
 	}
 }

@@ -64,7 +64,11 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 			}
 			diagnostics.Lock()
 			defer diagnostics.Unlock()
-			_, err := fmt.Fprintf(stderr, "%s: %s %s\n", e.Operation, e.Stage, e.Kind)
+			if e.Message == "" {
+				_, err := fmt.Fprintf(stderr, "%s: %s %s\n", e.Operation, e.Stage, e.Kind)
+				return err
+			}
+			_, err := fmt.Fprintf(stderr, "%s: %s %s: %s\n", e.Operation, e.Stage, e.Kind, e.Message)
 			return err
 		}})
 	}
@@ -198,6 +202,17 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, newCl
 			case "run":
 				var session *ns.Session
 				run := ns.RunRequest{Build: request, DeviceID: id}
+				// App output streams to stdout in text mode; the JSON envelope
+				// keeps stdout reserved, so it goes to stderr instead.
+				logWriter := stdout
+				if jsonMode(args) {
+					logWriter = stderr
+				}
+				run.Log = func(l ns.SessionLog) {
+					diagnostics.Lock()
+					defer diagnostics.Unlock()
+					fmt.Fprintln(logWriter, strings.TrimSuffix(l.Text, "\n"))
+				}
 				if hmr {
 					run.Development = &ns.DevelopmentOptions{Port: hmrPort}
 				}

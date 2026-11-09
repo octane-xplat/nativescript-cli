@@ -129,8 +129,14 @@ func SyncDir(dst, src string, keep func(string) bool) error {
 			return err
 		}
 		rel, err := filepath.Rel(dst, path)
-		if err != nil || rel == "." || keep(rel) {
+		if err != nil || rel == "." {
 			return err
+		}
+		if keep(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if info.IsDir() {
 			if !seen[rel] {
