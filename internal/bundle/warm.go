@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -66,11 +67,59 @@ func warmSpecifiers(body []byte) []string {
 func (d *Development) Warm(ctx context.Context) WarmResult {
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
 	defer client.CloseIdleConnections()
-	return warm(ctx, client, d.Ready.Endpoint.URL, d.Ready.Endpoint.URL+"/ns/entry",
+	origin := d.Ready.Endpoint.URL
+	seeds := warmBundleSeeds(d.Ready.Manifest, origin)
+	return warm(ctx, client, origin, append(seeds, origin+"/ns/entry"),
 		warmLimits{Concurrency: 8, Request: 2 * time.Minute, Total: 10 * time.Minute, MaxModules: 5000})
 }
 
-func warm(ctx context.Context, client *http.Client, origin, entry string, limits warmLimits) WarmResult {
+// warmBundleSeeds lists the absolute dev-server URLs the on-device bundle
+// imports before it loads /ns/entry. Bundle files are local, so only
+// specifiers that already point at the dev server qualify.
+func warmBundleSeeds(m Manifest, origin string) []string {
+	base, err := url.Parse(origin)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return nil
+	}
+	files := make([]string, 0, len(m.Files))
+	if m.Entry != "" {
+		files = append(files, m.Entry)
+	}
+	for _, f := range m.Files {
+		if f != m.Entry {
+			files = append(files, f)
+		}
+	}
+	seen := map[string]bool{}
+	var seeds []string
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".mjs") && !strings.HasSuffix(f, ".js") {
+			continue
+		}
+		file, err := os.Open(f)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(io.LimitReader(file, warmMaxBody+1))
+		file.Close()
+		if err != nil || len(body) > warmMaxBody {
+			continue
+		}
+		for _, s := range warmSpecifiers(body) {
+			u, err := url.Parse(s)
+			if err != nil || u.Scheme != base.Scheme || u.Host != base.Host {
+				continue
+			}
+			if su := u.String(); !seen[su] {
+				seen[su] = true
+				seeds = append(seeds, su)
+			}
+		}
+	}
+	return seeds
+}
+
+func warm(ctx context.Context, client *http.Client, origin string, seeds []string, limits warmLimits) WarmResult {
 	start := time.Now()
 	result := WarmResult{Elapsed: -1}
 	base, err := url.Parse(origin)
@@ -85,8 +134,14 @@ func warm(ctx context.Context, client *http.Client, origin, entry string, limits
 		body []byte
 		ok   bool
 	}
-	seen := map[string]bool{entry: true}
-	queue := []string{entry}
+	seen := make(map[string]bool, len(seeds))
+	queue := make([]string, 0, len(seeds))
+	for _, s := range seeds {
+		if !seen[s] {
+			seen[s] = true
+			queue = append(queue, s)
+		}
+	}
 	results := make(chan fetchResult, limits.Concurrency)
 	inFlight := 0
 	for {

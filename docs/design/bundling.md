@@ -52,7 +52,9 @@ Installed native runtimes older than 9.1 reject. Physical HMR and borrowed nativ
 servers are not implemented by this path and fail explicitly. Each launch waits
 for the dev server to serve the app's cold module graph once (bounded at ten
 minutes, never fatal); the warm-up runs concurrently with the native build and
-keeps the synchronous module loader off first-transform work on busy hosts.
+keeps the synchronous module loader off first-transform work on busy hosts. The
+crawl starts with the bundle's own dev-server imports (the boot modules the
+device loads before `/ns/entry`), then follows `/ns/entry`.
 
 `DevelopmentOptions.Mode = Restart` (the `run --watch` CLI flag) runs no dev
 server or HMR client. The session fingerprints the resolved source set and

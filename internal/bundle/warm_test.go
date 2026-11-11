@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +22,7 @@ type warmServer struct {
 	delay    map[string]time.Duration
 	inFlight atomic.Int32
 	maxSeen  atomic.Int32
+	order    []string
 	mu       sync.Mutex
 	srv      *httptest.Server
 }
@@ -30,6 +33,7 @@ func newWarmServer(t *testing.T, modules map[string]string) *warmServer {
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		w.mu.Lock()
 		w.requests[r.URL.String()]++
+		w.order = append(w.order, r.URL.String())
 		w.mu.Unlock()
 		n := w.inFlight.Add(1)
 		for {
@@ -74,7 +78,7 @@ func TestWarmCrawlGraph(t *testing.T) {
 		"/ns/c.js":  `export { y } from "./a.js"; import "./b.js";`,
 		"/ns/b.js":  `import("./a.js");`,
 	})
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 	if !r.Complete || r.Failures != 0 || r.Modules != 4 {
 		t.Fatalf("result %+v", r)
 	}
@@ -95,7 +99,7 @@ func TestWarmFollowsEntryWrapper(t *testing.T) {
 		"/ns/m/src/index.ts": `import "/ns/m/src/app.ts";`,
 		"/ns/m/src/app.ts":   `export const app = 1;`,
 	})
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 	if !r.Complete || r.Failures != 0 || r.Modules != 4 || w.requests["/ns/entry-rt?v=7"] != 1 || w.requests["/ns/m/src/app.ts"] != 1 {
 		t.Fatalf("result %+v requests %v", r, w.requests)
 	}
@@ -108,7 +112,7 @@ func TestWarmFailuresCounted(t *testing.T) {
 	})
 	w.failing["/ns/missing.js"] = true
 	w.delay["/ns/slow.js"] = 2 * time.Second // past Request (300ms)
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 	if !r.Complete || r.Failures != 2 || r.Modules != 4 {
 		t.Fatalf("result %+v", r)
 	}
@@ -127,7 +131,7 @@ func TestWarmTotalDeadline(t *testing.T) {
 	limits.Total = 500 * time.Millisecond
 	limits.Request = 3 * time.Second
 	start := time.Now()
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", limits)
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, limits)
 	if r.Complete {
 		t.Fatalf("crawl reported complete past the deadline")
 	}
@@ -142,7 +146,7 @@ func TestWarmContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		warm(ctx, &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+		warm(ctx, &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 		close(done)
 	}()
 	time.Sleep(200 * time.Millisecond)
@@ -170,7 +174,7 @@ func TestWarmConcurrencyBound(t *testing.T) {
 			w.delay[p] = 30 * time.Millisecond
 		}
 	}
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 	if !r.Complete || r.Modules != 23 {
 		t.Fatalf("result %+v", r)
 	}
@@ -184,12 +188,72 @@ func TestWarmQueryDistinct(t *testing.T) {
 		"/ns/entry": `import "./m.js?v=1"; import "./m.js?v=2";`,
 		"/ns/m.js":  `export const m = 1;`,
 	})
-	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, []string{w.origin + "/ns/entry"}, warmLimitsForTests())
 	if !r.Complete || r.Modules != 3 {
 		t.Fatalf("result %+v", r)
 	}
 	if w.requests["/ns/m.js?v=1"] != 1 || w.requests["/ns/m.js?v=2"] != 1 {
 		t.Fatalf("query variants not fetched distinctly: %v", w.requests)
+	}
+}
+
+func TestWarmSeedsBundleImports(t *testing.T) {
+	w := newWarmServer(t, map[string]string{
+		"/ns/entry":                          `import "./late.js";`,
+		"/ns/late.js":                        `export const late = 1;`,
+		"/ns/core/globals":                   `export const globals = 1;`,
+		"/ns/core/inspector_modules":         `import "./debugger/webinspector-dom";`,
+		"/ns/core/debugger/webinspector-dom": `export const dom = 1;`,
+	})
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "bundle.mjs")
+	contents := `import "` + w.origin + `/ns/core/globals";` +
+		`import "` + w.origin + `/ns/core/inspector_modules";` +
+		`import "http://other.invalid/x";` +
+		`import "./local.mjs";`
+	if err := os.WriteFile(bundle, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Development{Ready: Event{
+		Manifest: Manifest{Directory: dir, Entry: bundle, Files: []string{bundle}},
+		Endpoint: Endpoint{URL: w.origin},
+	}}
+	r := d.Warm(context.Background())
+	if !r.Complete || r.Failures != 0 || r.Modules != 5 {
+		t.Fatalf("result %+v", r)
+	}
+	for _, u := range []string{"/ns/core/globals", "/ns/core/inspector_modules", "/ns/core/debugger/webinspector-dom", "/ns/entry", "/ns/late.js"} {
+		if w.requests[u] != 1 {
+			t.Fatalf("%s fetched %d times", u, w.requests[u])
+		}
+	}
+	if w.requests["/local.mjs"] != 0 || strings.Contains(fmt.Sprint(w.requests), "other.invalid") {
+		t.Fatalf("local-file specifiers leaked into requests: %v", w.requests)
+	}
+	index := func(u string) int {
+		for i, o := range w.order {
+			if o == u {
+				return i
+			}
+		}
+		return -1
+	}
+	if index("/ns/core/globals") < 0 || index("/ns/core/globals") > index("/ns/late.js") {
+		t.Fatalf("bundle seeds did not fetch before the entry's children: %v", w.order)
+	}
+}
+
+func TestWarmSkipsMissingManifestFile(t *testing.T) {
+	w := newWarmServer(t, map[string]string{"/ns/entry": `export const entry = 1;`})
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "bundle.mjs")
+	d := &Development{Ready: Event{
+		Manifest: Manifest{Directory: dir, Entry: missing, Files: []string{missing}},
+		Endpoint: Endpoint{URL: w.origin},
+	}}
+	r := d.Warm(context.Background())
+	if !r.Complete || r.Failures != 0 || r.Modules != 1 || w.requests["/ns/entry"] != 1 {
+		t.Fatalf("result %+v requests %v", r, w.requests)
 	}
 }
 
