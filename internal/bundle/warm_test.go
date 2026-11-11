@@ -88,6 +88,19 @@ func TestWarmCrawlGraph(t *testing.T) {
 	}
 }
 
+func TestWarmFollowsEntryWrapper(t *testing.T) {
+	w := newWarmServer(t, map[string]string{
+		"/ns/entry":          `let origin = "x"; const main = "/src/index.ts"; const __ns_graph_ver = "7";` + "\n" + `const __entryRtUrl = '/ns/entry-rt?v=' + String(__ns_graph_ver);`,
+		"/ns/entry-rt":       `export default async function start() {}`,
+		"/ns/m/src/index.ts": `import "/ns/m/src/app.ts";`,
+		"/ns/m/src/app.ts":   `export const app = 1;`,
+	})
+	r := warm(context.Background(), &http.Client{Transport: &http.Transport{Proxy: nil}}, w.origin, w.origin+"/ns/entry", warmLimitsForTests())
+	if !r.Complete || r.Failures != 0 || r.Modules != 4 || w.requests["/ns/entry-rt?v=7"] != 1 || w.requests["/ns/m/src/app.ts"] != 1 {
+		t.Fatalf("result %+v requests %v", r, w.requests)
+	}
+}
+
 func TestWarmFailuresCounted(t *testing.T) {
 	w := newWarmServer(t, map[string]string{
 		"/ns/entry": `import "./missing.js"; import "./slow.js"; import "./ok.js";`,

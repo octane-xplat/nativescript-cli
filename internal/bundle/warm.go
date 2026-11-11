@@ -30,7 +30,33 @@ type warmLimits struct {
 // export-from clauses plus dynamic import() calls.
 var warmImport = regexp.MustCompile(`\b(?:import|export)\s*(?:[\w*{}\s,$]+?\s*from\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)`)
 
+// The /ns/entry wrapper is a script, not a module: it names the app's main
+// module and the entry runtime in string constants instead of imports.
+var (
+	warmEntryMain    = regexp.MustCompile(`\bconst main = "(/[^"]*)"`)
+	warmEntryVersion = regexp.MustCompile(`\b__ns_graph_ver = "([0-9]+)"`)
+)
+
 const warmMaxBody = 64 << 20
+
+// warmSpecifiers lists the URLs a response leads the runtime to request.
+func warmSpecifiers(body []byte) []string {
+	var specs []string
+	for _, spec := range warmImport.FindAllSubmatch(body, -1) {
+		if spec[1] != nil {
+			specs = append(specs, string(spec[1]))
+		} else {
+			specs = append(specs, string(spec[2]))
+		}
+	}
+	if main := warmEntryMain.FindSubmatch(body); main != nil {
+		specs = append(specs, "/ns/m"+string(main[1]))
+		if version := warmEntryVersion.FindSubmatch(body); version != nil {
+			specs = append(specs, "/ns/entry-rt?v="+string(version[1]))
+		}
+	}
+	return specs
+}
 
 // Warm fetches the session's native entry and every same-origin module it
 // statically or dynamically imports, once, with bounded concurrency. It keeps
@@ -84,13 +110,7 @@ func warm(ctx context.Context, client *http.Client, origin, entry string, limits
 				result.Failures++
 				continue
 			}
-			for _, spec := range warmImport.FindAllSubmatch(r.body, -1) {
-				s := ""
-				if spec[1] != nil {
-					s = string(spec[1])
-				} else {
-					s = string(spec[2])
-				}
+			for _, s := range warmSpecifiers(r.body) {
 				if !strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "./") && !strings.HasPrefix(s, "../") && !strings.HasPrefix(s, "http") {
 					continue
 				}
