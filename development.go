@@ -3,6 +3,7 @@ package nativescript
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -171,6 +172,11 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 		return nil, cause
 	}
 	stages.Bundler = server
+	// Hold the launch until the dev server has served the cold module graph
+	// once: the app's synchronous loader times out against first-transform
+	// work on a busy host. Warm-up overlaps the native build below.
+	warmDone := make(chan bundle.WarmResult, 1)
+	go func() { warmDone <- server.Warm(iterationCtx) }()
 	if launcher, ok := stages.Launcher.(platformDevices); ok && request.Build.Target.Platform == Android {
 		endpoint, err := url.Parse(server.Ready.Endpoint.URL)
 		if err != nil {
@@ -195,6 +201,18 @@ func (c *Client) startDevelopment(ctx context.Context, request RunRequest, stage
 	var artifacts []project.Artifact
 	for _, v := range result.Artifacts {
 		artifacts = append(artifacts, project.Artifact{Identity: project.Identity{Schema: v.Identity.Schema, Revision: v.Identity.Revision, ProjectDir: v.Identity.ProjectDir, Target: internalTarget(v.Identity.Target)}, Path: v.Path, Kind: v.Kind, ApplicationID: v.ApplicationID})
+	}
+	var warmed bundle.WarmResult
+	select {
+	case warmed = <-warmDone:
+	case <-iterationCtx.Done():
+		return fail(ctx.Err())
+	}
+	e := &emitter{sink: c.options.Sink, operation: "run"}
+	if warmed.Complete {
+		_ = e.emitEvent(ctx, Diagnostic, "warm", fmt.Sprintf("development server warmed %d modules in %s (%d failed)", warmed.Modules, warmed.Elapsed.Round(time.Second), warmed.Failures))
+	} else {
+		_ = e.emitEvent(ctx, Diagnostic, "warm", fmt.Sprintf("development server warm-up incomplete after %s (%d modules, %d failed); launching anyway", warmed.Elapsed.Round(time.Second), warmed.Modules, warmed.Failures))
 	}
 	app, err := c.launch(iterationCtx, request, stages, artifacts, device, notify)
 	if err != nil {

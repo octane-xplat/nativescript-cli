@@ -49,7 +49,10 @@ and `--hmr-port`. The root package's `main` must identify an entry inside appPat
 The caller installs core, engine, Vite and any runtime WebSocket dependencies;
 the library never installs packages or invokes the upstream NativeScript CLI.
 Installed native runtimes older than 9.1 reject. Physical HMR and borrowed native
-servers are not implemented by this path and fail explicitly.
+servers are not implemented by this path and fail explicitly. Each launch waits
+for the dev server to serve the app's cold module graph once (bounded at ten
+minutes, never fatal); the warm-up runs concurrently with the native build and
+keeps the synchronous module loader off first-transform work on busy hosts.
 
 `DevelopmentOptions.Mode = Restart` (the `run --watch` CLI flag) runs no dev
 server or HMR client. The session fingerprints the resolved source set and
