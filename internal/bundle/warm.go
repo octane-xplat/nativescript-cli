@@ -39,6 +39,7 @@ const warmMaxBody = 64 << 20
 // with no proxy, and never returns an error.
 func (d *Development) Warm(ctx context.Context) WarmResult {
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	defer client.CloseIdleConnections()
 	return warm(ctx, client, d.Ready.Endpoint.URL, d.Ready.Endpoint.URL+"/ns/entry",
 		warmLimits{Concurrency: 8, Request: 2 * time.Minute, Total: 10 * time.Minute, MaxModules: 5000})
 }
