@@ -38,6 +38,8 @@ goddard-agent resource run --json '{"resources":{"native_builds":1,"exclusive":[
 `--mode hmr` tests in-process HMR instead. `--startup-timeout 600` permits a
 longer cold entry load for the monorepo; live source-edit HMR remains bounded
 at90 seconds. Deadlines do not waive heartbeat or ownership requirements.
+The iOS driver allows 20 minutes per launch step because each HMR launch first
+waits for the development server's warm-up, which is capped at 10 minutes.
 
 The initial app, edited source and native-resource rebuild each need three
 marker samples from the exact live process. Restart source edits must produce a

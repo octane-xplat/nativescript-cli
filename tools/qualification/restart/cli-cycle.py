@@ -89,7 +89,7 @@ def main():
         def observe():
             output.append(reader.read())
 
-        def until(check, label, timeout=600):
+        def until(check, label, timeout=1200):
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 observe()
